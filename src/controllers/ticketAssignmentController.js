@@ -1,0 +1,1084 @@
+import TicketAssignment from "../models/TicketAssignment.js";
+import Ticket from "../models/Ticket.js";
+import Team from "../models/Team.js";
+import Consultant from "../models/Consltant.js";
+import TeamMember from "../models/TeamMember.js";
+
+// @desc    Get all ticket assignments
+// @route   GET /api/ticket-assignments
+// @access  Public
+const getAllTicketAssignments = async (req, res) => {
+  try {
+    const {
+      ticket,
+      assignedToTeam,
+      assignedByConsultant,
+      acceptedBy,
+      isCurrent,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const query = {};
+
+    if (ticket) {
+      query.ticket = ticket;
+    }
+
+    if (assignedToTeam) {
+      query.assignedToTeam = assignedToTeam;
+    }
+
+    if (assignedByConsultant) {
+      query.assignedByConsultant = assignedByConsultant;
+    }
+
+    if (acceptedBy) {
+      query.acceptedBy = acceptedBy;
+    }
+
+    if (isCurrent !== undefined) {
+      query.isCurrent = isCurrent === "true";
+    }
+
+    const skip = (page - 1) * limit;
+
+    const assignments = await TicketAssignment.find(query)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email")
+      .populate("acceptedBy", "firstName lastName email")
+      .sort({ assignedAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await TicketAssignment.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: assignments.length,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+      data: assignments,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching ticket assignments",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get single ticket assignment by ID
+// @route   GET /api/ticket-assignments/:id
+// @access  Public
+const getTicketAssignmentById = async (req, res) => {
+  try {
+    const assignment = await TicketAssignment.findById(req.params.id)
+      .populate("ticket", "ticketNumber subject description status priority customer")
+      .populate("assignedToTeam", "teamName department specialization")
+      .populate("assignedByConsultant", "firstName lastName email phone")
+      .populate("acceptedBy", "firstName lastName email phone team");
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: assignment,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Error fetching ticket assignment",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get current assignment for a ticket
+// @route   GET /api/ticket-assignments/ticket/:ticketId/current
+// @access  Public
+const getCurrentAssignmentForTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    // Verify ticket exists
+    const ticket = await Ticket.findById(ticketId);
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    const assignment = await TicketAssignment.getCurrentAssignment(ticketId);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "No current assignment found for this ticket",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: assignment,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Error fetching current assignment",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get assignment history for a ticket
+// @route   GET /api/ticket-assignments/ticket/:ticketId/history
+// @access  Public
+const getAssignmentHistoryForTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+
+    // Verify ticket exists
+    const ticket = await Ticket.findById(ticketId);
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    const skip = (page - 1) * limit;
+
+    const assignments = await TicketAssignment.find({ ticket: ticketId })
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName")
+      .populate("acceptedBy", "firstName lastName")
+      .sort({ assignedAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await TicketAssignment.countDocuments({ ticket: ticketId });
+
+    res.status(200).json({
+      success: true,
+      count: assignments.length,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+      ticket: {
+        id: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+      },
+      data: assignments,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Error fetching assignment history",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Create new ticket assignment
+// @route   POST /api/ticket-assignments
+// @access  Public
+const createTicketAssignment = async (req, res) => {
+  try {
+    const {
+      ticket,
+      assignedToTeam,
+      assignedByConsultant,
+      assignmentNotes,
+    } = req.body;
+
+    // Verify ticket exists
+    const ticketExists = await Ticket.findById(ticket);
+    if (!ticketExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    // Verify team exists
+    const teamExists = await Team.findById(assignedToTeam);
+    if (!teamExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // Verify consultant exists
+    const consultantExists = await Consultant.findById(assignedByConsultant);
+    if (!consultantExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Consultant not found",
+      });
+    }
+
+    // Mark all previous assignments for this ticket as not current
+    await TicketAssignment.markPreviousAsNotCurrent(ticket);
+
+    // Create new assignment
+    const assignment = await TicketAssignment.create({
+      ticket,
+      assignedToTeam,
+      assignedByConsultant,
+      assignmentNotes,
+      isCurrent: true,
+    });
+
+    // Update ticket status to assigned if it's new
+    if (ticketExists.status === "new") {
+      await Ticket.findByIdAndUpdate(ticket, {
+        status: "assigned",
+        assignedTeam: assignedToTeam,
+        assignedBy: assignedByConsultant,
+      });
+    }
+
+    const populatedAssignment = await TicketAssignment.findById(assignment._id)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email");
+
+    res.status(201).json({
+      success: true,
+      message: "Ticket assignment created successfully",
+      data: populatedAssignment,
+    });
+  } catch (error) {
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((err) => err.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: messages,
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error creating ticket assignment",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Update ticket assignment
+// @route   PUT /api/ticket-assignments/:id
+// @access  Public
+const updateTicketAssignment = async (req, res) => {
+  try {
+    const { assignmentNotes } = req.body;
+
+    let assignment = await TicketAssignment.findById(req.params.id);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    assignment = await TicketAssignment.findByIdAndUpdate(
+      req.params.id,
+      { assignmentNotes },
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email")
+      .populate("acceptedBy", "firstName lastName email");
+
+    res.status(200).json({
+      success: true,
+      message: "Ticket assignment updated successfully",
+      data: assignment,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((err) => err.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: messages,
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error updating ticket assignment",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Accept ticket assignment
+// @route   PATCH /api/ticket-assignments/:id/accept
+// @access  Public
+const acceptTicketAssignment = async (req, res) => {
+  try {
+    const { teamMemberId } = req.body;
+
+    if (!teamMemberId) {
+      return res.status(400).json({
+        success: false,
+        message: "Team member ID is required",
+      });
+    }
+
+    let assignment = await TicketAssignment.findById(req.params.id);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    // Verify team member exists
+    const teamMember = await TeamMember.findById(teamMemberId);
+    if (!teamMember) {
+      return res.status(404).json({
+        success: false,
+        message: "Team member not found",
+      });
+    }
+
+    // Verify team member belongs to the assigned team
+    if (teamMember.team.toString() !== assignment.assignedToTeam.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: "Team member does not belong to the assigned team",
+      });
+    }
+
+    // Check if already accepted
+    if (assignment.acceptedBy) {
+      return res.status(400).json({
+        success: false,
+        message: "Assignment already accepted",
+      });
+    }
+
+    // Accept the assignment using model method
+    await assignment.acceptAssignment(teamMemberId);
+
+    const populatedAssignment = await TicketAssignment.findById(assignment._id)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email")
+      .populate("acceptedBy", "firstName lastName email");
+
+    res.status(200).json({
+      success: true,
+      message: "Ticket assignment accepted successfully",
+      data: populatedAssignment,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error accepting ticket assignment",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Reassign ticket
+// @route   POST /api/ticket-assignments/:id/reassign
+// @access  Public
+const reassignTicket = async (req, res) => {
+  try {
+    const { assignedToTeam, assignedByConsultant, assignmentNotes } = req.body;
+
+    const currentAssignment = await TicketAssignment.findById(req.params.id);
+
+    if (!currentAssignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    // Verify new team exists
+    const teamExists = await Team.findById(assignedToTeam);
+    if (!teamExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // Verify consultant exists
+    const consultantExists = await Consultant.findById(assignedByConsultant);
+    if (!consultantExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Consultant not found",
+      });
+    }
+
+    // Mark current assignment as not current
+    await TicketAssignment.markPreviousAsNotCurrent(currentAssignment.ticket);
+
+    // Create new assignment
+    const newAssignment = await TicketAssignment.create({
+      ticket: currentAssignment.ticket,
+      assignedToTeam,
+      assignedByConsultant,
+      assignmentNotes,
+      isCurrent: true,
+    });
+
+    // Update ticket
+    await Ticket.findByIdAndUpdate(currentAssignment.ticket, {
+      status: "assigned",
+      assignedTeam: assignedToTeam,
+      assignedBy: assignedByConsultant,
+    });
+
+    const populatedAssignment = await TicketAssignment.findById(newAssignment._id)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email");
+
+    res.status(201).json({
+      success: true,
+      message: "Ticket reassigned successfully",
+      data: populatedAssignment,
+    });
+  } catch (error) {
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((err) => err.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: messages,
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error reassigning ticket",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Delete ticket assignment
+// @route   DELETE /api/ticket-assignments/:id
+// @access  Public
+const deleteTicketAssignment = async (req, res) => {
+  try {
+    const assignment = await TicketAssignment.findById(req.params.id);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    await assignment.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: "Ticket assignment deleted successfully",
+      data: {},
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error deleting ticket assignment",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get ticket assignment statistics
+// @route   GET /api/ticket-assignments/stats
+// @access  Public
+const getTicketAssignmentStats = async (req, res) => {
+  try {
+    const totalAssignments = await TicketAssignment.countDocuments();
+    const currentAssignments = await TicketAssignment.countDocuments({ isCurrent: true });
+    const acceptedAssignments = await TicketAssignment.countDocuments({
+      acceptedBy: { $exists: true, $ne: null },
+    });
+    const pendingAcceptance = await TicketAssignment.countDocuments({
+      isCurrent: true,
+      acceptedBy: null,
+    });
+
+    const assignmentsByTeam = await TicketAssignment.aggregate([
+      {
+        $match: { isCurrent: true },
+      },
+      {
+        $group: {
+          _id: "$assignedToTeam",
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $lookup: {
+          from: "teams",
+          localField: "_id",
+          foreignField: "_id",
+          as: "teamInfo",
+        },
+      },
+      {
+        $unwind: "$teamInfo",
+      },
+      {
+        $project: {
+          teamName: "$teamInfo.teamName",
+          count: 1,
+        },
+      },
+    ]);
+
+    const assignmentsByConsultant = await TicketAssignment.aggregate([
+      {
+        $group: {
+          _id: "$assignedByConsultant",
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $lookup: {
+          from: "consultants",
+          localField: "_id",
+          foreignField: "_id",
+          as: "consultantInfo",
+        },
+      },
+      {
+        $unwind: "$consultantInfo",
+      },
+      {
+        $project: {
+          consultantName: {
+            $concat: [
+              "$consultantInfo.firstName",
+              " ",
+              "$consultantInfo.lastName",
+            ],
+          },
+          count: 1,
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total: totalAssignments,
+        current: currentAssignments,
+        accepted: acceptedAssignments,
+        pendingAcceptance,
+        byTeam: assignmentsByTeam,
+        byConsultant: assignmentsByConsultant,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching ticket assignment statistics",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get assignments by team
+// @route   GET /api/ticket-assignments/team/:teamId
+// @access  Public
+const getAssignmentsByTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { isCurrent, page = 1, limit = 10 } = req.query;
+
+    // Verify team exists
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    const query = { assignedToTeam: teamId };
+
+    if (isCurrent !== undefined) {
+      query.isCurrent = isCurrent === "true";
+    }
+
+    const skip = (page - 1) * limit;
+
+    const assignments = await TicketAssignment.find(query)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedByConsultant", "firstName lastName")
+      .populate("acceptedBy", "firstName lastName")
+      .sort({ assignedAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await TicketAssignment.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: assignments.length,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+      team: {
+        id: team._id,
+        name: team.teamName,
+      },
+      data: assignments,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching team assignments",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get assignments by team member
+// @route   GET /api/ticket-assignments/team-member/:memberId
+// @access  Public
+const getAssignmentsByTeamMember = async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const { isCurrent, page = 1, limit = 10 } = req.query;
+
+    // Verify team member exists
+    const member = await TeamMember.findById(memberId);
+    if (!member) {
+      return res.status(404).json({
+        success: false,
+        message: "Team member not found",
+      });
+    }
+
+    const query = { acceptedBy: memberId };
+
+    if (isCurrent !== undefined) {
+      query.isCurrent = isCurrent === "true";
+    }
+
+    const skip = (page - 1) * limit;
+
+    const assignments = await TicketAssignment.find(query)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName")
+      .populate("assignedByConsultant", "firstName lastName")
+      .sort({ acceptedAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await TicketAssignment.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: assignments.length,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+      teamMember: {
+        id: member._id,
+        name: member.fullName,
+      },
+      data: assignments,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Team member not found",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching team member assignments",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Assign ticket to multiple consultants
+// @route   POST /api/ticket-assignments/:id/assign-consultants
+// @access  Public
+const assignToMultipleConsultants = async (req, res) => {
+  try {
+    const assignmentId = req.params.id;
+    const { consultants } = req.body;
+
+    if (!consultants || !Array.isArray(consultants) || consultants.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Consultants array is required and must not be empty",
+      });
+    }
+
+    let assignment = await TicketAssignment.findById(assignmentId);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    // Verify all consultants exist
+    for (const consultantId of consultants) {
+      const consultantExists = await Consultant.findById(consultantId);
+      if (!consultantExists) {
+        return res.status(404).json({
+          success: false,
+          message: `Consultant with ID ${consultantId} not found`,
+        });
+      }
+    }
+
+    // Add consultants to the assignment
+    const consultantAssignments = consultants.map((consultantId) => ({
+      consultant: consultantId,
+      assignedAt: new Date(),
+      status: "pending",
+    }));
+
+    assignment.assignedToConsultants = [
+      ...assignment.assignedToConsultants,
+      ...consultantAssignments,
+    ];
+
+    await assignment.save();
+
+    const populatedAssignment = await TicketAssignment.findById(assignment._id)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email")
+      .populate("assignedToConsultants.consultant", "firstName lastName email");
+
+    res.status(200).json({
+      success: true,
+      message: "Consultants assigned successfully",
+      data: populatedAssignment,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Invalid ID format",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error assigning consultants",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Update consultant assignment status
+// @route   PATCH /api/ticket-assignments/:assignmentId/consultant/:consultantId/status
+// @access  Public
+const updateConsultantAssignmentStatus = async (req, res) => {
+  try {
+    const { assignmentId, consultantId } = req.params;
+    const { status, notes } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    const validStatuses = ["pending", "accepted", "declined", "completed"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status value",
+      });
+    }
+
+    let assignment = await TicketAssignment.findById(assignmentId);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    // Find the consultant assignment
+    const consultantAssignment = assignment.assignedToConsultants.find(
+      (ca) => ca.consultant.toString() === consultantId
+    );
+
+    if (!consultantAssignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Consultant not assigned to this ticket",
+      });
+    }
+
+    // Update status
+    consultantAssignment.status = status;
+
+    if (notes) {
+      consultantAssignment.notes = notes;
+    }
+
+    if (status === "accepted" && !consultantAssignment.acceptedAt) {
+      consultantAssignment.acceptedAt = new Date();
+    }
+
+    if (status === "completed" && !consultantAssignment.completedAt) {
+      consultantAssignment.completedAt = new Date();
+    }
+
+    await assignment.save();
+
+    const populatedAssignment = await TicketAssignment.findById(assignment._id)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email")
+      .populate("assignedToConsultants.consultant", "firstName lastName email");
+
+    res.status(200).json({
+      success: true,
+      message: "Consultant assignment status updated successfully",
+      data: populatedAssignment,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Invalid ID format",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error updating consultant assignment status",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Remove consultant from assignment
+// @route   DELETE /api/ticket-assignments/:assignmentId/consultant/:consultantId
+// @access  Public
+const removeConsultantFromAssignment = async (req, res) => {
+  try {
+    const { assignmentId, consultantId } = req.params;
+
+    let assignment = await TicketAssignment.findById(assignmentId);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket assignment not found",
+      });
+    }
+
+    // Find the consultant assignment
+    const consultantIndex = assignment.assignedToConsultants.findIndex(
+      (ca) => ca.consultant.toString() === consultantId
+    );
+
+    if (consultantIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Consultant not assigned to this ticket",
+      });
+    }
+
+    // Remove consultant
+    assignment.assignedToConsultants.splice(consultantIndex, 1);
+    await assignment.save();
+
+    const populatedAssignment = await TicketAssignment.findById(assignment._id)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email")
+      .populate("assignedToConsultants.consultant", "firstName lastName email");
+
+    res.status(200).json({
+      success: true,
+      message: "Consultant removed from assignment successfully",
+      data: populatedAssignment,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Invalid ID format",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error removing consultant from assignment",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get assignments by consultant
+// @route   GET /api/ticket-assignments/consultant/:consultantId
+// @access  Public
+const getAssignmentsByConsultant = async (req, res) => {
+  try {
+    const { consultantId } = req.params;
+    const { status, page = 1, limit = 10 } = req.query;
+
+    // Verify consultant exists
+    const consultant = await Consultant.findById(consultantId);
+    if (!consultant) {
+      return res.status(404).json({
+        success: false,
+        message: "Consultant not found",
+      });
+    }
+
+    const query = {
+      "assignedToConsultants.consultant": consultantId,
+      isCurrent: true,
+    };
+
+    if (status) {
+      query["assignedToConsultants.status"] = status;
+    }
+
+    const skip = (page - 1) * limit;
+
+    const assignments = await TicketAssignment.find(query)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName")
+      .populate("assignedByConsultant", "firstName lastName")
+      .populate("assignedToConsultants.consultant", "firstName lastName email")
+      .sort({ assignedAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await TicketAssignment.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: assignments.length,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+      consultant: {
+        id: consultant._id,
+        name: `${consultant.firstName} ${consultant.lastName}`,
+      },
+      data: assignments,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Consultant not found",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching consultant assignments",
+      error: error.message,
+    });
+  }
+};
+
+export {
+  getAllTicketAssignments,
+  getTicketAssignmentById,
+  getCurrentAssignmentForTicket,
+  getAssignmentHistoryForTicket,
+  createTicketAssignment,
+  updateTicketAssignment,
+  acceptTicketAssignment,
+  reassignTicket,
+  deleteTicketAssignment,
+  getTicketAssignmentStats,
+  getAssignmentsByTeam,
+  getAssignmentsByTeamMember,
+  assignToMultipleConsultants,
+  updateConsultantAssignmentStatus,
+  removeConsultantFromAssignment,
+  getAssignmentsByConsultant,
+};
