@@ -124,6 +124,12 @@ router.get("/stats", getCustomerStats);
  *               slaMapping:
  *                 type: string
  *                 example: 60d5ec49f1b2c72b8c8e4f1a
+ *               versionNumber:
+ *                 type: string
+ *                 example: 60d5ec49f1b2c72b8c8e4f1b
+ *               erpType:
+ *                 type: string
+ *                 example: 60d5ec49f1b2c72b8c8e4f1c
  *     responses:
  *       201:
  *         description: Customer created successfully
@@ -221,6 +227,10 @@ router.route("/").get(getAllCustomers).post(createCustomer);
  *                 type: string
  *                 enum: [active, inactive, suspended]
  *               slaMapping:
+ *                 type: string
+ *               versionNumber:
+ *                 type: string
+ *               erpType:
  *                 type: string
  *     responses:
  *       200:

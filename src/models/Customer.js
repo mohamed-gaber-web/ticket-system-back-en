@@ -60,6 +60,14 @@ const customerSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "SLA",
     },
+    versionNumber: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "VersionNumber",
+    },
+    erpType: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ERPType",
+    },
     lastLogin: {
       type: Date,
     },

@@ -25,6 +25,8 @@ const getAllCustomers = async (req, res) => {
 
     const customers = await Customer.find(query)
       .populate("slaMapping", "name responseTime resolutionTime")
+      .populate("versionNumber", "name isActive")
+      .populate("erpType", "name isActive")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -55,6 +57,8 @@ const getCustomerById = async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id)
       .populate("slaMapping", "name responseTime resolutionTime")
+      .populate("versionNumber", "name isActive")
+      .populate("erpType", "name isActive")
       .populate({
         path: "tickets",
         select: "title status priority createdAt",
@@ -102,6 +106,8 @@ const createCustomer = async (req, res) => {
       country,
       status,
       slaMapping,
+      versionNumber,
+      erpType,
     } = req.body;
 
     const customerExists = await Customer.findOne({ email });
@@ -124,12 +130,14 @@ const createCustomer = async (req, res) => {
       country,
       status,
       slaMapping,
+      versionNumber,
+      erpType,
     });
 
-    const populatedCustomer = await Customer.findById(customer._id).populate(
-      "slaMapping",
-      "name responseTime resolutionTime"
-    );
+    const populatedCustomer = await Customer.findById(customer._id)
+      .populate("slaMapping", "name responseTime resolutionTime")
+      .populate("versionNumber", "name isActive")
+      .populate("erpType", "name isActive");
 
     res.status(201).json({
       success: true,
@@ -170,6 +178,8 @@ const updateCustomer = async (req, res) => {
       country,
       status,
       slaMapping,
+      versionNumber,
+      erpType,
     } = req.body;
 
     let customer = await Customer.findById(req.params.id);
@@ -200,6 +210,8 @@ const updateCustomer = async (req, res) => {
     customer.country = country || customer.country;
     customer.status = status || customer.status;
     customer.slaMapping = slaMapping || customer.slaMapping;
+    customer.versionNumber = versionNumber || customer.versionNumber;
+    customer.erpType = erpType || customer.erpType;
 
     if (password) {
       customer.password = password;
@@ -207,10 +219,10 @@ const updateCustomer = async (req, res) => {
 
     await customer.save();
 
-    const populatedCustomer = await Customer.findById(customer._id).populate(
-      "slaMapping",
-      "name responseTime resolutionTime"
-    );
+    const populatedCustomer = await Customer.findById(customer._id)
+      .populate("slaMapping", "name responseTime resolutionTime")
+      .populate("versionNumber", "name isActive")
+      .populate("erpType", "name isActive");
 
     res.status(200).json({
       success: true,
