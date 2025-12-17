@@ -109,6 +109,30 @@ const ticketSchema = mongoose.Schema(
       type: Number, // in hours
       min: 0,
     },
+    environment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Environment",
+    },
+    feature: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Feature",
+    },
+    department: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Department",
+    },
+    productType: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductType",
+    },
+    serviceType: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceType",
+    },
+    scope: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Scope",
+    },
   },
   {
     timestamps: true,
@@ -166,6 +190,12 @@ ticketSchema.index({ parentTicket: 1 });
 ticketSchema.index({ isSubTicket: 1 });
 ticketSchema.index({ startDate: 1 });
 ticketSchema.index({ endDate: 1 });
+ticketSchema.index({ environment: 1 });
+ticketSchema.index({ feature: 1 });
+ticketSchema.index({ department: 1 });
+ticketSchema.index({ productType: 1 });
+ticketSchema.index({ serviceType: 1 });
+ticketSchema.index({ scope: 1 });
 
 // Pre-save middleware to generate ticket number
 ticketSchema.pre("save", async function () {

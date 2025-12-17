@@ -41,6 +41,12 @@ const getAllTickets = async (req, res) => {
       assignedBy,
       category,
       isSlaBreached,
+      environment,
+      feature,
+      department,
+      productType,
+      serviceType,
+      scope,
       page = 1,
       limit = 10,
       search,
@@ -78,6 +84,30 @@ const getAllTickets = async (req, res) => {
       query.isSlaBreached = isSlaBreached === "true";
     }
 
+    if (environment) {
+      query.environment = environment;
+    }
+
+    if (feature) {
+      query.feature = feature;
+    }
+
+    if (department) {
+      query.department = department;
+    }
+
+    if (productType) {
+      query.productType = productType;
+    }
+
+    if (serviceType) {
+      query.serviceType = serviceType;
+    }
+
+    if (scope) {
+      query.scope = scope;
+    }
+
     if (search) {
       query.$or = [
         { ticketNumber: { $regex: search, $options: "i" } },
@@ -96,6 +126,12 @@ const getAllTickets = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("environment", "name description")
+      .populate("feature", "name")
+      .populate("department", "name")
+      .populate("productType", "name")
+      .populate("serviceType", "name")
+      .populate("scope", "name")
       .sort(sort)
       .limit(parseInt(limit))
       .skip(skip);
@@ -130,6 +166,12 @@ const getTicketById = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName description")
       .populate("assignedBy", "firstName lastName email")
+      .populate("environment", "name description")
+      .populate("feature", "name")
+      .populate("department", "name")
+      .populate("productType", "name")
+      .populate("serviceType", "name")
+      .populate("scope", "name")
       .populate("attachments")
       .populate("statusHistory")
       .populate("assignments");
@@ -230,6 +272,12 @@ const createTicket = async (req, res) => {
       startDate,
       endDate,
       estimatedTime,
+      environment,
+      feature,
+      department,
+      productType,
+      serviceType,
+      scope,
     } = req.body;
 
     // If user is a customer, automatically use their ID
@@ -270,6 +318,12 @@ const createTicket = async (req, res) => {
       startDate,
       endDate,
       estimatedTime,
+      environment,
+      feature,
+      department,
+      productType,
+      serviceType,
+      scope,
     });
 
     const populatedTicket = await Ticket.findById(ticket._id)
@@ -277,7 +331,13 @@ const createTicket = async (req, res) => {
       .populate("category", "name description")
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
-      .populate("assignedBy", "firstName lastName email");
+      .populate("assignedBy", "firstName lastName email")
+      .populate("environment", "name description")
+      .populate("feature", "name")
+      .populate("department", "name")
+      .populate("productType", "name")
+      .populate("serviceType", "name")
+      .populate("scope", "name");
 
     res.status(201).json({
       success: true,
@@ -329,6 +389,12 @@ const updateTicket = async (req, res) => {
       startDate,
       endDate,
       estimatedTime,
+      environment,
+      feature,
+      department,
+      productType,
+      serviceType,
+      scope,
     } = req.body;
 
     let ticket = await Ticket.findById(req.params.id);
@@ -353,6 +419,12 @@ const updateTicket = async (req, res) => {
       startDate,
       endDate,
       estimatedTime,
+      environment,
+      feature,
+      department,
+      productType,
+      serviceType,
+      scope,
     };
 
     // Update timestamps based on status
@@ -382,7 +454,13 @@ const updateTicket = async (req, res) => {
       .populate("category", "name description")
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
-      .populate("assignedBy", "firstName lastName email");
+      .populate("assignedBy", "firstName lastName email")
+      .populate("environment", "name description")
+      .populate("feature", "name")
+      .populate("department", "name")
+      .populate("productType", "name")
+      .populate("serviceType", "name")
+      .populate("scope", "name");
 
     res.status(200).json({
       success: true,
@@ -917,6 +995,12 @@ const createSubTicket = async (req, res) => {
       startDate,
       endDate,
       estimatedTime,
+      environment,
+      feature,
+      department,
+      productType,
+      serviceType,
+      scope,
     } = req.body;
 
     // Verify parent ticket exists
@@ -952,6 +1036,12 @@ const createSubTicket = async (req, res) => {
       startDate,
       endDate,
       estimatedTime,
+      environment: environment || parentTicket.environment,
+      feature: feature || parentTicket.feature,
+      department: department || parentTicket.department,
+      productType: productType || parentTicket.productType,
+      serviceType: serviceType || parentTicket.serviceType,
+      scope: scope || parentTicket.scope,
     });
 
     const populatedSubTicket = await Ticket.findById(subTicket._id)
@@ -960,6 +1050,12 @@ const createSubTicket = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("environment", "name description")
+      .populate("feature", "name")
+      .populate("department", "name")
+      .populate("productType", "name")
+      .populate("serviceType", "name")
+      .populate("scope", "name")
       .populate("parentTicket", "ticketNumber subject status");
 
     res.status(201).json({
