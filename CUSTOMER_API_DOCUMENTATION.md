@@ -23,6 +23,7 @@
   "slaMapping": "ObjectId",             // Reference to SLA
   "versionNumber": "ObjectId",          // Reference to VersionNumber
   "erpType": "ObjectId",                // Reference to ERPType
+  "consultants": ["ObjectId"],          // Array of references to Consultant (can assign multiple)
   "lastLogin": "Date",                  // Auto-updated on login
   "createdAt": "Date",                  // Auto-generated
   "updatedAt": "Date"                   // Auto-updated
@@ -52,7 +53,8 @@ Creates a new customer account.
   "status": "active",
   "slaMapping": "60d5ec49f1b2c72b8c8e4f1a",
   "versionNumber": "60d5ec49f1b2c72b8c8e4f1b",
-  "erpType": "60d5ec49f1b2c72b8c8e4f1c"
+  "erpType": "60d5ec49f1b2c72b8c8e4f1c",
+  "consultants": ["60d5ec49f1b2c72b8c8e4f1d", "60d5ec49f1b2c72b8c8e4f1e"]
 }
 ```
 
@@ -69,6 +71,7 @@ Creates a new customer account.
 - `slaMapping` (optional): SLA ID reference
 - `versionNumber` (optional): Version Number ID reference
 - `erpType` (optional): ERP Type ID reference
+- `consultants` (optional): Array of Consultant IDs (can assign multiple consultants to work with this customer - emails will be sent automatically to all assigned consultants)
 
 **Success Response (201):**
 ```json
@@ -101,11 +104,33 @@ Creates a new customer account.
       "name": "SAP",
       "isActive": true
     },
+    "consultants": [
+      {
+        "_id": "60d5ec49f1b2c72b8c8e4f1d",
+        "firstName": "Sarah",
+        "lastName": "Johnson",
+        "email": "sarah@company.com",
+        "phone": "+1234567890",
+        "role": "consultant",
+        "status": "active"
+      },
+      {
+        "_id": "60d5ec49f1b2c72b8c8e4f1e",
+        "firstName": "Mike",
+        "lastName": "Smith",
+        "email": "mike@company.com",
+        "phone": "+1234567891",
+        "role": "senior_consultant",
+        "status": "active"
+      }
+    ],
     "createdAt": "2025-12-15T10:30:00.000Z",
     "updatedAt": "2025-12-15T10:30:00.000Z"
   }
 }
 ```
+
+**Note:** When consultants are assigned, email notifications are automatically sent to each consultant's email address. See [EMAIL_API_DOCUMENTATION.md](EMAIL_API_DOCUMENTATION.md) for details.
 
 **Error Responses:**
 
@@ -196,6 +221,17 @@ GET /api/customers?status=active&search=john&page=1&limit=15
         "name": "SAP",
         "isActive": true
       },
+      "consultants": [
+        {
+          "_id": "60d5ec49f1b2c72b8c8e4f1d",
+          "firstName": "Sarah",
+          "lastName": "Johnson",
+          "email": "sarah@company.com",
+          "phone": "+1234567890",
+          "role": "consultant",
+          "status": "active"
+        }
+      ],
       "lastLogin": "2025-12-15T08:30:00.000Z",
       "createdAt": "2025-12-14T10:30:00.000Z",
       "updatedAt": "2025-12-15T10:30:00.000Z"
@@ -258,6 +294,26 @@ GET /api/customers/507f1f77bcf86cd799439011
       "name": "SAP",
       "isActive": true
     },
+    "consultants": [
+      {
+        "_id": "60d5ec49f1b2c72b8c8e4f1d",
+        "firstName": "Sarah",
+        "lastName": "Johnson",
+        "email": "sarah@company.com",
+        "phone": "+1234567890",
+        "role": "consultant",
+        "status": "active"
+      },
+      {
+        "_id": "60d5ec49f1b2c72b8c8e4f1e",
+        "firstName": "Mike",
+        "lastName": "Smith",
+        "email": "mike@company.com",
+        "phone": "+1234567891",
+        "role": "senior_consultant",
+        "status": "active"
+      }
+    ],
     "tickets": [
       {
         "_id": "60d5ec49f1b2c72b8c8e4f2a",
@@ -317,6 +373,7 @@ Updates an existing customer.
   "slaMapping": "60d5ec49f1b2c72b8c8e4f1a",
   "versionNumber": "60d5ec49f1b2c72b8c8e4f1d",
   "erpType": "60d5ec49f1b2c72b8c8e4f1e",
+  "consultants": ["60d5ec49f1b2c72b8c8e4f1d", "60d5ec49f1b2c72b8c8e4f1e", "60d5ec49f1b2c72b8c8e4f1f"],
   "password": "newpassword123"
 }
 ```
@@ -325,6 +382,7 @@ Updates an existing customer.
 - All fields are optional - only send fields you want to update
 - Password will be hashed automatically if provided
 - Email uniqueness is checked if updating email
+- When updating consultants, only newly added consultants will receive email notifications (existing consultants won't get duplicate emails)
 
 **Example:**
 ```
@@ -362,11 +420,42 @@ PUT /api/customers/507f1f77bcf86cd799439011
       "name": "Oracle ERP",
       "isActive": true
     },
+    "consultants": [
+      {
+        "_id": "60d5ec49f1b2c72b8c8e4f1d",
+        "firstName": "Sarah",
+        "lastName": "Johnson",
+        "email": "sarah@company.com",
+        "phone": "+1234567890",
+        "role": "consultant",
+        "status": "active"
+      },
+      {
+        "_id": "60d5ec49f1b2c72b8c8e4f1e",
+        "firstName": "Mike",
+        "lastName": "Smith",
+        "email": "mike@company.com",
+        "phone": "+1234567891",
+        "role": "senior_consultant",
+        "status": "active"
+      },
+      {
+        "_id": "60d5ec49f1b2c72b8c8e4f1f",
+        "firstName": "Lisa",
+        "lastName": "Brown",
+        "email": "lisa@company.com",
+        "phone": "+1234567892",
+        "role": "consultant",
+        "status": "active"
+      }
+    ],
     "createdAt": "2025-12-14T10:30:00.000Z",
     "updatedAt": "2025-12-15T11:45:00.000Z"
   }
 }
 ```
+
+**Note:** In this example, if the customer previously had only Sarah and Mike assigned, Lisa (the newly added consultant) will receive an email notification. Sarah and Mike will not receive duplicate emails.
 
 **Error Responses:**
 
@@ -814,12 +903,14 @@ curl http://localhost:3000/api/customers/stats
 
 1. **Password Security**: Passwords are automatically hashed using bcrypt with cost factor 12
 2. **Email Uniqueness**: Email addresses must be unique across all customers
-3. **Populated References**: GET requests automatically populate `slaMapping`, `versionNumber`, and `erpType` with their details
+3. **Populated References**: GET requests automatically populate `slaMapping`, `versionNumber`, `erpType`, and `consultants` with their details
 4. **Virtual Tickets**: GET by ID also populates related tickets
 5. **Search**: The search parameter searches across company name, contact person, and email
 6. **Status Values**: Only "active", "inactive", or "suspended" are valid status values
 7. **Pagination**: Default is 10 items per page, sorted by creation date (newest first)
 8. **Password in Updates**: Password is optional in updates - only include if changing
+9. **Consultant Assignment**: You can assign multiple consultants to a customer using an array of consultant IDs
+10. **Email Notifications**: When consultants are assigned (create or update), they automatically receive email notifications. On update, only newly added consultants receive emails. See [EMAIL_API_DOCUMENTATION.md](EMAIL_API_DOCUMENTATION.md) for email configuration details.
 
 ---
 

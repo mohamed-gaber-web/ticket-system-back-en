@@ -1,4 +1,6 @@
 import Customer from "../models/Customer.js";
+import Consultant from "../models/Consltant.js";
+import { sendBulkConsultantAssignmentEmails } from "../utils/emailService.js";
 
 // @desc    Get all customers
 // @route   GET /api/customers
@@ -27,6 +29,7 @@ const getAllCustomers = async (req, res) => {
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
+      .populate("consultants", "firstName lastName email phone role status")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -59,6 +62,7 @@ const getCustomerById = async (req, res) => {
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
+      .populate("consultants", "firstName lastName email phone role status")
       .populate({
         path: "tickets",
         select: "title status priority createdAt",
@@ -108,6 +112,7 @@ const createCustomer = async (req, res) => {
       slaMapping,
       versionNumber,
       erpType,
+      consultants,
     } = req.body;
 
     const customerExists = await Customer.findOne({ email });
@@ -132,18 +137,55 @@ const createCustomer = async (req, res) => {
       slaMapping,
       versionNumber,
       erpType,
+      consultants,
     });
 
     const populatedCustomer = await Customer.findById(customer._id)
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
-      .populate("erpType", "name isActive");
+      .populate("erpType", "name isActive")
+      .populate("consultants", "firstName lastName email phone role status");
 
-    res.status(201).json({
+    let emailResults = null;
+    let emailWarning = null;
+
+    if (consultants && consultants.length > 0) {
+      try {
+        const consultantDetails = await Consultant.find({
+          _id: { $in: consultants },
+        }).select("firstName lastName email");
+
+        if (consultantDetails.length > 0) {
+          emailResults = await sendBulkConsultantAssignmentEmails(
+            consultantDetails,
+            companyName,
+            email
+          );
+
+          const failedEmails = emailResults.filter((r) => !r.success);
+          if (failedEmails.length > 0) {
+            emailWarning = `Customer created successfully, but ${failedEmails.length} email(s) failed to send. Please check email configuration.`;
+          }
+        }
+      } catch (emailError) {
+        console.error("Email sending failed:", emailError.message);
+        emailWarning =
+          "Customer created successfully, but email notifications could not be sent. Please check email configuration in .env file.";
+      }
+    }
+
+    const response = {
       success: true,
-      message: "Customer created successfully",
+      message: emailWarning || "Customer created successfully",
       data: populatedCustomer,
-    });
+    };
+
+    if (emailWarning) {
+      response.emailWarning = emailWarning;
+      response.emailResults = emailResults;
+    }
+
+    res.status(201).json(response);
   } catch (error) {
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
@@ -180,6 +222,7 @@ const updateCustomer = async (req, res) => {
       slaMapping,
       versionNumber,
       erpType,
+      consultants,
     } = req.body;
 
     let customer = await Customer.findById(req.params.id);
@@ -213,6 +256,22 @@ const updateCustomer = async (req, res) => {
     customer.versionNumber = versionNumber || customer.versionNumber;
     customer.erpType = erpType || customer.erpType;
 
+    let newConsultants = [];
+    if (consultants !== undefined) {
+      const oldConsultantIds = customer.consultants.map((id) => id.toString());
+      const newConsultantIds = consultants.filter(
+        (id) => !oldConsultantIds.includes(id.toString())
+      );
+
+      if (newConsultantIds.length > 0) {
+        newConsultants = await Consultant.find({
+          _id: { $in: newConsultantIds },
+        }).select("firstName lastName email");
+      }
+
+      customer.consultants = consultants;
+    }
+
     if (password) {
       customer.password = password;
     }
@@ -222,13 +281,43 @@ const updateCustomer = async (req, res) => {
     const populatedCustomer = await Customer.findById(customer._id)
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
-      .populate("erpType", "name isActive");
+      .populate("erpType", "name isActive")
+      .populate("consultants", "firstName lastName email phone role status");
 
-    res.status(200).json({
+    let emailResults = null;
+    let emailWarning = null;
+
+    if (newConsultants.length > 0) {
+      try {
+        emailResults = await sendBulkConsultantAssignmentEmails(
+          newConsultants,
+          customer.companyName,
+          customer.email
+        );
+
+        const failedEmails = emailResults.filter((r) => !r.success);
+        if (failedEmails.length > 0) {
+          emailWarning = `Customer updated successfully, but ${failedEmails.length} email(s) failed to send to new consultants. Please check email configuration.`;
+        }
+      } catch (emailError) {
+        console.error("Email sending failed:", emailError.message);
+        emailWarning =
+          "Customer updated successfully, but email notifications could not be sent to new consultants. Please check email configuration in .env file.";
+      }
+    }
+
+    const response = {
       success: true,
-      message: "Customer updated successfully",
+      message: emailWarning || "Customer updated successfully",
       data: populatedCustomer,
-    });
+    };
+
+    if (emailWarning) {
+      response.emailWarning = emailWarning;
+      response.emailResults = emailResults;
+    }
+
+    res.status(200).json(response);
   } catch (error) {
     if (error.kind === "ObjectId") {
       return res.status(404).json({

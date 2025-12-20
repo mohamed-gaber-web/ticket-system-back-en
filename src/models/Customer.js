@@ -68,6 +68,12 @@ const customerSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "ERPType",
     },
+    consultants: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Consultant",
+      },
+    ],
     lastLogin: {
       type: Date,
     },
