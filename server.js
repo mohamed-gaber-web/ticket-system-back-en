@@ -10,7 +10,7 @@ import routes from "./src/routes/index.js";
 // Load environment variables
 dotenv.config();
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8000;
 
 // Initialize Express app
 const app = express();
@@ -22,18 +22,22 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // Swagger API Documentation
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  explorer: true,
-  customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: "Ticketing System API Documentation",
-}));
+app.use(
+  "/api-docs",
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec, {
+    explorer: true,
+    customCss: ".swagger-ui .topbar { display: none }",
+    customSiteTitle: "Ticketing System API Documentation",
+  })
+);
 
 // Root route
 app.get("/", (req, res) => {
   res.json({
     message: "Welcome to the Ticketing System API",
-    documentation: `${req.protocol}://${req.get('host')}/api-docs`,
-    version: "1.0.0"
+    documentation: `${req.protocol}://${req.get("host")}/api-docs`,
+    version: "1.0.0",
   });
 });
 
@@ -55,7 +59,9 @@ const startServer = async () => {
     // Then start the Express server
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
-      console.log(`API Documentation available at: http://localhost:${PORT}/api-docs`);
+      console.log(
+        `API Documentation available at: http://localhost:${PORT}/api-docs`
+      );
     });
   } catch (error) {
     console.error("Failed to start server:", error);
