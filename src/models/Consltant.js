@@ -82,7 +82,6 @@ consultantSchema.virtual("assignments", {
 });
 
 // Index for faster queries
-consultantSchema.index({ email: 1 });
 consultantSchema.index({ status: 1 });
 consultantSchema.index({ role: 1 });
 

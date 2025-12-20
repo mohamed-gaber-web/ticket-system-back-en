@@ -177,7 +177,6 @@ ticketSchema.virtual("subTickets", {
 });
 
 // Indexes for faster queries
-ticketSchema.index({ ticketNumber: 1 });
 ticketSchema.index({ customer: 1 });
 ticketSchema.index({ status: 1 });
 ticketSchema.index({ priority: 1 });

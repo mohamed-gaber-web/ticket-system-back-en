@@ -53,7 +53,6 @@ teamSchema.virtual("assignedTickets", {
 
 // Index for faster queries
 teamSchema.index({ status: 1 });
-teamSchema.index({ teamName: 1 });
 
 // Method to get team workload
 teamSchema.methods.getWorkload = async function () {

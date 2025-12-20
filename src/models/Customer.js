@@ -105,7 +105,6 @@ customerSchema.virtual("tickets", {
 });
 
 // Index for faster queries
-customerSchema.index({ email: 1 });
 customerSchema.index({ status: 1 });
 customerSchema.index({ companyName: 1 });
 

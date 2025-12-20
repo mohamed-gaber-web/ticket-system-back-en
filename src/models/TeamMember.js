@@ -89,7 +89,6 @@ teamMemberSchema.virtual("myTickets", {
 
 // Index for faster queries
 teamMemberSchema.index({ team: 1 });
-teamMemberSchema.index({ email: 1 });
 teamMemberSchema.index({ status: 1 });
 teamMemberSchema.index({ team: 1, status: 1 });
 
