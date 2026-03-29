@@ -21,6 +21,8 @@ import serviceTypeRoutes from "./serviceTypeRoutes.js";
 import departmentRoutes from "./departmentRoutes.js";
 import erpTypeRoutes from "./erpTypeRoutes.js";
 import versionNumberRoutes from "./versionNumberRoutes.js";
+import sourceRoutes from "./sourceRoutes.js";
+import companyRoutes from "./companyRoutes.js";
 
 const router = express.Router();
 
@@ -90,6 +92,12 @@ router.use("/erp-types", erpTypeRoutes);
 
 // Version Number routes
 router.use("/version-numbers", versionNumberRoutes);
+
+// Source routes
+router.use("/sources", sourceRoutes);
+
+// Company routes
+router.use("/companies", companyRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

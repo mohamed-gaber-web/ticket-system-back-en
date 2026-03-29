@@ -133,6 +133,10 @@ const ticketSchema = mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Scope",
     },
+    source: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Source",
+    },
   },
   {
     timestamps: true,
@@ -195,6 +199,7 @@ ticketSchema.index({ department: 1 });
 ticketSchema.index({ productType: 1 });
 ticketSchema.index({ serviceType: 1 });
 ticketSchema.index({ scope: 1 });
+ticketSchema.index({ source: 1 });
 
 // Pre-save middleware to generate ticket number
 ticketSchema.pre("save", async function () {
