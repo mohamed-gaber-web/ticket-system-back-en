@@ -33,12 +33,14 @@ const populateCommentBy = async (comment) => {
 // @access  Public
 const getAllTickets = async (req, res) => {
   try {
+    console.log("=== RAW req.query ===", req.query);
     const {
       status,
       priority,
       customer,
       assignedTeam,
       assignedBy,
+      acceptedBy,
       category,
       isSlaBreached,
       environment,
@@ -48,6 +50,13 @@ const getAllTickets = async (req, res) => {
       serviceType,
       scope,
       source,
+      startDate,
+      endDate,
+      createdDateFrom,
+      createdDateTo,
+      closedDateFrom,
+      closedDateTo,
+      customerName,
       page = 1,
       limit = 10,
       search,
@@ -113,6 +122,43 @@ const getAllTickets = async (req, res) => {
       query.source = source;
     }
 
+    if (acceptedBy) {
+      query.acceptedBy = acceptedBy;
+      console.log("Filtering by acceptedBy:", acceptedBy);
+    }
+
+    if (startDate) {
+      query.startDate = { ...query.startDate, $gte: new Date(startDate) };
+    }
+
+    if (endDate) {
+      query.endDate = { ...query.endDate, $lte: new Date(endDate) };
+    }
+
+    if (createdDateFrom || createdDateTo) {
+      query.createdAt = {};
+      if (createdDateFrom) {
+        query.createdAt.$gte = new Date(createdDateFrom);
+      }
+      if (createdDateTo) {
+        const toDate = new Date(createdDateTo);
+        toDate.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = toDate;
+      }
+    }
+
+    if (closedDateFrom || closedDateTo) {
+      query.closedAt = {};
+      if (closedDateFrom) {
+        query.closedAt.$gte = new Date(closedDateFrom);
+      }
+      if (closedDateTo) {
+        const toDate = new Date(closedDateTo);
+        toDate.setHours(23, 59, 59, 999);
+        query.closedAt.$lte = toDate;
+      }
+    }
+
     if (search) {
       query.$or = [
         { ticketNumber: { $regex: search, $options: "i" } },
@@ -124,6 +170,9 @@ const getAllTickets = async (req, res) => {
     const skip = (page - 1) * limit;
     const sort = {};
     sort[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+    console.log("Ticket query params:", JSON.stringify(req.query));
+    console.log("Ticket DB query:", JSON.stringify(query));
 
     const tickets = await Ticket.find(query)
       .populate("customer", "companyName email contactPerson")
