@@ -3,6 +3,7 @@ import Ticket from "../models/Ticket.js";
 import Team from "../models/Team.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
+import { notifyAndEmail } from "../utils/emailHelper.js";
 
 // @desc    Get all ticket assignments
 // @route   GET /api/ticket-assignments
@@ -270,9 +271,25 @@ const createTicketAssignment = async (req, res) => {
     }
 
     const populatedAssignment = await TicketAssignment.findById(assignment._id)
-      .populate("ticket", "ticketNumber subject status priority")
+      .populate("ticket", "ticketNumber subject status priority customer")
       .populate("assignedToTeam", "teamName department")
       .populate("assignedByConsultant", "firstName lastName email");
+
+    // Notify assigned consultant (fire-and-forget)
+    if (populatedAssignment.assignedByConsultant) {
+      const ticket = await Ticket.findById(populatedAssignment.ticket._id || populatedAssignment.ticket)
+        .populate("customer", "companyName contactPerson email");
+
+      notifyAndEmail("ticket_assigned", {
+        ticket: ticket || populatedAssignment.ticket,
+        ticketNumber: populatedAssignment.ticket.ticketNumber,
+        subject: populatedAssignment.ticket.subject,
+        assignee: populatedAssignment.assignedByConsultant,
+        recipients: [
+          { userId: populatedAssignment.assignedByConsultant._id, userType: "consultant" },
+        ],
+      }).catch((err) => console.error("Email notification error:", err.message));
+    }
 
     res.status(201).json({
       success: true,
@@ -488,9 +505,27 @@ const reassignTicket = async (req, res) => {
     });
 
     const populatedAssignment = await TicketAssignment.findById(newAssignment._id)
-      .populate("ticket", "ticketNumber subject status priority")
+      .populate("ticket", "ticketNumber subject status priority customer")
       .populate("assignedToTeam", "teamName department")
       .populate("assignedByConsultant", "firstName lastName email");
+
+    // Notify new assignee about reassignment (fire-and-forget)
+    if (populatedAssignment.assignedByConsultant) {
+      const ticket = await Ticket.findById(populatedAssignment.ticket._id || populatedAssignment.ticket)
+        .populate("customer", "companyName contactPerson email");
+
+      notifyAndEmail("ticket_reassigned", {
+        ticket: ticket || populatedAssignment.ticket,
+        ticketNumber: populatedAssignment.ticket.ticketNumber,
+        subject: populatedAssignment.ticket.subject,
+        newAssignee: populatedAssignment.assignedByConsultant,
+        newTeamName: populatedAssignment.assignedToTeam?.teamName || "N/A",
+        reassignedBy: `${consultantExists.firstName} ${consultantExists.lastName}`,
+        recipients: [
+          { userId: populatedAssignment.assignedByConsultant._id, userType: "consultant" },
+        ],
+      }).catch((err) => console.error("Email notification error:", err.message));
+    }
 
     res.status(201).json({
       success: true,

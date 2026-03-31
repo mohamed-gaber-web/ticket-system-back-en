@@ -3,6 +3,7 @@ import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
 import TicketComment from "../models/TicketComment.js";
+import { notifyAndEmail } from "../utils/emailHelper.js";
 
 // Helper function to populate commentBy based on userType
 const populateCommentBy = async (comment) => {
@@ -398,6 +399,16 @@ const createTicket = async (req, res) => {
       .populate("scope", "name")
       .populate("source", "name");
 
+    // Send email notification (fire-and-forget)
+    notifyAndEmail("new_ticket", {
+      ticket: populatedTicket,
+      ticketNumber: populatedTicket.ticketNumber,
+      subject: populatedTicket.subject,
+      recipients: [
+        { userId: populatedTicket.customer._id || populatedTicket.customer, userType: "customer" },
+      ],
+    }).catch((err) => console.error("Email notification error:", err.message));
+
     res.status(201).json({
       success: true,
       message: "Ticket created successfully",
@@ -595,15 +606,52 @@ const updateTicketStatus = async (req, res) => {
       updateData.closedAt = new Date();
     }
 
+    const oldStatus = ticket.status;
+
     ticket = await Ticket.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
     )
-      .populate("customer", "companyName email")
+      .populate("customer", "companyName contactPerson email")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
-      .populate("assignedBy", "firstName lastName");
+      .populate("assignedBy", "firstName lastName email");
+
+    // Send email notifications based on new status (fire-and-forget)
+    const recipients = [];
+    if (ticket.customer?._id) {
+      recipients.push({ userId: ticket.customer._id, userType: "customer" });
+    }
+    if (ticket.assignedBy?._id) {
+      recipients.push({ userId: ticket.assignedBy._id, userType: "consultant" });
+    }
+
+    if (status === "resolved") {
+      notifyAndEmail("ticket_resolved", {
+        ticket,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        recipients,
+      }).catch((err) => console.error("Email notification error:", err.message));
+    } else if (status === "closed") {
+      notifyAndEmail("ticket_closed", {
+        ticket,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        recipients,
+      }).catch((err) => console.error("Email notification error:", err.message));
+    } else {
+      notifyAndEmail("status_change", {
+        ticket,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        oldStatus,
+        newStatus: status,
+        assignee: ticket.assignedBy || null,
+        recipients,
+      }).catch((err) => console.error("Email notification error:", err.message));
+    }
 
     res.status(200).json({
       success: true,
@@ -659,10 +707,23 @@ const assignTicket = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     )
-      .populate("customer", "companyName email")
+      .populate("customer", "companyName contactPerson email")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email");
+
+    // Notify the assigned consultant (fire-and-forget)
+    if (ticket.assignedBy) {
+      notifyAndEmail("ticket_assigned", {
+        ticket,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        assignee: ticket.assignedBy,
+        recipients: [
+          { userId: ticket.assignedBy._id, userType: "consultant" },
+        ],
+      }).catch((err) => console.error("Email notification error:", err.message));
+    }
 
     res.status(200).json({
       success: true,

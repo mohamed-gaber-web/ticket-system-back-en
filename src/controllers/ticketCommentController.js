@@ -3,6 +3,7 @@ import Ticket from "../models/Ticket.js";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
+import { notifyAndEmail, resolveUser } from "../utils/emailHelper.js";
 
 // Helper function to populate commentBy based on userType
 const populateCommentBy = async (comment) => {
@@ -223,6 +224,59 @@ const createComment = async (req, res) => {
 
     // Manually populate commentBy
     const populatedComment = await populateCommentBy(foundComment);
+
+    // Send email notification for public comments (fire-and-forget)
+    if (!isInternal) {
+      (async () => {
+        try {
+          const fullTicket = await Ticket.findById(ticket)
+            .populate("customer", "companyName contactPerson email")
+            .populate("assignedBy", "firstName lastName email");
+
+          if (!fullTicket) return;
+
+          const commenterUser = await resolveUser(commentByUserId, commentByUserType);
+          if (!commenterUser) return;
+
+          let commenterName = "";
+          let commenterRole = "";
+          let recipient = null;
+          const recipients = [];
+
+          if (commentByUserType === "customer") {
+            commenterName = commenterUser.contactPerson || commenterUser.companyName;
+            commenterRole = "Customer";
+            // Notify assigned consultant
+            if (fullTicket.assignedBy) {
+              recipient = fullTicket.assignedBy;
+              recipients.push({ userId: fullTicket.assignedBy._id, userType: "consultant" });
+            }
+          } else {
+            commenterName = `${commenterUser.firstName} ${commenterUser.lastName}`;
+            commenterRole = commentByUserType === "consultant" ? "Consultant" : "Team Member";
+            // Notify customer
+            if (fullTicket.customer) {
+              recipient = fullTicket.customer;
+              recipients.push({ userId: fullTicket.customer._id, userType: "customer" });
+            }
+          }
+
+          if (recipient && recipients.length > 0) {
+            await notifyAndEmail("new_comment", {
+              ticket: fullTicket,
+              ticketNumber: fullTicket.ticketNumber,
+              subject: fullTicket.subject,
+              recipient,
+              commenter: { name: commenterName, role: commenterRole },
+              commentText: commentText,
+              recipients,
+            });
+          }
+        } catch (err) {
+          console.error("Comment email notification error:", err.message);
+        }
+      })();
+    }
 
     res.status(201).json({
       success: true,

@@ -6,6 +6,7 @@ import cookieParser from "cookie-parser";
 import swaggerUi from "swagger-ui-express";
 import swaggerSpec from "./src/config/swagger.js";
 import routes from "./src/routes/index.js";
+import { startSLACron } from "./src/utils/slaCron.js";
 
 // Load environment variables
 dotenv.config();
@@ -62,6 +63,9 @@ const startServer = async () => {
       console.log(
         `API Documentation available at: http://localhost:${PORT}/api-docs`
       );
+
+      // Start SLA monitoring cron job
+      startSLACron();
     });
   } catch (error) {
     console.error("Failed to start server:", error);

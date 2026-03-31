@@ -1,6 +1,6 @@
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
-import { sendBulkConsultantAssignmentEmails } from "../utils/emailService.js";
+import { sendBulkConsultantAssignmentEmails, sendWelcomeEmail } from "../utils/emailService.js";
 
 // @desc    Get all customers
 // @route   GET /api/customers
@@ -145,6 +145,11 @@ const createCustomer = async (req, res) => {
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
       .populate("consultants", "firstName lastName email phone role status");
+
+    // Send welcome email to the new customer (fire-and-forget)
+    sendWelcomeEmail(populatedCustomer).catch((err) =>
+      console.error("Welcome email error:", err.message)
+    );
 
     let emailResults = null;
     let emailWarning = null;

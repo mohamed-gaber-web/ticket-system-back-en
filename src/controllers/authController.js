@@ -3,6 +3,7 @@ import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
 import { sendTokenResponse, generateResetToken } from "../utils/jwtUtils.js";
+import { sendPasswordResetEmail } from "../utils/emailService.js";
 import { log } from "console";
 
 // Helper function to get user model based on userType
@@ -386,15 +387,25 @@ export const forgotPassword = async (req, res) => {
     user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
     await user.save({ validateBeforeSave: false });
 
-    // In production, send email with reset token
-    // For now, return the reset token in response (NOT RECOMMENDED FOR PRODUCTION)
+    // Determine user name for email
+    let userName = "User";
+    if (user.contactPerson) {
+      userName = user.contactPerson;
+    } else if (user.firstName) {
+      userName = `${user.firstName} ${user.lastName || ""}`.trim();
+    }
+
+    // Send password reset email
+    try {
+      await sendPasswordResetEmail(user.email, userName, resetToken);
+    } catch (emailError) {
+      console.error("Failed to send password reset email:", emailError.message);
+      // Continue even if email fails — don't expose reset token
+    }
+
     res.status(200).json({
       success: true,
-      message: "Password reset token generated",
-      resetToken, // Remove this in production, send via email instead
-      data: {
-        info: "In production, this token should be sent via email",
-      },
+      message: "If an account with that email exists, a password reset link has been sent.",
     });
   } catch (error) {
     res.status(500).json({

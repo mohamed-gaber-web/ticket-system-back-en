@@ -23,6 +23,7 @@ import erpTypeRoutes from "./erpTypeRoutes.js";
 import versionNumberRoutes from "./versionNumberRoutes.js";
 import sourceRoutes from "./sourceRoutes.js";
 import companyRoutes from "./companyRoutes.js";
+import emailRoutes from "./emailRoutes.js";
 
 const router = express.Router();
 
@@ -98,6 +99,9 @@ router.use("/sources", sourceRoutes);
 
 // Company routes
 router.use("/companies", companyRoutes);
+
+// Email routes
+router.use("/emails", emailRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

@@ -1,0 +1,18 @@
+<p>Dear {{assigneeName}},</p>
+
+<p>A ticket has been assigned to you. Please review it and take action accordingly.</p>
+
+<div class="info-box">
+  <h3>Ticket Details</h3>
+  <p><strong>Ticket Number:</strong> {{ticketNumber}}</p>
+  <p><strong>Subject:</strong> {{subject}}</p>
+  <p><strong>Customer:</strong> {{customerName}}</p>
+  <p><strong>Priority:</strong> <span class="badge badge-{{priority}}">{{priority}}</span></p>
+  <p><strong>Category:</strong> {{category}}</p>
+</div>
+
+<a href="{{ticketUrl}}" class="btn">View Ticket</a>
+
+<p>Please review this ticket at your earliest convenience.</p>
+
+<p>Best regards,<br>Ticketing System Team</p>

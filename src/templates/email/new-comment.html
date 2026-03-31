@@ -1,0 +1,17 @@
+<p>Dear {{recipientName}},</p>
+
+<p>A new comment has been added to ticket <strong>{{ticketNumber}}</strong>.</p>
+
+<div class="info-box">
+  <h3>Comment Details</h3>
+  <p><strong>Ticket:</strong> {{ticketNumber}} - {{subject}}</p>
+  <p><strong>Comment By:</strong> {{commenterName}} ({{commenterRole}})</p>
+</div>
+
+<div style="background-color: #f8fafc; padding: 16px 20px; margin: 16px 0; border-radius: 6px; border: 1px solid #e2e8f0;">
+  <p style="margin: 0; font-style: italic; color: #475569;">{{commentPreview}}</p>
+</div>
+
+<a href="{{ticketUrl}}" class="btn">View Full Comment</a>
+
+<p>Best regards,<br>Ticketing System Team</p>

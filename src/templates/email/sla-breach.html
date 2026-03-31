@@ -1,0 +1,19 @@
+<p>Dear {{assigneeName}},</p>
+
+<p>A ticket has breached its SLA deadline and requires immediate escalation.</p>
+
+<div class="alert-box">
+  <h3>SLA Breached</h3>
+  <p><strong>Ticket Number:</strong> {{ticketNumber}}</p>
+  <p><strong>Subject:</strong> {{subject}}</p>
+  <p><strong>Customer:</strong> {{customerName}}</p>
+  <p><strong>Priority:</strong> <span class="badge badge-{{priority}}">{{priority}}</span></p>
+  <p><strong>SLA Due Date:</strong> {{slaDueDate}}</p>
+  <p><strong>Overdue By:</strong> {{overdueBy}}</p>
+</div>
+
+<a href="{{ticketUrl}}" class="btn btn-alert">Resolve Immediately</a>
+
+<p>This SLA breach has been logged and will be reflected in the performance reports.</p>
+
+<p>Best regards,<br>Ticketing System Team</p>

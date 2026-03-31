@@ -1,0 +1,15 @@
+<p>Dear {{recipientName}},</p>
+
+<p>The status of ticket <strong>{{ticketNumber}}</strong> has been updated.</p>
+
+<div class="info-box">
+  <h3>Status Update</h3>
+  <p><strong>Ticket Number:</strong> {{ticketNumber}}</p>
+  <p><strong>Subject:</strong> {{subject}}</p>
+  <p><strong>Previous Status:</strong> <span class="badge badge-{{oldStatus}}">{{oldStatus}}</span></p>
+  <p><strong>New Status:</strong> <span class="badge badge-{{newStatus}}">{{newStatus}}</span></p>
+</div>
+
+<a href="{{ticketUrl}}" class="btn">View Ticket</a>
+
+<p>Best regards,<br>Ticketing System Team</p>
