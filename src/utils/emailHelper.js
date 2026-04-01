@@ -78,9 +78,13 @@ const sendEventEmail = async (eventType, data) => {
 
   switch (eventType) {
     case "new_ticket": {
+      console.log("[Email Debug] new_ticket - ticket.customer:", ticket.customer);
       const customer = await resolveCustomer(ticket.customer);
+      console.log("[Email Debug] resolveCustomer result:", customer);
       if (customer) {
         await sendTicketCreatedEmail(ticket, customer);
+      } else {
+        console.log("[Email Debug] customer is null/undefined - skipping email");
       }
       break;
     }
