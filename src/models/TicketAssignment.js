@@ -10,7 +10,6 @@ const ticketAssignmentSchema = mongoose.Schema(
     assignedToTeam: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Team",
-      required: [true, "Team is required"],
     },
     assignedByConsultant: {
       type: mongoose.Schema.Types.ObjectId,

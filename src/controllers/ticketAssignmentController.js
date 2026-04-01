@@ -231,13 +231,15 @@ const createTicketAssignment = async (req, res) => {
       });
     }
 
-    // Verify team exists
-    const teamExists = await Team.findById(assignedToTeam);
-    if (!teamExists) {
-      return res.status(404).json({
-        success: false,
-        message: "Team not found",
-      });
+    // Verify team exists (only if provided)
+    if (assignedToTeam) {
+      const teamExists = await Team.findById(assignedToTeam);
+      if (!teamExists) {
+        return res.status(404).json({
+          success: false,
+          message: "Team not found",
+        });
+      }
     }
 
     // Verify consultant exists
@@ -263,11 +265,9 @@ const createTicketAssignment = async (req, res) => {
 
     // Update ticket status to assigned if it's new
     if (ticketExists.status === "new") {
-      await Ticket.findByIdAndUpdate(ticket, {
-        status: "assigned",
-        assignedTeam: assignedToTeam,
-        assignedBy: assignedByConsultant,
-      });
+      const ticketUpdate = { status: "assigned", assignedBy: assignedByConsultant };
+      if (assignedToTeam) ticketUpdate.assignedTeam = assignedToTeam;
+      await Ticket.findByIdAndUpdate(ticket, ticketUpdate);
     }
 
     const populatedAssignment = await TicketAssignment.findById(assignment._id)
