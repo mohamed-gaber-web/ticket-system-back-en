@@ -3,6 +3,7 @@ import {
   getEmailLogs,
   getEmailStats,
   sendTestEmail,
+  sendCommentEmailToExternal,
 } from "../controllers/emailController.js";
 
 const router = express.Router();
@@ -15,5 +16,8 @@ router.get("/stats", getEmailStats);
 
 // POST /api/emails/test - Send test email to verify SMTP
 router.post("/test", sendTestEmail);
+
+// POST /api/emails/send-comment - Send a comment to external email recipients
+router.post("/send-comment", sendCommentEmailToExternal);
 
 export default router;

@@ -1,5 +1,6 @@
 import EmailLog from "../models/EmailLog.js";
 import { sendEmail } from "../utils/emailService.js";
+import Ticket from "../models/Ticket.js";
 
 // @desc    Get email logs
 // @route   GET /api/emails/logs
@@ -147,4 +148,74 @@ const sendTestEmail = async (req, res) => {
   }
 };
 
-export { getEmailLogs, getEmailStats, sendTestEmail };
+// @desc    Send a comment to multiple external email recipients
+// @route   POST /api/emails/send-comment
+// @access  Private
+const sendCommentEmailToExternal = async (req, res) => {
+  try {
+    const { ticketId, ticketNumber, commentText, recipients, senderName } = req.body;
+
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ success: false, message: "No recipients provided" });
+    }
+    if (!commentText || !commentText.trim()) {
+      return res.status(400).json({ success: false, message: "Comment text is required" });
+    }
+
+    // Resolve ticket details (fallback to payload values if lookup fails)
+    let ticketDoc = null;
+    if (ticketId) {
+      ticketDoc = await Ticket.findById(ticketId).select("ticketNumber subject _id").lean();
+    }
+
+    const resolvedNumber = ticketDoc?.ticketNumber || ticketNumber || ticketId;
+    const resolvedSubject = ticketDoc?.subject || "";
+    const resolvedId = ticketDoc?._id || ticketId;
+
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const ticketUrl = `${frontendUrl}/tickets/view/${resolvedId}`;
+    const preview =
+      commentText.length > 200 ? commentText.substring(0, 200) + "..." : commentText;
+
+    const results = await Promise.allSettled(
+      recipients.map((email) =>
+        sendEmail(
+          email,
+          `New Comment on Ticket ${resolvedNumber}`,
+          "new-comment",
+          {
+            headerTitle: "New Comment",
+            recipientName: email,
+            ticketNumber: resolvedNumber,
+            subject: resolvedSubject,
+            commenterName: senderName || "Support Team",
+            commenterRole: "Support Team",
+            commentPreview: preview,
+            ticketUrl,
+          },
+          { ticketId: resolvedId }
+        )
+      )
+    );
+
+    const sent = results.filter(
+      (r) => r.status === "fulfilled" && r.value?.success
+    ).length;
+    const failed = results.length - sent;
+
+    res.status(200).json({
+      success: true,
+      message: `Emails sent: ${sent}, failed: ${failed}`,
+      sent,
+      failed,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error sending comment emails",
+      error: error.message,
+    });
+  }
+};
+
+export { getEmailLogs, getEmailStats, sendTestEmail, sendCommentEmailToExternal };
