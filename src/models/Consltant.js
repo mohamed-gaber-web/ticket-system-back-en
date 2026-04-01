@@ -30,6 +30,11 @@ const consultantSchema = mongoose.Schema(
       trim: true,
       maxlength: [20, "Phone number cannot exceed 20 characters"],
     },
+    position: {
+      type: String,
+      trim: true,
+      maxlength: [150, "Position cannot exceed 150 characters"],
+    },
     password: {
       type: String,
       required: [true, "Password is required"],
