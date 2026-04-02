@@ -20,6 +20,17 @@ router.post("/test", sendTestEmail);
 // GET /api/emails/test?to=email@example.com - Quick browser test
 router.get("/test", sendTestEmail);
 
+// GET /api/emails/config-check - Check which env vars are set (values hidden)
+router.get("/config-check", (req, res) => {
+  res.json({
+    MS_TENANT_ID: !!process.env.MS_TENANT_ID,
+    MS_CLIENT_ID: !!process.env.MS_CLIENT_ID,
+    MS_CLIENT_SECRET: !!process.env.MS_CLIENT_SECRET,
+    MS_EMAIL_FROM: process.env.MS_EMAIL_FROM || null,
+    NODE_VERSION: process.version,
+  });
+});
+
 // POST /api/emails/send-comment - Send a comment to external email recipients
 router.post("/send-comment", sendCommentEmailToExternal);
 
