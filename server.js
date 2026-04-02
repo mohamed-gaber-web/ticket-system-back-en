@@ -11,6 +11,14 @@ import { startSLACron } from "./src/utils/slaCron.js";
 // Load environment variables
 dotenv.config();
 
+// Debug: log which email env vars are present at startup
+console.log("=== ENV CHECK ===");
+console.log("MS_TENANT_ID:", !!process.env.MS_TENANT_ID);
+console.log("MS_CLIENT_ID:", !!process.env.MS_CLIENT_ID);
+console.log("MS_CLIENT_SECRET:", !!process.env.MS_CLIENT_SECRET);
+console.log("MS_EMAIL_FROM:", process.env.MS_EMAIL_FROM || "NOT SET");
+console.log("=================");
+
 const PORT = process.env.PORT || 8000;
 
 // Initialize Express app
