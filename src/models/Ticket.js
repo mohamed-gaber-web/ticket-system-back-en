@@ -205,12 +205,21 @@ ticketSchema.index({ source: 1 });
 ticketSchema.pre("save", async function () {
   if (!this.isNew) return;
 
-  // Generate ticket number: TKT-YYYY-XXXXX
+  // Get company prefix from customer (first 3 chars of companyName, uppercased)
+  let prefix = "TKT";
+  if (this.customer) {
+    const customer = await mongoose.model("Customer").findById(this.customer).select("companyName").lean();
+    if (customer?.companyName) {
+      prefix = customer.companyName.replace(/[^a-zA-Z0-9]/g, "").substring(0, 3).toUpperCase();
+      if (prefix.length < 3) prefix = prefix.padEnd(3, "X");
+    }
+  }
+
   const year = new Date().getFullYear();
   const count = await mongoose.model("Ticket").countDocuments();
   const ticketNum = String(count + 1).padStart(5, "0");
 
-  this.ticketNumber = `TKT-${year}-${ticketNum}`;
+  this.ticketNumber = `${prefix}-${year}-${ticketNum}`;
 });
 
 // Pre-save middleware to calculate SLA due date
