@@ -22,12 +22,15 @@ router.get("/test", sendTestEmail);
 
 // GET /api/emails/config-check - Check which env vars are set (values hidden)
 router.get("/config-check", (req, res) => {
+  const allKeys = Object.keys(process.env).filter(k => k.startsWith("MS_"));
   res.json({
     MS_TENANT_ID: !!process.env.MS_TENANT_ID,
     MS_CLIENT_ID: !!process.env.MS_CLIENT_ID,
     MS_CLIENT_SECRET: !!process.env.MS_CLIENT_SECRET,
     MS_EMAIL_FROM: process.env.MS_EMAIL_FROM || null,
     NODE_VERSION: process.version,
+    all_MS_keys_found: allKeys,
+    total_env_vars: Object.keys(process.env).length,
   });
 });
 
