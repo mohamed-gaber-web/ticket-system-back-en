@@ -105,7 +105,7 @@ const getEmailStats = async (req, res) => {
 // @access  Admin
 const sendTestEmail = async (req, res) => {
   try {
-    const { to } = req.body;
+    const to = (req.body && req.body.to) || req.query.to;
 
     if (!to) {
       return res.status(400).json({

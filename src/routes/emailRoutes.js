@@ -17,6 +17,9 @@ router.get("/stats", getEmailStats);
 // POST /api/emails/test - Send test email to verify SMTP
 router.post("/test", sendTestEmail);
 
+// GET /api/emails/test?to=email@example.com - Quick browser test
+router.get("/test", sendTestEmail);
+
 // POST /api/emails/send-comment - Send a comment to external email recipients
 router.post("/send-comment", sendCommentEmailToExternal);
 
