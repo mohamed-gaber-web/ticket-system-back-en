@@ -1,7 +1,7 @@
-import nodemailer from "nodemailer";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { ClientSecretCredential } from "@azure/identity";
 import EmailLog from "../models/EmailLog.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -9,37 +9,60 @@ const __dirname = path.dirname(__filename);
 const TEMPLATES_DIR = path.join(__dirname, "../templates/email");
 
 // ---------------------------------------------------------------------------
-// Transporter
+// Microsoft 365 / Azure AD — Graph API via Client Credentials
 // ---------------------------------------------------------------------------
 
-const createTransporter = () => {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.error("❌ Email configuration missing in .env file");
-    console.error("Please set EMAIL_USER and EMAIL_PASSWORD in your .env file");
-    throw new Error("Email configuration missing");
+let _credential = null;
+
+const getCredential = () => {
+  if (!_credential) {
+    const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET } = process.env;
+    if (!MS_TENANT_ID || !MS_CLIENT_ID || !MS_CLIENT_SECRET) {
+      throw new Error(
+        "Microsoft 365 email config missing. Set MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET in .env"
+      );
+    }
+    _credential = new ClientSecretCredential(MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET);
+  }
+  return _credential;
+};
+
+const getAccessToken = async () => {
+  const token = await getCredential().getToken("https://graph.microsoft.com/.default");
+  return token.token;
+};
+
+const sendViaMicrosoftGraph = async (from, to, subject, html) => {
+  const accessToken = await getAccessToken();
+
+  const response = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/sendMail`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: "HTML", content: html },
+          toRecipients: [{ emailAddress: { address: to } }],
+        },
+        saveToSentItems: false,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(
+      errorBody?.error?.message || `Graph API error: ${response.status} ${response.statusText}`
+    );
   }
 
-  if (
-    process.env.EMAIL_USER === "your-email@gmail.com" ||
-    process.env.EMAIL_PASSWORD === "your-app-password"
-  ) {
-    console.error("❌ Email configuration contains placeholder values");
-    console.error("Please update EMAIL_USER and EMAIL_PASSWORD with real values in .env file");
-    throw new Error("Email configuration not properly set");
-  }
-
-  return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port: parseInt(process.env.EMAIL_PORT) || 587,
-    secure: false,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD,
-    },
-    tls: {
-      rejectUnauthorized: false,
-    },
-  });
+  // Graph sendMail returns 202 with no body
+  return { messageId: `graph-${Date.now()}` };
 };
 
 // ---------------------------------------------------------------------------
@@ -79,16 +102,10 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
     const allVars = { frontendUrl, ...variables };
     const html = loadTemplate(templateName, allVars);
 
-    const transporter = createTransporter();
+    const senderAddress = process.env.MS_EMAIL_FROM || process.env.EMAIL_USER;
+    if (!senderAddress) throw new Error("Email sender address missing. Set MS_EMAIL_FROM in .env");
 
-    const mailOptions = {
-      from: `"${fromName}" <${process.env.EMAIL_USER}>`,
-      to,
-      subject,
-      html,
-    };
-
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendViaMicrosoftGraph(senderAddress, to, subject, html);
 
     console.log(`✅ Email sent to ${to} [${templateName}] - ${info.messageId}`);
 
@@ -107,15 +124,6 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error(`❌ Email failed to ${to} [${templateName}]:`, error.message);
-
-    if (error.message.includes("Invalid login")) {
-      console.error("\n📝 Gmail Authentication Failed!");
-      console.error("Possible solutions:");
-      console.error("1. Use Gmail App Password (not your regular password)");
-      console.error("2. Enable 2-Step Verification in your Google Account");
-      console.error("3. Generate an App Password: https://myaccount.google.com/apppasswords");
-      console.error("4. Or use a test email service like Ethereal: https://ethereal.email\n");
-    }
 
     // Log failure
     EmailLog.create({
