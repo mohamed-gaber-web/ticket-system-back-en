@@ -1184,6 +1184,15 @@ const createSubTicket = async (req, res) => {
       .populate("source", "name")
       .populate("parentTicket", "ticketNumber subject status");
 
+    notifyAndEmail("new_ticket", {
+      ticket: populatedSubTicket,
+      ticketNumber: populatedSubTicket.ticketNumber,
+      subject: populatedSubTicket.subject,
+      recipients: [
+        { userId: populatedSubTicket.customer._id || populatedSubTicket.customer, userType: "customer" },
+      ],
+    }).catch((err) => console.error("Sub-ticket email notification error:", err.message));
+
     res.status(201).json({
       success: true,
       message: "Sub-ticket created successfully",

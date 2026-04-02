@@ -364,6 +364,22 @@ export const sendNewCommentEmail = async (ticket, recipient, commenter, commentT
   );
 };
 
+export const sendConsultantWelcomeEmail = async (consultant) => {
+  return sendEmail(
+    consultant.email,
+    "Welcome to the Ticketing System",
+    "welcome-consultant",
+    {
+      headerTitle: "Account Created",
+      firstName: consultant.firstName,
+      lastName: consultant.lastName,
+      email: consultant.email,
+      role: consultant.role || "consultant",
+    },
+    { userId: consultant._id, userType: "consultant" }
+  );
+};
+
 export const sendWelcomeEmail = async (customer) => {
   return sendEmail(
     customer.email,

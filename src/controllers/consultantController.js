@@ -1,4 +1,5 @@
 import Consultant from "../models/Consltant.js";
+import { sendConsultantWelcomeEmail } from "../utils/emailService.js";
 
 // @desc    Get all consultants
 // @route   GET /api/consultants
@@ -128,6 +129,10 @@ const createConsultant = async (req, res) => {
 
     const consultantResponse = await Consultant.findById(consultant._id).select(
       "-password -refreshToken"
+    );
+
+    sendConsultantWelcomeEmail(consultant).catch((err) =>
+      console.error("Consultant welcome email error:", err.message)
     );
 
     res.status(201).json({
