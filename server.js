@@ -12,7 +12,7 @@ import { startSLACron } from "./src/utils/slaCron.js";
 dotenv.config();
 
 // Debug: log which email env vars are present at startup
-console.log("=== ENV CHECK ===");
+console.log("=== ENV CHECK === PID:", process.pid);
 console.log("MS_TENANT_ID:", !!process.env.MS_TENANT_ID);
 console.log("MS_CLIENT_ID:", !!process.env.MS_CLIENT_ID);
 console.log("MS_CLIENT_SECRET:", !!process.env.MS_CLIENT_SECRET);
