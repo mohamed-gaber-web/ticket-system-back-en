@@ -29,8 +29,13 @@ const getCredential = () => {
 };
 
 const getAccessToken = async () => {
-  const token = await getCredential().getToken("https://graph.microsoft.com/.default");
-  return token.token;
+  try {
+    const token = await getCredential().getToken("https://graph.microsoft.com/.default");
+    return token.token;
+  } catch (err) {
+    const detail = err.errorResponse?.errorDescription || err.message || String(err);
+    throw new Error(`Azure token error: ${detail}`);
+  }
 };
 
 const sendViaMicrosoftGraph = async (from, to, subject, html) => {
