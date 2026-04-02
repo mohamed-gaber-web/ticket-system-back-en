@@ -12,19 +12,20 @@ const TEMPLATES_DIR = path.join(__dirname, "../templates/email");
 // Microsoft 365 / Azure AD — Graph API via Client Credentials
 // ---------------------------------------------------------------------------
 
-let _credential = null;
-
 const getCredential = () => {
-  if (!_credential) {
-    const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET } = process.env;
-    if (!MS_TENANT_ID || !MS_CLIENT_ID || !MS_CLIENT_SECRET) {
-      throw new Error(
-        "Microsoft 365 email config missing. Set MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET in .env"
-      );
-    }
-    _credential = new ClientSecretCredential(MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET);
+  const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET } = process.env;
+
+  const missing = [
+    !MS_TENANT_ID && "MS_TENANT_ID",
+    !MS_CLIENT_ID && "MS_CLIENT_ID",
+    !MS_CLIENT_SECRET && "MS_CLIENT_SECRET",
+  ].filter(Boolean);
+
+  if (missing.length > 0) {
+    throw new Error(`Missing email env vars: ${missing.join(", ")}`);
   }
-  return _credential;
+
+  return new ClientSecretCredential(MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET);
 };
 
 const getAccessToken = async () => {
