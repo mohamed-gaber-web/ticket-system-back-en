@@ -30,6 +30,8 @@ const getCredential = () => {
 
 const getAccessToken = async () => {
   try {
+    const secret = process.env.MS_CLIENT_SECRET || "";
+    console.log(`[Azure Debug] TENANT=${process.env.MS_TENANT_ID} CLIENT=${process.env.MS_CLIENT_ID} SECRET_LEN=${secret.length} SECRET_START=${secret.slice(0, 4)} SECRET_END=${secret.slice(-4)}`);
     const token = await getCredential().getToken("https://graph.microsoft.com/.default");
     return token.token;
   } catch (err) {
