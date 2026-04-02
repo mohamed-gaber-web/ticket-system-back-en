@@ -105,6 +105,11 @@ const getEmailStats = async (req, res) => {
 // @access  Admin
 const sendTestEmail = async (req, res) => {
   try {
+    console.log("=== SEND TEST EMAIL === PID:", process.pid,
+      "| MS_TENANT_ID:", !!process.env.MS_TENANT_ID,
+      "| MS_CLIENT_ID:", !!process.env.MS_CLIENT_ID,
+      "| MS_CLIENT_SECRET:", !!process.env.MS_CLIENT_SECRET
+    );
     const to = (req.body && req.body.to) || req.query.to;
 
     if (!to) {
