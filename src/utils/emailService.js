@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { ClientSecretCredential } from "@azure/identity";
 import EmailLog from "../models/EmailLog.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -9,10 +8,10 @@ const __dirname = path.dirname(__filename);
 const TEMPLATES_DIR = path.join(__dirname, "../templates/email");
 
 // ---------------------------------------------------------------------------
-// Microsoft 365 / Azure AD — Graph API via Client Credentials
+// Microsoft 365 / Azure AD — Graph API via Client Credentials (direct HTTP)
 // ---------------------------------------------------------------------------
 
-const getCredential = () => {
+const getAccessToken = async () => {
   const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET } = process.env;
 
   const missing = [
@@ -25,19 +24,31 @@ const getCredential = () => {
     throw new Error(`Missing email env vars: ${missing.join(", ")}`);
   }
 
-  return new ClientSecretCredential(MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET);
-};
+  const params = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: MS_CLIENT_ID,
+    client_secret: MS_CLIENT_SECRET,
+    scope: "https://graph.microsoft.com/.default",
+  });
 
-const getAccessToken = async () => {
-  try {
-    const secret = process.env.MS_CLIENT_SECRET || "";
-    console.log(`[Azure Debug] TENANT=${process.env.MS_TENANT_ID} CLIENT=${process.env.MS_CLIENT_ID} SECRET_LEN=${secret.length} SECRET_START=${secret.slice(0, 4)} SECRET_END=${secret.slice(-4)}`);
-    const token = await getCredential().getToken("https://graph.microsoft.com/.default");
-    return token.token;
-  } catch (err) {
-    const detail = err.errorResponse?.errorDescription || err.message || String(err);
-    throw new Error(`Azure token error: ${detail}`);
+  const response = await fetch(
+    `https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      `Azure token error: ${data.error} - ${data.error_description || response.statusText}`
+    );
   }
+
+  return data.access_token;
 };
 
 const sendViaMicrosoftGraph = async (from, to, subject, html) => {
