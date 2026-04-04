@@ -514,6 +514,8 @@ const updateTicket = async (req, res) => {
       updateData.firstResponseAt = new Date();
     }
 
+    const oldStatus = ticket.status;
+
     ticket = await Ticket.findByIdAndUpdate(
       req.params.id,
       updateData,
@@ -534,6 +536,29 @@ const updateTicket = async (req, res) => {
       .populate("serviceType", "name")
       .populate("scope", "name")
       .populate("source", "name");
+
+    // Send email when status changes to resolved or closed
+    if (status && status !== oldStatus) {
+      const recipients = [];
+      if (ticket.customer?._id) {
+        recipients.push({ userId: ticket.customer._id, userType: "customer" });
+      }
+      if (status === "resolved") {
+        notifyAndEmail("ticket_resolved", {
+          ticket,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          recipients,
+        }).catch((err) => console.error("Email notification error:", err.message));
+      } else if (status === "closed") {
+        notifyAndEmail("ticket_closed", {
+          ticket,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          recipients,
+        }).catch((err) => console.error("Email notification error:", err.message));
+      }
+    }
 
     res.status(200).json({
       success: true,
