@@ -604,7 +604,7 @@ const updateTicketStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ["new", "assigned", "in_progress", "resolved", "closed", "reopened"];
+    const validStatuses = ["new", "assigned", "in_progress", "pending_customer", "resolved", "closed", "reopened"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -1043,7 +1043,7 @@ const getTicketsByStatus = async (req, res) => {
     const { status } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const validStatuses = ["new", "assigned", "in_progress", "resolved", "closed", "reopened"];
+    const validStatuses = ["new", "assigned", "in_progress", "pending_customer", "resolved", "closed", "reopened"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,

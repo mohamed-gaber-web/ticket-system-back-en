@@ -233,6 +233,8 @@ export const sendTicketCreatedEmail = async (ticket, customer) => {
       subject: ticket.subject,
       priority: ticket.priority || "medium",
       ticketUrl,
+      company: customer.companyName || "N/A",
+      createdBy: customer.contactPerson || customer.companyName || "N/A",
     },
     { ticketId: ticket._id, userId: customer._id, userType: "customer" }
   );

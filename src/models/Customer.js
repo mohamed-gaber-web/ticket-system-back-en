@@ -1,11 +1,16 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
+import Company from "./Company.js";
 
 const customerSchema = new mongoose.Schema(
   {
+    company: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company is required"],
+    },
     companyName: {
       type: String,
-      required: [true, "Company name is required"],
       trim: true,
       maxlength: [200, "Company name cannot exceed 200 characters"],
     },
@@ -53,7 +58,7 @@ const customerSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "inactive", "suspended"],
+      enum: ["active", "inactive", "suspended", "pending"],
       default: "active",
     },
     slaMapping: {
@@ -107,6 +112,16 @@ customerSchema.virtual("tickets", {
 // Index for faster queries
 customerSchema.index({ status: 1 });
 customerSchema.index({ companyName: 1 });
+
+// Sync companyName from company reference before saving
+customerSchema.pre("save", async function () {
+  if (this.isModified("company") && this.company) {
+    const companyDoc = await Company.findById(this.company).select("name").lean();
+    if (companyDoc) {
+      this.companyName = companyDoc.name;
+    }
+  }
+});
 
 // Hash password before saving
 customerSchema.pre("save", async function () {

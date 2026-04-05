@@ -1,5 +1,6 @@
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
+import Company from "../models/Company.js";
 import { sendBulkConsultantAssignmentEmails, sendWelcomeEmail } from "../utils/emailService.js";
 
 // @desc    Get all customers
@@ -26,6 +27,7 @@ const getAllCustomers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const customers = await Customer.find(query)
+      .populate("company", "name description isActive")
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
@@ -59,6 +61,7 @@ const getAllCustomers = async (req, res) => {
 const getCustomerById = async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id)
+      .populate("company", "name description isActive")
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
@@ -100,7 +103,7 @@ const getCustomerById = async (req, res) => {
 const createCustomer = async (req, res) => {
   try {
     const {
-      companyName,
+      company,
       contactPerson,
       email,
       password,
@@ -115,6 +118,11 @@ const createCustomer = async (req, res) => {
       consultants,
     } = req.body;
 
+    const companyDoc = await Company.findById(company);
+    if (!companyDoc) {
+      return res.status(400).json({ success: false, message: "Company not found" });
+    }
+
     const customerExists = await Customer.findOne({ email });
 
     if (customerExists) {
@@ -125,7 +133,7 @@ const createCustomer = async (req, res) => {
     }
 
     const customer = await Customer.create({
-      companyName,
+      company,
       contactPerson,
       email,
       password,
@@ -141,6 +149,7 @@ const createCustomer = async (req, res) => {
     });
 
     const populatedCustomer = await Customer.findById(customer._id)
+      .populate("company", "name description isActive")
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
@@ -163,7 +172,7 @@ const createCustomer = async (req, res) => {
         if (consultantDetails.length > 0) {
           emailResults = await sendBulkConsultantAssignmentEmails(
             consultantDetails,
-            companyName,
+            companyDoc.name,
             email
           );
 
@@ -215,7 +224,7 @@ const createCustomer = async (req, res) => {
 const updateCustomer = async (req, res) => {
   try {
     const {
-      companyName,
+      company,
       contactPerson,
       email,
       password,
@@ -239,6 +248,14 @@ const updateCustomer = async (req, res) => {
       });
     }
 
+    if (company && company.toString() !== customer.company?.toString()) {
+      const companyDoc = await Company.findById(company);
+      if (!companyDoc) {
+        return res.status(400).json({ success: false, message: "Company not found" });
+      }
+      customer.company = company;
+    }
+
     if (email && email !== customer.email) {
       const emailExists = await Customer.findOne({ email });
       if (emailExists) {
@@ -250,7 +267,6 @@ const updateCustomer = async (req, res) => {
       customer.email = email;
     }
 
-    customer.companyName = companyName || customer.companyName;
     customer.contactPerson = contactPerson || customer.contactPerson;
     customer.phone = phone || customer.phone;
     customer.address = address || customer.address;
@@ -284,6 +300,7 @@ const updateCustomer = async (req, res) => {
     await customer.save();
 
     const populatedCustomer = await Customer.findById(customer._id)
+      .populate("company", "name description isActive")
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
@@ -398,6 +415,9 @@ const getCustomerStats = async (req, res) => {
     const suspendedCustomers = await Customer.countDocuments({
       status: "suspended",
     });
+    const pendingCustomers = await Customer.countDocuments({
+      status: "pending",
+    });
 
     res.status(200).json({
       success: true,
@@ -406,6 +426,7 @@ const getCustomerStats = async (req, res) => {
         active: activeCustomers,
         inactive: inactiveCustomers,
         suspended: suspendedCustomers,
+        pending: pendingCustomers,
       },
     });
   } catch (error) {

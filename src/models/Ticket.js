@@ -38,6 +38,7 @@ const ticketSchema = mongoose.Schema(
         "new",
         "assigned",
         "in_progress",
+        "pending_customer",
         "resolved",
         "closed",
         "reopened",
