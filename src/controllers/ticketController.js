@@ -537,17 +537,23 @@ const updateTicket = async (req, res) => {
       .populate("scope", "name")
       .populate("source", "name");
 
-    // Send email when status changes to resolved or closed
+    // Send email on any status change
     if (status && status !== oldStatus) {
       const recipients = [];
       if (ticket.customer?._id) {
         recipients.push({ userId: ticket.customer._id, userType: "customer" });
       }
+      if (ticket.assignedBy?._id) {
+        recipients.push({ userId: ticket.assignedBy._id, userType: "consultant" });
+      }
+
       if (status === "resolved") {
         notifyAndEmail("ticket_resolved", {
           ticket,
           ticketNumber: ticket.ticketNumber,
           subject: ticket.subject,
+          oldStatus,
+          assignee: ticket.assignedBy || null,
           recipients,
         }).catch((err) => console.error("Email notification error:", err.message));
       } else if (status === "closed") {
@@ -555,6 +561,18 @@ const updateTicket = async (req, res) => {
           ticket,
           ticketNumber: ticket.ticketNumber,
           subject: ticket.subject,
+          oldStatus,
+          assignee: ticket.assignedBy || null,
+          recipients,
+        }).catch((err) => console.error("Email notification error:", err.message));
+      } else {
+        notifyAndEmail("status_change", {
+          ticket,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          oldStatus,
+          newStatus: status,
+          assignee: ticket.assignedBy || null,
           recipients,
         }).catch((err) => console.error("Email notification error:", err.message));
       }
@@ -657,6 +675,8 @@ const updateTicketStatus = async (req, res) => {
         ticket,
         ticketNumber: ticket.ticketNumber,
         subject: ticket.subject,
+        oldStatus,
+        assignee: ticket.assignedBy || null,
         recipients,
       }).catch((err) => console.error("Email notification error:", err.message));
     } else if (status === "closed") {
@@ -664,6 +684,8 @@ const updateTicketStatus = async (req, res) => {
         ticket,
         ticketNumber: ticket.ticketNumber,
         subject: ticket.subject,
+        oldStatus,
+        assignee: ticket.assignedBy || null,
         recipients,
       }).catch((err) => console.error("Email notification error:", err.message));
     } else {

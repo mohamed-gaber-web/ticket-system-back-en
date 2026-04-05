@@ -130,12 +130,18 @@ const sendEventEmail = async (eventType, data) => {
       if (customer) {
         await sendTicketResolvedEmail(ticket, customer);
       }
+      if (data.assignee) {
+        await sendStatusChangeEmail(ticket, data.assignee, data.oldStatus || "", "resolved");
+      }
       break;
     }
     case "ticket_closed": {
       const customer = await resolveCustomer(ticket.customer);
       if (customer) {
         await sendTicketClosedEmail(ticket, customer);
+      }
+      if (data.assignee) {
+        await sendStatusChangeEmail(ticket, data.assignee, data.oldStatus || "", "closed");
       }
       break;
     }
