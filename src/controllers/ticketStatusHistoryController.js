@@ -391,7 +391,7 @@ const getStatusHistoryByTransition = async (req, res) => {
       "new",
       "assigned",
       "in_progress",
-      "pending_customer",
+      "customer_pending",
       "resolved",
       "closed",
       "reopened",
