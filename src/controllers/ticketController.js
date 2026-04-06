@@ -94,7 +94,6 @@ const getAllTickets = async (req, res) => {
       scope,
       source,
       startDate,
-      endDate,
       createdDateFrom,
       createdDateTo,
       closedDateFrom,
@@ -172,10 +171,6 @@ const getAllTickets = async (req, res) => {
 
     if (startDate) {
       query.startDate = { ...query.startDate, $gte: new Date(startDate) };
-    }
-
-    if (endDate) {
-      query.endDate = { ...query.endDate, $lte: new Date(endDate) };
     }
 
     if (createdDateFrom || createdDateTo) {
@@ -369,8 +364,6 @@ const createTicket = async (req, res) => {
       assignedTeam,
       assignedBy,
       startDate,
-      endDate,
-      estimatedTime,
       environment,
       feature,
       department,
@@ -419,8 +412,6 @@ const createTicket = async (req, res) => {
       assignedTeam,
       assignedBy,
       startDate,
-      endDate,
-      estimatedTime,
       environment,
       feature,
       department,
@@ -505,8 +496,6 @@ const updateTicket = async (req, res) => {
       assignedBy,
       sla,
       startDate,
-      endDate,
-      estimatedTime,
       environment,
       feature,
       department,
@@ -536,8 +525,6 @@ const updateTicket = async (req, res) => {
       assignedBy,
       sla,
       startDate,
-      endDate,
-      estimatedTime,
       environment,
       feature,
       department,
@@ -1211,8 +1198,6 @@ const createSubTicket = async (req, res) => {
       assignedTeam,
       assignedBy,
       startDate,
-      endDate,
-      estimatedTime,
       environment,
       feature,
       department,
@@ -1256,8 +1241,6 @@ const createSubTicket = async (req, res) => {
       parentTicket: parentTicketId,
       isSubTicket: true,
       startDate,
-      endDate,
-      estimatedTime,
       environment: environment || parentTicket.environment,
       feature: feature || parentTicket.feature,
       department: department || parentTicket.department,

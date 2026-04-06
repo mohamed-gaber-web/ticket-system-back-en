@@ -103,13 +103,6 @@ const ticketSchema = mongoose.Schema(
     startDate: {
       type: Date,
     },
-    endDate: {
-      type: Date,
-    },
-    estimatedTime: {
-      type: Number, // in hours
-      min: 0,
-    },
     estimationStartDate: {
       type: Date,
     },
@@ -203,7 +196,6 @@ ticketSchema.index({ slaDueDate: 1 });
 ticketSchema.index({ parentTicket: 1 });
 ticketSchema.index({ isSubTicket: 1 });
 ticketSchema.index({ startDate: 1 });
-ticketSchema.index({ endDate: 1 });
 ticketSchema.index({ estimationStartDate: 1 });
 ticketSchema.index({ deliveryEstimationDate: 1 });
 ticketSchema.index({ environment: 1 });
