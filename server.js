@@ -3,8 +3,6 @@ import dotenv from "dotenv";
 import { connectDB } from "./src/config/db.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import swaggerUi from "swagger-ui-express";
-import swaggerSpec from "./src/config/swagger.js";
 import routes from "./src/routes/index.js";
 import { startSLACron } from "./src/utils/slaCron.js";
 
@@ -30,16 +28,20 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Swagger API Documentation
-app.use(
-  "/api-docs",
-  swaggerUi.serve,
-  swaggerUi.setup(swaggerSpec, {
-    explorer: true,
-    customCss: ".swagger-ui .topbar { display: none }",
-    customSiteTitle: "Ticketing System API Documentation",
-  })
-);
+// Swagger API Documentation — dev only
+if (process.env.NODE_ENV !== "production") {
+  const { default: swaggerUi } = await import("swagger-ui-express");
+  const { default: swaggerSpec } = await import("./src/config/swagger.js");
+  app.use(
+    "/api-docs",
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, {
+      explorer: true,
+      customCss: ".swagger-ui .topbar { display: none }",
+      customSiteTitle: "Ticketing System API Documentation",
+    })
+  );
+}
 
 // Root route
 app.get("/", (req, res) => {
