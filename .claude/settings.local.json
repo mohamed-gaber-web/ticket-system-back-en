@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")"
+      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")",
+      "Bash(node --input-type=module --check)",
+      "Bash(node --check src/utils/workingHoursCron.js)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(node --check src/utils/emailHelper.js)",
+      "Bash(node --check server.js)"
     ]
   }
 }

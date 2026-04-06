@@ -141,6 +141,15 @@ const ticketSchema = mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Source",
     },
+    notifyEmails: {
+      type: [String],
+      default: [],
+      validate: {
+        validator: (emails) =>
+          emails.every((e) => /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(e)),
+        message: "One or more notify emails are invalid",
+      },
+    },
   },
   {
     timestamps: true,

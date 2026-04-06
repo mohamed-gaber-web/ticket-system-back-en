@@ -54,6 +54,10 @@ const getAccessToken = async () => {
 const sendViaMicrosoftGraph = async (from, to, subject, html) => {
   const accessToken = await getAccessToken();
 
+  // `to` can be a string or an array of strings
+  const addresses = Array.isArray(to) ? to : [to];
+  const toRecipients = addresses.map((addr) => ({ emailAddress: { address: addr } }));
+
   const response = await fetch(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/sendMail`,
     {
@@ -66,7 +70,7 @@ const sendViaMicrosoftGraph = async (from, to, subject, html) => {
         message: {
           subject,
           body: { contentType: "HTML", content: html },
-          toRecipients: [{ emailAddress: { address: to } }],
+          toRecipients,
         },
         saveToSentItems: false,
       }),
@@ -126,11 +130,12 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
 
     const info = await sendViaMicrosoftGraph(senderAddress, to, subject, html);
 
-    console.log(`✅ Email sent to ${to} [${templateName}] - ${info.messageId}`);
+    const toLabel = Array.isArray(to) ? to.join(", ") : to;
+    console.log(`✅ Email sent to ${toLabel} [${templateName}] - ${info.messageId}`);
 
     // Log to database (fire-and-forget)
     EmailLog.create({
-      to,
+      to: toLabel,
       subject,
       templateName,
       status: "sent",
@@ -142,11 +147,12 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
 
     return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error(`❌ Email failed to ${to} [${templateName}]:`, error.message);
+    const toLabel = Array.isArray(to) ? to.join(", ") : to;
+    console.error(`❌ Email failed to ${toLabel} [${templateName}]:`, error.message);
 
     // Log failure
     EmailLog.create({
-      to,
+      to: toLabel,
       subject,
       templateName,
       status: "failed",
@@ -218,12 +224,16 @@ export const sendPasswordResetEmail = async (userEmail, userName, resetToken) =>
   );
 };
 
-export const sendTicketCreatedEmail = async (ticket, customer) => {
+export const sendTicketCreatedEmail = async (ticket, customer, notifyEmails = []) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
 
+  // Merge customer email with additional notify emails (deduplicated)
+  const extraEmails = Array.isArray(notifyEmails) ? notifyEmails : [];
+  const allRecipients = [...new Set([customer.email, ...extraEmails].filter(Boolean))];
+
   return sendEmail(
-    customer.email,
+    allRecipients,
     `Ticket Created: ${ticket.ticketNumber}`,
     "ticket-created",
     {

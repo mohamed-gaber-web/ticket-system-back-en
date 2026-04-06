@@ -371,6 +371,7 @@ const createTicket = async (req, res) => {
       serviceType,
       scope,
       source,
+      notifyEmails,
     } = req.body;
 
     // If user is a customer, automatically use their ID
@@ -419,6 +420,7 @@ const createTicket = async (req, res) => {
       serviceType,
       scope,
       source,
+      notifyEmails: Array.isArray(notifyEmails) ? notifyEmails : [],
       estimationStartDate: estimation.estimationStartDate,
       deliveryEstimationDate: estimation.deliveryEstimationDate,
       estimationDays: estimation.estimationDays,
@@ -443,6 +445,7 @@ const createTicket = async (req, res) => {
       ticket: populatedTicket,
       ticketNumber: populatedTicket.ticketNumber,
       subject: populatedTicket.subject,
+      notifyEmails: populatedTicket.notifyEmails || [],
       recipients: [
         { userId: populatedTicket.customer._id || populatedTicket.customer, userType: "customer" },
       ],
@@ -1205,6 +1208,7 @@ const createSubTicket = async (req, res) => {
       serviceType,
       scope,
       source,
+      notifyEmails,
     } = req.body;
 
     // Verify parent ticket exists
@@ -1248,6 +1252,7 @@ const createSubTicket = async (req, res) => {
       serviceType: serviceType || parentTicket.serviceType,
       scope: scope || parentTicket.scope,
       source: source || parentTicket.source,
+      notifyEmails: Array.isArray(notifyEmails) ? notifyEmails : [],
       estimationStartDate: subEstimation.estimationStartDate,
       deliveryEstimationDate: subEstimation.deliveryEstimationDate,
       estimationDays: subEstimation.estimationDays,
@@ -1272,6 +1277,7 @@ const createSubTicket = async (req, res) => {
       ticket: populatedSubTicket,
       ticketNumber: populatedSubTicket.ticketNumber,
       subject: populatedSubTicket.subject,
+      notifyEmails: populatedSubTicket.notifyEmails || [],
       recipients: [
         { userId: populatedSubTicket.customer._id || populatedSubTicket.customer, userType: "customer" },
       ],
