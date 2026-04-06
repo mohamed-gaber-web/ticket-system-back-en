@@ -1,0 +1,18 @@
+<p>Dear {{customerName}},</p>
+
+<p>Your ticket <strong>{{ticketNumber}}</strong> has been automatically closed after {{autoCloseDays}} days in resolved status with no further activity.</p>
+
+<div class="info-box">
+  <h3>Ticket Summary</h3>
+  <p><strong>Ticket Number:</strong> {{ticketNumber}}</p>
+  <p><strong>Subject:</strong> {{subject}}</p>
+  <p><strong>Resolved On:</strong> {{resolvedAt}}</p>
+  <p><strong>Closed On:</strong> {{closedAt}}</p>
+  <p><strong>Status:</strong> <span class="badge badge-closed">Closed</span></p>
+</div>
+
+<p>If you still have questions or the issue has not been fully resolved, please open a new ticket and we will be happy to assist.</p>
+
+<a href="{{ticketUrl}}" class="btn">View Ticket</a>
+
+<p>Best regards,<br>Ticketing System Team</p>

@@ -10,6 +10,9 @@ import {
   sendTicketResolvedEmail,
   sendTicketClosedEmail,
   sendNewCommentEmail,
+  sendAutoCloseEmail,
+  sendPendingReminderEmail,
+  sendDeliveryReminderEmail,
 } from "./emailService.js";
 
 // ---------------------------------------------------------------------------
@@ -48,6 +51,9 @@ const NOTIFICATION_MESSAGES = {
   ticket_resolved: (d) => `Ticket ${d.ticketNumber} has been resolved`,
   ticket_closed: (d) => `Ticket ${d.ticketNumber} has been closed`,
   ticket_reopened: (d) => `Ticket ${d.ticketNumber} has been reopened`,
+  ticket_auto_closed: (d) => `Ticket ${d.ticketNumber} was automatically closed`,
+  pending_reminder: (d) => `Ticket ${d.ticketNumber} is awaiting your response`,
+  delivery_reminder: (d) => `Ticket ${d.ticketNumber} delivery is due in ${d.daysUntilDelivery || "N/A"} day(s)`,
 };
 
 const createNotification = async (eventType, data) => {
@@ -148,6 +154,31 @@ const sendEventEmail = async (eventType, data) => {
     case "new_comment": {
       if (data.recipient && data.commenter && data.commentText) {
         await sendNewCommentEmail(ticket, data.recipient, data.commenter, data.commentText);
+      }
+      break;
+    }
+    case "ticket_auto_closed": {
+      const customer = await resolveCustomer(ticket.customer);
+      if (customer) {
+        await sendAutoCloseEmail(ticket, customer, data);
+      }
+      break;
+    }
+    case "pending_reminder": {
+      const customer = await resolveCustomer(ticket.customer);
+      if (customer) {
+        await sendPendingReminderEmail(ticket, customer, data);
+      }
+      break;
+    }
+    case "delivery_reminder": {
+      // Send to assignee(s) and customer
+      if (data.recipients) {
+        for (const r of data.recipients) {
+          if (r.email) {
+            await sendDeliveryReminderEmail(ticket, r, data);
+          }
+        }
       }
       break;
     }

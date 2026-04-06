@@ -420,6 +420,72 @@ export const sendSlaAlertEmail = async (ticket, assignee, variables = {}) => {
   );
 };
 
+export const sendAutoCloseEmail = async (ticket, customer, variables = {}) => {
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+
+  return sendEmail(
+    customer.email,
+    `Ticket Auto-Closed: ${ticket.ticketNumber}`,
+    "ticket-auto-closed",
+    {
+      headerTitle: "Ticket Automatically Closed",
+      customerName: customer.contactPerson || customer.companyName,
+      ticketNumber: ticket.ticketNumber,
+      subject: ticket.subject,
+      autoCloseDays: variables.autoCloseDays || "N/A",
+      resolvedAt: variables.resolvedAt || "N/A",
+      closedAt: variables.closedAt || new Date().toLocaleDateString(),
+      ticketUrl,
+    },
+    { ticketId: ticket._id, userId: customer._id, userType: "customer" }
+  );
+};
+
+export const sendPendingReminderEmail = async (ticket, customer, variables = {}) => {
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+
+  return sendEmail(
+    customer.email,
+    `Action Required: Ticket ${ticket.ticketNumber} Awaiting Your Response`,
+    "pending-reminder",
+    {
+      headerTitle: "Response Required",
+      customerName: customer.contactPerson || customer.companyName,
+      ticketNumber: ticket.ticketNumber,
+      subject: ticket.subject,
+      pendingDays: variables.pendingDays || "N/A",
+      waitingSince: variables.waitingSince || "N/A",
+      ticketUrl,
+    },
+    { ticketId: ticket._id, userId: customer._id, userType: "customer" }
+  );
+};
+
+export const sendDeliveryReminderEmail = async (ticket, recipient, variables = {}) => {
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+
+  return sendEmail(
+    recipient.email,
+    `Delivery Reminder: Ticket ${ticket.ticketNumber} due in ${variables.daysUntilDelivery || "N/A"} day(s)`,
+    "delivery-reminder",
+    {
+      headerTitle: "Delivery Reminder",
+      recipientName: recipient.contactPerson || recipient.companyName || `${recipient.firstName} ${recipient.lastName}`,
+      ticketNumber: ticket.ticketNumber,
+      subject: ticket.subject,
+      customerName: variables.customerName || "N/A",
+      priority: ticket.priority || "medium",
+      deliveryDate: variables.deliveryDate || "N/A",
+      daysUntilDelivery: variables.daysUntilDelivery || "N/A",
+      ticketUrl,
+    },
+    { ticketId: ticket._id, userId: recipient._id }
+  );
+};
+
 export const sendSlaBreachEmail = async (ticket, assignee, variables = {}) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;

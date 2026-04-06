@@ -1,0 +1,17 @@
+<p>Dear {{customerName}},</p>
+
+<p>We are waiting for your response on ticket <strong>{{ticketNumber}}</strong>. This ticket has been pending your reply for <strong>{{pendingDays}} day(s)</strong>.</p>
+
+<div class="info-box">
+  <h3>Ticket Details</h3>
+  <p><strong>Ticket Number:</strong> {{ticketNumber}}</p>
+  <p><strong>Subject:</strong> {{subject}}</p>
+  <p><strong>Status:</strong> <span class="badge badge-pending">Pending Customer Response</span></p>
+  <p><strong>Waiting Since:</strong> {{waitingSince}}</p>
+</div>
+
+<p>Please reply or update the ticket at your earliest convenience to avoid it being automatically closed.</p>
+
+<a href="{{ticketUrl}}" class="btn">View &amp; Respond</a>
+
+<p>Best regards,<br>Ticketing System Team</p>

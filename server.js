@@ -5,6 +5,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import routes from "./src/routes/index.js";
 import { startSLACron } from "./src/utils/slaCron.js";
+import { startWorkingHoursCron } from "./src/utils/workingHoursCron.js";
 
 // Load environment variables
 dotenv.config();
@@ -76,6 +77,9 @@ const startServer = async () => {
 
       // Start SLA monitoring cron job
       startSLACron();
+
+      // Start working hours cron jobs (auto-close, pending reminders, delivery reminders)
+      startWorkingHoursCron();
     });
   } catch (error) {
     console.error("Failed to start server:", error);
