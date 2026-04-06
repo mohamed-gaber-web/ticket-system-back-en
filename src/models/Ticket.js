@@ -110,6 +110,16 @@ const ticketSchema = mongoose.Schema(
       type: Number, // in hours
       min: 0,
     },
+    estimationStartDate: {
+      type: Date,
+    },
+    deliveryEstimationDate: {
+      type: Date,
+    },
+    estimationDays: {
+      type: Number, // snapshot of WorkingHours.estimationDays at creation time
+      min: 0,
+    },
     environment: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Environment",
@@ -194,6 +204,8 @@ ticketSchema.index({ parentTicket: 1 });
 ticketSchema.index({ isSubTicket: 1 });
 ticketSchema.index({ startDate: 1 });
 ticketSchema.index({ endDate: 1 });
+ticketSchema.index({ estimationStartDate: 1 });
+ticketSchema.index({ deliveryEstimationDate: 1 });
 ticketSchema.index({ environment: 1 });
 ticketSchema.index({ feature: 1 });
 ticketSchema.index({ department: 1 });

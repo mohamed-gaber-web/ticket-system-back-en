@@ -4,6 +4,48 @@ import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
 import TicketComment from "../models/TicketComment.js";
 import { notifyAndEmail } from "../utils/emailHelper.js";
+import WorkingHours from "../models/WorkingHours.js";
+import Holiday from "../models/Holiday.js";
+import { getEstimationStartDate, addWorkingDays } from "../utils/estimationUtils.js";
+
+// Load working-hours config + holidays, auto-create defaults if missing
+const loadEstimationConfig = async () => {
+  let config = await WorkingHours.findOne().lean();
+  if (!config) config = await WorkingHours.create({});
+  const holidays = await Holiday.find().select("date").lean().then((docs) => docs.map((d) => d.date));
+  return { config, holidays };
+};
+
+// Calculate estimation fields for a ticket
+const calcEstimation = async (customerId, createdAt) => {
+  const { config, holidays } = await loadEstimationConfig();
+
+  const lastTicket = await Ticket.findOne({
+    customer: customerId,
+    deliveryEstimationDate: { $exists: true, $ne: null },
+  })
+    .sort({ createdAt: -1 })
+    .select("deliveryEstimationDate")
+    .lean();
+
+  const lastDeliveryDate = lastTicket?.deliveryEstimationDate ?? null;
+
+  const estimationStartDate = getEstimationStartDate(
+    createdAt,
+    config,
+    holidays,
+    lastDeliveryDate
+  );
+
+  const deliveryEstimationDate = addWorkingDays(
+    estimationStartDate,
+    config.estimationDays,
+    config.weekendDays,
+    holidays
+  );
+
+  return { estimationStartDate, deliveryEstimationDate, estimationDays: config.estimationDays };
+};
 
 // Helper function to populate commentBy based on userType
 const populateCommentBy = async (comment) => {
@@ -363,6 +405,9 @@ const createTicket = async (req, res) => {
     // Get SLA from customer if mapped
     const sla = customerExists.slaMapping || null;
 
+    const now = new Date();
+    const estimation = await calcEstimation(customer, now);
+
     const ticket = await Ticket.create({
       customer,
       subject,
@@ -383,6 +428,9 @@ const createTicket = async (req, res) => {
       serviceType,
       scope,
       source,
+      estimationStartDate: estimation.estimationStartDate,
+      deliveryEstimationDate: estimation.deliveryEstimationDate,
+      estimationDays: estimation.estimationDays,
     });
 
     const populatedTicket = await Ticket.findById(ticket._id)
@@ -1192,6 +1240,9 @@ const createSubTicket = async (req, res) => {
     }
 
     // Create sub-ticket with parent ticket's customer and SLA
+    const subNow = new Date();
+    const subEstimation = await calcEstimation(parentTicket.customer, subNow);
+
     const subTicket = await Ticket.create({
       customer: parentTicket.customer,
       subject,
@@ -1214,6 +1265,9 @@ const createSubTicket = async (req, res) => {
       serviceType: serviceType || parentTicket.serviceType,
       scope: scope || parentTicket.scope,
       source: source || parentTicket.source,
+      estimationStartDate: subEstimation.estimationStartDate,
+      deliveryEstimationDate: subEstimation.deliveryEstimationDate,
+      estimationDays: subEstimation.estimationDays,
     });
 
     const populatedSubTicket = await Ticket.findById(subTicket._id)

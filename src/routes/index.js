@@ -24,6 +24,7 @@ import versionNumberRoutes from "./versionNumberRoutes.js";
 import sourceRoutes from "./sourceRoutes.js";
 import companyRoutes from "./companyRoutes.js";
 import emailRoutes from "./emailRoutes.js";
+import workingHoursRoutes from "./workingHoursRoutes.js";
 
 const router = express.Router();
 
@@ -102,6 +103,9 @@ router.use("/companies", companyRoutes);
 
 // Email routes
 router.use("/emails", emailRoutes);
+
+// Working Hours & Holidays routes
+router.use("/working-hours", workingHoursRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);
