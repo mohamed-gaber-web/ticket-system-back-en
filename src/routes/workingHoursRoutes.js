@@ -21,19 +21,19 @@ router
 router.post(
   "/holidays/bulk",
   protect,
-  authorizeRole("admin", "senior_consultant"),
+  authorizeRole("admin", "senior_consultant", "consultant"),
   addHolidaysBulk
 );
 
 router
   .route("/holidays")
   .get(protect, getHolidays)
-  .post(protect, authorizeRole("admin", "senior_consultant"), addHoliday);
+  .post(protect, authorizeRole("admin", "senior_consultant", "consultant"), addHoliday);
 
 router.delete(
   "/holidays/:id",
   protect,
-  authorizeRole("admin", "senior_consultant"),
+  authorizeRole("admin", "senior_consultant", "consultant"),
   deleteHoliday
 );
 
