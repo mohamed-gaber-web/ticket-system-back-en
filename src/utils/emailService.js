@@ -207,9 +207,9 @@ export const sendBulkConsultantAssignmentEmails = async (
   return results;
 };
 
-export const sendPasswordResetEmail = async (userEmail, userName, resetToken) => {
+export const sendPasswordResetEmail = async (userEmail, userName, resetToken, userType = "customer") => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-  const resetUrl = `${frontendUrl}/reset-password/${resetToken}`;
+  const resetUrl = `${frontendUrl}/reset-password/${userType}/${resetToken}`;
 
   return sendEmail(
     userEmail,
@@ -348,6 +348,25 @@ export const sendTicketClosedEmail = async (ticket, customer) => {
       customerName: customer.contactPerson || customer.companyName,
       ticketNumber: ticket.ticketNumber,
       subject: ticket.subject,
+    },
+    { ticketId: ticket._id, userId: customer._id, userType: "customer" }
+  );
+};
+
+export const sendTicketDeliveredEmail = async (ticket, customer) => {
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+
+  return sendEmail(
+    customer.email,
+    `Ticket Delivered: ${ticket.ticketNumber}`,
+    "ticket-delivered",
+    {
+      headerTitle: "Ticket Delivered",
+      customerName: customer.contactPerson || customer.companyName,
+      ticketNumber: ticket.ticketNumber,
+      subject: ticket.subject,
+      ticketUrl,
     },
     { ticketId: ticket._id, userId: customer._id, userType: "customer" }
   );

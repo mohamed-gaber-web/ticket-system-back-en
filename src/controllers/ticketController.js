@@ -545,6 +545,9 @@ const updateTicket = async (req, res) => {
       if (status === "closed" && !ticket.closedAt) {
         updateData.closedAt = new Date();
       }
+      if (status === "delivered" && !ticket.deliveredAt) {
+        updateData.deliveredAt = new Date();
+      }
     }
 
     // Set first response time if being assigned for the first time
@@ -596,6 +599,15 @@ const updateTicket = async (req, res) => {
         }).catch((err) => console.error("Email notification error:", err.message));
       } else if (status === "closed") {
         notifyAndEmail("ticket_closed", {
+          ticket,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          oldStatus,
+          assignee: ticket.assignedBy || null,
+          recipients,
+        }).catch((err) => console.error("Email notification error:", err.message));
+      } else if (status === "delivered") {
+        notifyAndEmail("ticket_delivered", {
           ticket,
           ticketNumber: ticket.ticketNumber,
           subject: ticket.subject,
@@ -660,7 +672,7 @@ const updateTicketStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "closed", "reopened"];
+    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "closed", "reopened", "delivered"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -685,6 +697,9 @@ const updateTicketStatus = async (req, res) => {
     }
     if (status === "closed" && !ticket.closedAt) {
       updateData.closedAt = new Date();
+    }
+    if (status === "delivered" && !ticket.deliveredAt) {
+      updateData.deliveredAt = new Date();
     }
 
     const oldStatus = ticket.status;
@@ -719,6 +734,15 @@ const updateTicketStatus = async (req, res) => {
       }).catch((err) => console.error("Email notification error:", err.message));
     } else if (status === "closed") {
       notifyAndEmail("ticket_closed", {
+        ticket,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        oldStatus,
+        assignee: ticket.assignedBy || null,
+        recipients,
+      }).catch((err) => console.error("Email notification error:", err.message));
+    } else if (status === "delivered") {
+      notifyAndEmail("ticket_delivered", {
         ticket,
         ticketNumber: ticket.ticketNumber,
         subject: ticket.subject,
@@ -1103,7 +1127,7 @@ const getTicketsByStatus = async (req, res) => {
     const { status } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "closed", "reopened"];
+    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "closed", "reopened", "delivered"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,

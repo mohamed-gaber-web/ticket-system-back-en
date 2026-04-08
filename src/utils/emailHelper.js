@@ -9,6 +9,7 @@ import {
   sendStatusChangeEmail,
   sendTicketResolvedEmail,
   sendTicketClosedEmail,
+  sendTicketDeliveredEmail,
   sendNewCommentEmail,
   sendAutoCloseEmail,
   sendPendingReminderEmail,
@@ -50,6 +51,7 @@ const NOTIFICATION_MESSAGES = {
   sla_breach: (d) => `SLA breached for ticket ${d.ticketNumber}`,
   ticket_resolved: (d) => `Ticket ${d.ticketNumber} has been resolved`,
   ticket_closed: (d) => `Ticket ${d.ticketNumber} has been closed`,
+  ticket_delivered: (d) => `Ticket ${d.ticketNumber} has been delivered`,
   ticket_reopened: (d) => `Ticket ${d.ticketNumber} has been reopened`,
   ticket_auto_closed: (d) => `Ticket ${d.ticketNumber} was automatically closed`,
   pending_reminder: (d) => `Ticket ${d.ticketNumber} is awaiting your response`,
@@ -148,6 +150,16 @@ const sendEventEmail = async (eventType, data) => {
       }
       if (data.assignee) {
         await sendStatusChangeEmail(ticket, data.assignee, data.oldStatus || "", "closed");
+      }
+      break;
+    }
+    case "ticket_delivered": {
+      const customer = await resolveCustomer(ticket.customer);
+      if (customer) {
+        await sendTicketDeliveredEmail(ticket, customer);
+      }
+      if (data.assignee) {
+        await sendStatusChangeEmail(ticket, data.assignee, data.oldStatus || "", "delivered");
       }
       break;
     }

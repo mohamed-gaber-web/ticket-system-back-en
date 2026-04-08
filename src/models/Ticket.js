@@ -42,6 +42,7 @@ const ticketSchema = mongoose.Schema(
         "resolved",
         "closed",
         "reopened",
+        "delivered",
       ],
       default: "new",
     },
@@ -73,6 +74,9 @@ const ticketSchema = mongoose.Schema(
       type: Date,
     },
     closedAt: {
+      type: Date,
+    },
+    deliveredAt: {
       type: Date,
     },
     slaDueDate: {

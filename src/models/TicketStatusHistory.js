@@ -13,9 +13,11 @@ const ticketStatusHistorySchema = mongoose.Schema(
         "new",
         "assigned",
         "in_progress",
+        "customer_pending",
         "resolved",
         "closed",
         "reopened",
+        "delivered",
       ],
     },
     newStatus: {
@@ -25,9 +27,11 @@ const ticketStatusHistorySchema = mongoose.Schema(
         "new",
         "assigned",
         "in_progress",
+        "customer_pending",
         "resolved",
         "closed",
         "reopened",
+        "delivered",
       ],
     },
     changedByUserId: {
