@@ -9,7 +9,7 @@ import {
   setCustomerRole,
   getMyStats,
 } from "../controllers/customerController.js";
-import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
+import { protect, authorize } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -272,7 +272,6 @@ router.put(
   "/:id/role",
   protect,
   authorize("consultant"),
-  authorizeRole("admin"),
   setCustomerRole
 );
 
