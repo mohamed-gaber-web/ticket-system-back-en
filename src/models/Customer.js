@@ -61,6 +61,11 @@ const customerSchema = new mongoose.Schema(
       enum: ["active", "inactive", "suspended", "pending"],
       default: "active",
     },
+    role: {
+      type: String,
+      enum: ["company_admin", "company_user"],
+      default: "company_user",
+    },
     slaMapping: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "SLA",
@@ -112,6 +117,7 @@ customerSchema.virtual("tickets", {
 // Index for faster queries
 customerSchema.index({ status: 1 });
 customerSchema.index({ companyName: 1 });
+customerSchema.index({ company: 1, role: 1 });
 
 // Sync companyName from company reference before saving
 customerSchema.pre("save", async function () {

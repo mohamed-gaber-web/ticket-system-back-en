@@ -94,3 +94,14 @@ export const authorizeRole = (...roles) => {
     next();
   };
 };
+
+// Authorize company admin customers only
+export const authorizeCompanyAdmin = (req, res, next) => {
+  if (req.userType !== "customer" || req.user.role !== "company_admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Company admin access required",
+    });
+  }
+  next();
+};

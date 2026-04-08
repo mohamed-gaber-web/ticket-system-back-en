@@ -23,6 +23,7 @@ import erpTypeRoutes from "./erpTypeRoutes.js";
 import versionNumberRoutes from "./versionNumberRoutes.js";
 import sourceRoutes from "./sourceRoutes.js";
 import companyRoutes from "./companyRoutes.js";
+import companyUserRoutes from "./companyUserRoutes.js";
 import emailRoutes from "./emailRoutes.js";
 import workingHoursRoutes from "./workingHoursRoutes.js";
 
@@ -100,6 +101,9 @@ router.use("/sources", sourceRoutes);
 
 // Company routes
 router.use("/companies", companyRoutes);
+
+// Company User routes (company admin managing their own users)
+router.use("/company-users", companyUserRoutes);
 
 // Email routes
 router.use("/emails", emailRoutes);

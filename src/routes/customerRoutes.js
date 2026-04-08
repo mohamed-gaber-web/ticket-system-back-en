@@ -6,7 +6,10 @@ import {
   updateCustomer,
   deleteCustomer,
   getCustomerStats,
+  setCustomerRole,
+  getMyStats,
 } from "../controllers/customerController.js";
+import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -28,6 +31,7 @@ const router = express.Router();
  *         description: Server error
  */
 router.get("/stats", getCustomerStats);
+router.get("/my-stats", protect, authorize("customer"), getMyStats);
 
 /**
  * @swagger
@@ -264,6 +268,14 @@ router.route("/").get(getAllCustomers).post(createCustomer);
  *       500:
  *         description: Server error
  */
+router.put(
+  "/:id/role",
+  protect,
+  authorize("consultant"),
+  authorizeRole("admin"),
+  setCustomerRole
+);
+
 router
   .route("/:id")
   .get(getCustomerById)

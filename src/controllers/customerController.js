@@ -1,6 +1,7 @@
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import Company from "../models/Company.js";
+import Ticket from "../models/Ticket.js";
 import { sendBulkConsultantAssignmentEmails, sendWelcomeEmail } from "../utils/emailService.js";
 
 // @desc    Get all customers
@@ -438,6 +439,124 @@ const getCustomerStats = async (req, res) => {
   }
 };
 
+// @desc    Set customer role (company_admin / company_user)
+// @route   PUT /api/customers/:id/role
+// @access  System admin (consultant with admin role)
+const setCustomerRole = async (req, res) => {
+  try {
+    const { role } = req.body;
+
+    if (!role || !["company_admin", "company_user"].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Role must be 'company_admin' or 'company_user'",
+      });
+    }
+
+    const customer = await Customer.findById(req.params.id);
+    if (!customer) {
+      return res.status(404).json({ success: false, message: "Customer not found" });
+    }
+
+    customer.role = role;
+    await customer.save({ validateBeforeSave: false });
+
+    const populatedCustomer = await Customer.findById(customer._id)
+      .populate("company", "name description isActive")
+      .populate("slaMapping", "name responseTime resolutionTime")
+      .populate("versionNumber", "name isActive")
+      .populate("erpType", "name isActive")
+      .populate("consultants", "firstName lastName email phone role status");
+
+    res.status(200).json({
+      success: true,
+      message: "Customer role updated successfully",
+      data: populatedCustomer,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error updating customer role",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get dashboard stats for the logged-in customer
+// @route   GET /api/customers/my-stats
+// @access  Protected (customer)
+const getMyStats = async (req, res) => {
+  try {
+    let customerIds = [req.user._id];
+
+    // company_admin sees stats for all users in their company
+    if (req.user.role === "company_admin" && req.user.company) {
+      const companyCustomers = await Customer.find({
+        company: req.user.company,
+      }).select("_id");
+      customerIds = companyCustomers.map((c) => c._id);
+    }
+
+    const tickets = await Ticket.find({ customer: { $in: customerIds } }).select(
+      "status priority isSlaBreached ticketNumber subject createdAt"
+    );
+
+    const ticketsByStatus = {};
+    const ticketsByPriority = {};
+    let slaBreached = 0;
+    let openTickets = 0;
+    let resolvedTickets = 0;
+    let closedTickets = 0;
+
+    tickets.forEach((t) => {
+      ticketsByStatus[t.status] = (ticketsByStatus[t.status] || 0) + 1;
+      ticketsByPriority[t.priority] = (ticketsByPriority[t.priority] || 0) + 1;
+      if (t.isSlaBreached) slaBreached++;
+      if (["new", "assigned", "in_progress", "customer_pending", "reopened"].includes(t.status))
+        openTickets++;
+      if (t.status === "resolved" || t.status === "delivered") resolvedTickets++;
+      if (t.status === "closed") closedTickets++;
+    });
+
+    const recentTickets = await Ticket.find({ customer: { $in: customerIds } })
+      .select("ticketNumber subject status priority createdAt")
+      .sort({ createdAt: -1 })
+      .limit(5);
+
+    // company_admin also gets company user count
+    let companyUsers = null;
+    if (req.user.role === "company_admin" && req.user.company) {
+      const total = await Customer.countDocuments({ company: req.user.company });
+      const active = await Customer.countDocuments({
+        company: req.user.company,
+        status: "active",
+      });
+      companyUsers = { total, active };
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalTickets: tickets.length,
+        openTickets,
+        resolvedTickets,
+        closedTickets,
+        slaBreached,
+        ticketsByStatus,
+        ticketsByPriority,
+        recentTickets,
+        companyUsers,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching dashboard stats",
+      error: error.message,
+    });
+  }
+};
+
 export {
   getAllCustomers,
   getCustomerById,
@@ -445,4 +564,6 @@ export {
   updateCustomer,
   deleteCustomer,
   getCustomerStats,
+  setCustomerRole,
+  getMyStats,
 };
