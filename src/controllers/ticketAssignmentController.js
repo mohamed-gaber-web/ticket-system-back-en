@@ -4,6 +4,7 @@ import Team from "../models/Team.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
 import { notifyAndEmail } from "../utils/emailHelper.js";
+import { sendTicketReassignedEmail } from "../utils/emailService.js";
 
 // @desc    Get all ticket assignments
 // @route   GET /api/ticket-assignments
@@ -885,6 +886,81 @@ const assignToMultipleConsultants = async (req, res) => {
   }
 };
 
+// @desc    Replace all consultants on an assignment and email each new one
+// @route   POST /api/ticket-assignments/:id/reassign-consultants
+// @access  Private
+const reassignConsultants = async (req, res) => {
+  try {
+    const assignmentId = req.params.id;
+    const { consultants, notes } = req.body;
+
+    if (!consultants || !Array.isArray(consultants) || consultants.length === 0) {
+      return res.status(400).json({ success: false, message: "Consultants array is required and must not be empty" });
+    }
+
+    const assignment = await TicketAssignment.findById(assignmentId)
+      .populate("assignedByConsultant", "firstName lastName email");
+
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: "Ticket assignment not found" });
+    }
+
+    // Verify and collect consultant docs
+    const consultantDocs = [];
+    for (const consultantId of consultants) {
+      const consultant = await Consultant.findById(consultantId);
+      if (!consultant) {
+        return res.status(404).json({ success: false, message: `Consultant with ID ${consultantId} not found` });
+      }
+      consultantDocs.push(consultant);
+    }
+
+    // Replace all consultants
+    assignment.assignedToConsultants = consultants.map((consultantId) => ({
+      consultant: consultantId,
+      assignedAt: new Date(),
+      status: "pending",
+      notes: notes || undefined,
+    }));
+
+    await assignment.save();
+
+    // Populate ticket + customer for email context
+    const ticket = await Ticket.findById(assignment.ticket).populate("customer", "contactPerson companyName email");
+    const customer = ticket?.customer;
+    const reassignedBy = assignment.assignedByConsultant
+      ? `${assignment.assignedByConsultant.firstName} ${assignment.assignedByConsultant.lastName}`
+      : (req.user ? `${req.user.firstName} ${req.user.lastName}` : "System");
+
+    // Send reassignment email to each new consultant (non-blocking)
+    for (const consultant of consultantDocs) {
+      sendTicketReassignedEmail(
+        ticket || { _id: assignment.ticket, ticketNumber: "N/A", subject: "N/A", priority: "medium" },
+        consultant,
+        {
+          customerName: customer ? (customer.contactPerson || customer.companyName || "N/A") : "N/A",
+          newTeamName: "N/A",
+          reassignedBy,
+          recipientRole: "consultant",
+        }
+      ).catch((err) => console.error(`Re-assign email failed for ${consultant.email}:`, err.message));
+    }
+
+    const populated = await TicketAssignment.findById(assignment._id)
+      .populate("ticket", "ticketNumber subject status priority")
+      .populate("assignedToTeam", "teamName department")
+      .populate("assignedByConsultant", "firstName lastName email")
+      .populate("assignedToConsultants.consultant", "firstName lastName email position");
+
+    res.status(200).json({ success: true, message: "Consultants reassigned successfully", data: populated });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({ success: false, message: "Invalid ID format" });
+    }
+    res.status(500).json({ success: false, message: "Error reassigning consultants", error: error.message });
+  }
+};
+
 // @desc    Update consultant assignment status
 // @route   PATCH /api/ticket-assignments/:assignmentId/consultant/:consultantId/status
 // @access  Public
@@ -1113,6 +1189,7 @@ export {
   getAssignmentsByTeam,
   getAssignmentsByTeamMember,
   assignToMultipleConsultants,
+  reassignConsultants,
   updateConsultantAssignmentStatus,
   removeConsultantFromAssignment,
   getAssignmentsByConsultant,

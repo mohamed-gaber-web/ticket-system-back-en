@@ -13,6 +13,7 @@ import {
   getAssignmentsByTeam,
   getAssignmentsByTeamMember,
   assignToMultipleConsultants,
+  reassignConsultants,
   updateConsultantAssignmentStatus,
   removeConsultantFromAssignment,
   getAssignmentsByConsultant,
@@ -55,6 +56,7 @@ router.post("/:id/reassign", reassignTicket);
 
 // Multi-consultant assignment routes
 router.post("/:id/assign-consultants", assignToMultipleConsultants);
+router.post("/:id/reassign-consultants", reassignConsultants);
 router.patch("/:assignmentId/consultant/:consultantId/status", updateConsultantAssignmentStatus);
 router.delete("/:assignmentId/consultant/:consultantId", removeConsultantFromAssignment);
 
