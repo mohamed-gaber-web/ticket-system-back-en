@@ -6,7 +6,11 @@
       "Bash(node --check src/utils/workingHoursCron.js)",
       "Bash(echo \"exit:$?\")",
       "Bash(node --check src/utils/emailHelper.js)",
-      "Bash(node --check server.js)"
+      "Bash(node --check server.js)",
+      "Bash(npx tsc:*)",
+      "Bash(node:*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :5000)"
     ]
   }
 }

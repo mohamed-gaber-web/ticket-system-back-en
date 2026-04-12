@@ -2,6 +2,7 @@ import crypto from "crypto";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
+import TeleSalesAgent from "../models/TeleSalesAgent.js";
 import { sendTokenResponse, generateResetToken } from "../utils/jwtUtils.js";
 import { sendPasswordResetEmail } from "../utils/emailService.js";
 import { log } from "console";
@@ -15,6 +16,8 @@ const getUserModel = (userType) => {
       return Consultant;
     case "team_member":
       return TeamMember;
+    case "tele_sales":
+      return TeleSalesAgent;
     default:
       return null;
   }
@@ -28,12 +31,12 @@ export const signup = async (req, res) => {
     const { userType, ...userData } = req.body;
 
     // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member"];
+    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
     if (!userType || !validUserTypes.includes(userType)) {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid user type. Must be: customer, consultant, or team_member",
+          "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
       });
     }
 
@@ -90,13 +93,13 @@ export const signin = async (req, res) => {
     }
 
     // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member"];
+    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
     if (!validUserTypes.includes(userType)) {
       console.log("Invalid user type:", userType);
       return res.status(400).json({
         success: false,
         message:
-          "Invalid user type. Must be: customer, consultant, or team_member",
+          "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
       });
     }
 
@@ -359,12 +362,12 @@ export const forgotPassword = async (req, res) => {
     }
 
     // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member"];
+    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
     if (!validUserTypes.includes(userType)) {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid user type. Must be: customer, consultant, or team_member",
+          "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
       });
     }
 
@@ -439,12 +442,12 @@ export const resetPassword = async (req, res) => {
     }
 
     // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member"];
+    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
     if (!validUserTypes.includes(userType)) {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid user type. Must be: customer, consultant, or team_member",
+          "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
       });
     }
 
@@ -504,7 +507,7 @@ export const refreshToken = async (req, res) => {
     }
 
     // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member"];
+    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
     if (!validUserTypes.includes(userType)) {
       return res.status(400).json({
         success: false,

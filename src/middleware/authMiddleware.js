@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
+import TeleSalesAgent from "../models/TeleSalesAgent.js";
 
 // Protect routes - verify JWT token
 export const protect = async (req, res, next) => {
@@ -38,6 +39,8 @@ export const protect = async (req, res, next) => {
       user = await TeamMember.findById(decoded.id)
         .select("-password")
         .populate("team", "teamName department");
+    } else if (decoded.userType === "tele_sales") {
+      user = await TeleSalesAgent.findById(decoded.id).select("-password -refreshToken");
     }
 
     if (!user) {

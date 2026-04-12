@@ -26,6 +26,9 @@ import companyRoutes from "./companyRoutes.js";
 import companyUserRoutes from "./companyUserRoutes.js";
 import emailRoutes from "./emailRoutes.js";
 import workingHoursRoutes from "./workingHoursRoutes.js";
+import teleSalesAgentRoutes from "./teleSalesAgentRoutes.js";
+import leadRoutes from "./leadRoutes.js";
+import followUpRoutes from "./followUpRoutes.js";
 
 const router = express.Router();
 
@@ -110,6 +113,11 @@ router.use("/emails", emailRoutes);
 
 // Working Hours & Holidays routes
 router.use("/working-hours", workingHoursRoutes);
+
+// TeleSales routes
+router.use("/tele-sales-agents", teleSalesAgentRoutes);
+router.use("/leads", leadRoutes);
+router.use("/followups", followUpRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);
