@@ -7,7 +7,14 @@
       "Bash(echo \"exit:$?\")",
       "Bash(node --check src/utils/emailHelper.js)",
       "Bash(node --check server.js)",
+<<<<<<< HEAD
       "Bash(grep -l \"import.*from.*models/\" \"D:/Real Project/Ticketing System/back-en-and-api/src/models\"/*.js)"
+=======
+      "Bash(npx tsc:*)",
+      "Bash(node:*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :5000)"
+>>>>>>> tele-sales-module
     ]
   }
 }
