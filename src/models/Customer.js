@@ -84,6 +84,12 @@ const customerSchema = new mongoose.Schema(
         ref: "Consultant",
       },
     ],
+    productTypes: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "ProductType",
+      },
+    ],
     lastLogin: {
       type: Date,
     },

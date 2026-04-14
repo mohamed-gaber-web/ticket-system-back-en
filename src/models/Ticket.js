@@ -233,11 +233,18 @@ ticketSchema.pre("save", async function () {
     }
   }
 
-  const year = new Date().getFullYear();
-  const count = await mongoose.model("Ticket").countDocuments();
-  const ticketNum = String(count + 1).padStart(5, "0");
-
-  this.ticketNumber = `${prefix}-${year}-${ticketNum}`;
+  if (this.isSubTicket && this.parentTicket) {
+    // Sub-ticket format: {COMPANY_PREFIX}-SUB-{XXXX}
+    const subCount = await mongoose.model("Ticket").countDocuments({ parentTicket: this.parentTicket });
+    const subNum = String(subCount + 1).padStart(4, "0");
+    this.ticketNumber = `${prefix}-SUB-${subNum}`;
+  } else {
+    // Regular ticket format: {COMPANY_PREFIX}-{YEAR}-{NNNNN}
+    const year = new Date().getFullYear();
+    const count = await mongoose.model("Ticket").countDocuments();
+    const ticketNum = String(count + 1).padStart(5, "0");
+    this.ticketNumber = `${prefix}-${year}-${ticketNum}`;
+  }
 });
 
 // Pre-save middleware to calculate SLA due date

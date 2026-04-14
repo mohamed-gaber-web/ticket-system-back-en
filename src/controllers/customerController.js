@@ -33,6 +33,7 @@ const getAllCustomers = async (req, res) => {
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
       .populate("consultants", "firstName lastName email phone role status")
+      .populate("productTypes", "name isActive")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -67,6 +68,7 @@ const getCustomerById = async (req, res) => {
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
       .populate("consultants", "firstName lastName email phone role status")
+      .populate("productTypes", "name isActive")
       .populate({
         path: "tickets",
         select: "title status priority createdAt",
@@ -117,6 +119,7 @@ const createCustomer = async (req, res) => {
       versionNumber,
       erpType,
       consultants,
+      productTypes,
     } = req.body;
 
     const companyDoc = await Company.findById(company);
@@ -147,6 +150,7 @@ const createCustomer = async (req, res) => {
       versionNumber,
       erpType,
       consultants,
+      productTypes,
     });
 
     const populatedCustomer = await Customer.findById(customer._id)
@@ -154,7 +158,8 @@ const createCustomer = async (req, res) => {
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
-      .populate("consultants", "firstName lastName email phone role status");
+      .populate("consultants", "firstName lastName email phone role status")
+      .populate("productTypes", "name isActive");
 
     // Send welcome email to the new customer (fire-and-forget)
     sendWelcomeEmail(populatedCustomer).catch((err) =>
@@ -238,6 +243,7 @@ const updateCustomer = async (req, res) => {
       versionNumber,
       erpType,
       consultants,
+      productTypes,
     } = req.body;
 
     let customer = await Customer.findById(req.params.id);
@@ -278,6 +284,8 @@ const updateCustomer = async (req, res) => {
     customer.versionNumber = versionNumber || customer.versionNumber;
     customer.erpType = erpType || customer.erpType;
 
+    if (productTypes !== undefined) customer.productTypes = productTypes;
+
     let newConsultants = [];
     if (consultants !== undefined) {
       const oldConsultantIds = customer.consultants.map((id) => id.toString());
@@ -305,7 +313,8 @@ const updateCustomer = async (req, res) => {
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
-      .populate("consultants", "firstName lastName email phone role status");
+      .populate("consultants", "firstName lastName email phone role status")
+      .populate("productTypes", "name isActive");
 
     let emailResults = null;
     let emailWarning = null;
@@ -466,7 +475,8 @@ const setCustomerRole = async (req, res) => {
       .populate("slaMapping", "name responseTime resolutionTime")
       .populate("versionNumber", "name isActive")
       .populate("erpType", "name isActive")
-      .populate("consultants", "firstName lastName email phone role status");
+      .populate("consultants", "firstName lastName email phone role status")
+      .populate("productTypes", "name isActive");
 
     res.status(200).json({
       success: true,

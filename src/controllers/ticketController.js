@@ -981,6 +981,11 @@ const deleteTicket = async (req, res) => {
       });
     }
 
+    // If this is a parent ticket, delete all its sub-tickets first
+    if (!ticket.isSubTicket) {
+      await Ticket.deleteMany({ parentTicket: ticket._id });
+    }
+
     await ticket.deleteOne();
 
     res.status(200).json({
@@ -1302,9 +1307,9 @@ const createSubTicket = async (req, res) => {
       ticketNumber: populatedSubTicket.ticketNumber,
       subject: populatedSubTicket.subject,
       notifyEmails: populatedSubTicket.notifyEmails || [],
-      recipients: [
-        { userId: populatedSubTicket.customer._id || populatedSubTicket.customer, userType: "customer" },
-      ],
+      recipients: populatedSubTicket.customer
+        ? [{ userId: populatedSubTicket.customer._id || populatedSubTicket.customer, userType: "customer" }]
+        : [],
     }).catch((err) => console.error("Sub-ticket email notification error:", err.message));
 
     res.status(201).json({

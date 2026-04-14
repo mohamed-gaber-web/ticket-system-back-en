@@ -6,7 +6,8 @@
       "Bash(node --check src/utils/workingHoursCron.js)",
       "Bash(echo \"exit:$?\")",
       "Bash(node --check src/utils/emailHelper.js)",
-      "Bash(node --check server.js)"
+      "Bash(node --check server.js)",
+      "Bash(grep -l \"import.*from.*models/\" \"D:/Real Project/Ticketing System/back-en-and-api/src/models\"/*.js)"
     ]
   }
 }
