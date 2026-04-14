@@ -84,6 +84,7 @@ const getAllTickets = async (req, res) => {
       assignedTeam,
       assignedBy,
       acceptedBy,
+      assignedConsultant,
       category,
       isSlaBreached,
       environment,
@@ -169,6 +170,14 @@ const getAllTickets = async (req, res) => {
       console.log("Filtering by acceptedBy:", acceptedBy);
     }
 
+    // assignedConsultant: OR match across acceptedBy + assignedBy (for profile pages)
+    if (assignedConsultant) {
+      query.$or = [
+        { acceptedBy: assignedConsultant },
+        { assignedBy: assignedConsultant },
+      ];
+    }
+
     if (startDate) {
       query.startDate = { ...query.startDate, $gte: new Date(startDate) };
     }
@@ -229,6 +238,7 @@ const getAllTickets = async (req, res) => {
       .populate("serviceType", "name")
       .populate("scope", "name")
       .populate("source", "name")
+      .populate({ path: "subTickets", select: "_id" })
       .sort(sort)
       .limit(parseInt(limit))
       .skip(skip);
