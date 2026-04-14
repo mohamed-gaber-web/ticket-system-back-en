@@ -205,6 +205,9 @@ const getAllTickets = async (req, res) => {
       ];
     }
 
+    // Exclude sub-tickets from the main list — they belong to their parent
+    query.isSubTicket = { $ne: true };
+
     const skip = (page - 1) * limit;
     const sort = {};
     sort[sortBy] = sortOrder === "asc" ? 1 : -1;
@@ -218,6 +221,7 @@ const getAllTickets = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("acceptedBy", "firstName lastName email")
       .populate("environment", "name description")
       .populate("feature", "name")
       .populate("department", "name")
