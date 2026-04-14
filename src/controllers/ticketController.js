@@ -214,8 +214,12 @@ const getAllTickets = async (req, res) => {
       ];
     }
 
-    // Exclude sub-tickets from the main list — they belong to their parent
-    query.isSubTicket = { $ne: true };
+    // Exclude sub-tickets from general listings.
+    // When filtering by assignedConsultant (profile view), include them so the
+    // consultant can see all work assigned to them — main tickets AND sub-tickets.
+    if (!assignedConsultant) {
+      query.isSubTicket = { $ne: true };
+    }
 
     const skip = (page - 1) * limit;
     const sort = {};
@@ -239,6 +243,7 @@ const getAllTickets = async (req, res) => {
       .populate("scope", "name")
       .populate("source", "name")
       .populate({ path: "subTickets", select: "_id" })
+      .populate({ path: "parentTicket", select: "ticketNumber subject" })
       .sort(sort)
       .limit(parseInt(limit))
       .skip(skip);
@@ -1357,7 +1362,7 @@ const createSubTicket = async (req, res) => {
 const getSubTickets = async (req, res) => {
   try {
     const parentTicketId = req.params.id;
-    const { page = 1, limit = 10, status, priority } = req.query;
+    const { page = 1, limit = 500, status, priority } = req.query;
 
     // Verify parent ticket exists
     const parentTicket = await Ticket.findById(parentTicketId);
@@ -1385,6 +1390,7 @@ const getSubTickets = async (req, res) => {
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
+      .populate("acceptedBy", "firstName lastName email")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);

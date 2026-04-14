@@ -859,6 +859,12 @@ const assignToMultipleConsultants = async (req, res) => {
 
     await assignment.save();
 
+    // Keep ticket.assignedBy in sync — use the first newly added consultant
+    // so the ticket list shows the actual working consultant, not the creator
+    await Ticket.findByIdAndUpdate(assignment.ticket, {
+      assignedBy: consultants[0],
+    });
+
     const populatedAssignment = await TicketAssignment.findById(assignment._id)
       .populate("ticket", "ticketNumber subject status priority")
       .populate("assignedToTeam", "teamName department")
@@ -924,6 +930,14 @@ const reassignConsultants = async (req, res) => {
     }));
 
     await assignment.save();
+
+    // Sync ticket.assignedBy to the first new consultant so all ticket lists
+    // show the actual working consultant after reassignment
+    if (consultants.length > 0) {
+      await Ticket.findByIdAndUpdate(assignment.ticket, {
+        assignedBy: consultants[0],
+      });
+    }
 
     // Populate ticket + customer for email context
     const ticket = await Ticket.findById(assignment.ticket).populate("customer", "contactPerson companyName email");
