@@ -276,22 +276,6 @@ const createTicketAssignment = async (req, res) => {
       .populate("assignedToTeam", "teamName department")
       .populate("assignedByConsultant", "firstName lastName email");
 
-    // Notify assigned consultant (fire-and-forget)
-    if (populatedAssignment.assignedByConsultant) {
-      const ticket = await Ticket.findById(populatedAssignment.ticket._id || populatedAssignment.ticket)
-        .populate("customer", "companyName contactPerson email");
-
-      notifyAndEmail("ticket_assigned", {
-        ticket: ticket || populatedAssignment.ticket,
-        ticketNumber: populatedAssignment.ticket.ticketNumber,
-        subject: populatedAssignment.ticket.subject,
-        assignee: populatedAssignment.assignedByConsultant,
-        recipients: [
-          { userId: populatedAssignment.assignedByConsultant._id, userType: "consultant" },
-        ],
-      }).catch((err) => console.error("Email notification error:", err.message));
-    }
-
     res.status(201).json({
       success: true,
       message: "Ticket assignment created successfully",
@@ -513,7 +497,10 @@ const reassignTicket = async (req, res) => {
     // Notify new assignee about reassignment (fire-and-forget)
     if (populatedAssignment.assignedByConsultant) {
       const ticket = await Ticket.findById(populatedAssignment.ticket._id || populatedAssignment.ticket)
-        .populate("customer", "companyName contactPerson email");
+        .populate("customer", "companyName contactPerson email")
+        .populate("category", "name")
+        .populate("scope", "name")
+        .populate("serviceType", "name");
 
       notifyAndEmail("ticket_reassigned", {
         ticket: ticket || populatedAssignment.ticket,
@@ -871,6 +858,27 @@ const assignToMultipleConsultants = async (req, res) => {
       .populate("assignedByConsultant", "firstName lastName email")
       .populate("assignedToConsultants.consultant", "firstName lastName email");
 
+    // Send ticket_assigned email to each newly added consultant
+    const ticketForEmail = await Ticket.findById(assignment.ticket)
+      .populate("customer", "companyName contactPerson email")
+      .populate("category", "name")
+      .populate("scope", "name")
+      .populate("serviceType", "name");
+
+    for (const consultantId of consultants) {
+      const consultantDoc = await Consultant.findById(consultantId)
+        .select("firstName lastName email");
+      if (consultantDoc?.email) {
+        notifyAndEmail("ticket_assigned", {
+          ticket: ticketForEmail,
+          ticketNumber: populatedAssignment.ticket.ticketNumber,
+          subject: populatedAssignment.ticket.subject,
+          assignee: consultantDoc,
+          recipients: [{ userId: consultantDoc._id, userType: "consultant" }],
+        }).catch((err) => console.error("Consultant assignment email error:", err.message));
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: "Consultants assigned successfully",
@@ -940,7 +948,11 @@ const reassignConsultants = async (req, res) => {
     }
 
     // Populate ticket + customer for email context
-    const ticket = await Ticket.findById(assignment.ticket).populate("customer", "contactPerson companyName email");
+    const ticket = await Ticket.findById(assignment.ticket)
+      .populate("customer", "contactPerson companyName email")
+      .populate("category", "name")
+      .populate("scope", "name")
+      .populate("serviceType", "name");
     const customer = ticket?.customer;
     const reassignedBy = assignment.assignedByConsultant
       ? `${assignment.assignedByConsultant.firstName} ${assignment.assignedByConsultant.lastName}`

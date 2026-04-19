@@ -100,6 +100,7 @@ const getAllTickets = async (req, res) => {
       closedDateFrom,
       closedDateTo,
       customerName,
+      companyName,
       page = 1,
       limit = 10,
       search,
@@ -119,6 +120,12 @@ const getAllTickets = async (req, res) => {
 
     if (customer) {
       query.customer = customer;
+    }
+
+    if (companyName) {
+      const matchingCustomers = await Customer.find({ companyName }).select("_id").lean();
+      const ids = matchingCustomers.map((c) => c._id);
+      query.customer = { $in: ids };
     }
 
     if (assignedTeam) {
@@ -437,7 +444,7 @@ const createTicket = async (req, res) => {
       department,
       productType,
       serviceType,
-      scope,
+      scope: Array.isArray(scope) ? scope : scope ? [scope] : [],
       source,
       notifyEmails: Array.isArray(notifyEmails) ? notifyEmails : [],
       estimationStartDate: estimation.estimationStartDate,
@@ -552,7 +559,7 @@ const updateTicket = async (req, res) => {
       department,
       productType,
       serviceType,
-      scope,
+      scope: Array.isArray(scope) ? scope : scope ? [scope] : [],
       source,
     };
 
@@ -1330,6 +1337,19 @@ const createSubTicket = async (req, res) => {
         ? [{ userId: populatedSubTicket.customer._id || populatedSubTicket.customer, userType: "customer" }]
         : [],
     }).catch((err) => console.error("Sub-ticket email notification error:", err.message));
+
+    // If a consultant was assigned at creation time, send them the assignment email
+    if (populatedSubTicket.assignedBy) {
+      notifyAndEmail("ticket_assigned", {
+        ticket: populatedSubTicket,
+        ticketNumber: populatedSubTicket.ticketNumber,
+        subject: populatedSubTicket.subject,
+        assignee: populatedSubTicket.assignedBy,
+        recipients: [
+          { userId: populatedSubTicket.assignedBy._id, userType: "consultant" },
+        ],
+      }).catch((err) => console.error("Sub-ticket assignment email error:", err.message));
+    }
 
     res.status(201).json({
       success: true,

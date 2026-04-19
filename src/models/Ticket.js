@@ -138,8 +138,8 @@ const ticketSchema = mongoose.Schema(
       ref: "ServiceType",
     },
     scope: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Scope",
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Scope" }],
+      default: [],
     },
     source: {
       type: mongoose.Schema.Types.ObjectId,

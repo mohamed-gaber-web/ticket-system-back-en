@@ -2,6 +2,7 @@ import Notification from "../models/notification.js";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
+import Ticket from "../models/Ticket.js";
 import {
   sendTicketCreatedEmail,
   sendTicketAssignedEmail,
@@ -77,12 +78,48 @@ const createNotification = async (eventType, data) => {
 };
 
 // ---------------------------------------------------------------------------
+// Ensure category / scope / serviceType are populated on the ticket object.
+// Many call sites pass a partially-populated ticket, so we re-fetch only the
+// fields we need rather than requiring every controller to be updated.
+// ---------------------------------------------------------------------------
+
+const resolveTicketMeta = async (ticket) => {
+  if (!ticket?._id) return ticket;
+
+  const categoryMissing = !ticket.category?.name;
+  const serviceTypeMissing = !ticket.serviceType?.name;
+  const scopeMissing =
+    !Array.isArray(ticket.scope) ||
+    (ticket.scope.length > 0 && typeof ticket.scope[0] !== "object");
+
+  if (!categoryMissing && !serviceTypeMissing && !scopeMissing) return ticket;
+
+  const fresh = await Ticket.findById(ticket._id)
+    .populate("category", "name")
+    .populate("scope", "name")
+    .populate("serviceType", "name")
+    .lean();
+
+  if (!fresh) return ticket;
+
+  return {
+    ...ticket.toObject ? ticket.toObject() : ticket,
+    category: fresh.category !== undefined ? fresh.category : ticket.category,
+    scope: fresh.scope !== undefined ? fresh.scope : ticket.scope,
+    serviceType: fresh.serviceType !== undefined ? fresh.serviceType : ticket.serviceType,
+  };
+};
+
+// ---------------------------------------------------------------------------
 // Email dispatch by event type
 // ---------------------------------------------------------------------------
 
 const sendEventEmail = async (eventType, data) => {
-  const { ticket } = data;
+  let { ticket } = data;
   if (!ticket) return;
+
+  // Ensure meta fields are populated before any send function runs
+  ticket = await resolveTicketMeta(ticket);
 
   switch (eventType) {
     case "new_ticket": {
@@ -107,7 +144,6 @@ const sendEventEmail = async (eventType, data) => {
       if (data.newAssignee) {
         await sendTicketReassignedEmail(ticket, data.newAssignee, {
           customerName: await getCustomerName(ticket.customer),
-          newTeamName: data.newTeamName || "N/A",
           reassignedBy: data.reassignedBy || "N/A",
           recipientRole: "your team",
         });
@@ -115,7 +151,6 @@ const sendEventEmail = async (eventType, data) => {
       if (data.oldAssignee) {
         await sendTicketReassignedEmail(ticket, data.oldAssignee, {
           customerName: await getCustomerName(ticket.customer),
-          newTeamName: data.newTeamName || "N/A",
           reassignedBy: data.reassignedBy || "N/A",
           recipientRole: "another team",
         });

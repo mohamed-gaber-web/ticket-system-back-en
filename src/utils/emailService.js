@@ -167,6 +167,22 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
 };
 
 // ---------------------------------------------------------------------------
+// Helper — extract category / module / service-type from a ticket object
+// Works whether the fields are populated objects or plain ID strings
+// ---------------------------------------------------------------------------
+
+const getTicketMeta = (ticket) => ({
+  category: ticket.category?.name || "N/A",
+  module: Array.isArray(ticket.scope)
+    ? ticket.scope
+        .map((s) => (typeof s === "object" && s !== null ? s.name : null))
+        .filter(Boolean)
+        .join(", ") || "N/A"
+    : "N/A",
+  serviceType: ticket.serviceType?.name || "N/A",
+});
+
+// ---------------------------------------------------------------------------
 // Specific email functions
 // ---------------------------------------------------------------------------
 
@@ -227,6 +243,7 @@ export const sendPasswordResetEmail = async (userEmail, userName, resetToken, us
 export const sendTicketCreatedEmail = async (ticket, customer, notifyEmails = []) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+  const { category, module, serviceType } = getTicketMeta(ticket);
 
   // Merge customer email with additional notify emails (deduplicated)
   const extraEmails = Array.isArray(notifyEmails) ? notifyEmails : [];
@@ -245,6 +262,9 @@ export const sendTicketCreatedEmail = async (ticket, customer, notifyEmails = []
       ticketUrl,
       company: customer.companyName || "N/A",
       createdBy: customer.contactPerson || customer.companyName || "N/A",
+      category,
+      module,
+      serviceType,
     },
     { ticketId: ticket._id, userId: customer._id, userType: "customer" }
   );
@@ -253,6 +273,7 @@ export const sendTicketCreatedEmail = async (ticket, customer, notifyEmails = []
 export const sendTicketAssignedEmail = async (ticket, assignee, customerName) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+  const { category } = getTicketMeta(ticket);
 
   return sendEmail(
     assignee.email,
@@ -265,7 +286,7 @@ export const sendTicketAssignedEmail = async (ticket, assignee, customerName) =>
       subject: ticket.subject,
       customerName: customerName || "N/A",
       priority: ticket.priority || "medium",
-      category: ticket.category?.name || "N/A",
+      category,
       ticketUrl,
     },
     { ticketId: ticket._id, userId: assignee._id, userType: "consultant" }
@@ -275,6 +296,7 @@ export const sendTicketAssignedEmail = async (ticket, assignee, customerName) =>
 export const sendTicketReassignedEmail = async (ticket, assignee, variables = {}) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+  const { category, module, serviceType } = getTicketMeta(ticket);
 
   return sendEmail(
     assignee.email,
@@ -287,9 +309,11 @@ export const sendTicketReassignedEmail = async (ticket, assignee, variables = {}
       subject: ticket.subject,
       customerName: variables.customerName || "N/A",
       priority: ticket.priority || "medium",
-      newTeamName: variables.newTeamName || "N/A",
       reassignedBy: variables.reassignedBy || "N/A",
       recipientRole: variables.recipientRole || "your team",
+      category,
+      module,
+      serviceType,
       ticketUrl,
     },
     { ticketId: ticket._id }
@@ -299,6 +323,7 @@ export const sendTicketReassignedEmail = async (ticket, assignee, variables = {}
 export const sendStatusChangeEmail = async (ticket, recipient, oldStatus, newStatus) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+  const { category } = getTicketMeta(ticket);
 
   return sendEmail(
     recipient.email,
@@ -311,6 +336,7 @@ export const sendStatusChangeEmail = async (ticket, recipient, oldStatus, newSta
       subject: ticket.subject,
       oldStatus,
       newStatus,
+      category,
       ticketUrl,
     },
     { ticketId: ticket._id, userId: recipient._id }
@@ -320,6 +346,7 @@ export const sendStatusChangeEmail = async (ticket, recipient, oldStatus, newSta
 export const sendTicketResolvedEmail = async (ticket, customer) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+  const { category } = getTicketMeta(ticket);
 
   return sendEmail(
     customer.email,
@@ -330,6 +357,7 @@ export const sendTicketResolvedEmail = async (ticket, customer) => {
       customerName: customer.contactPerson || customer.companyName,
       ticketNumber: ticket.ticketNumber,
       subject: ticket.subject,
+      category,
       ticketUrl,
     },
     { ticketId: ticket._id, userId: customer._id, userType: "customer" }
@@ -338,6 +366,8 @@ export const sendTicketResolvedEmail = async (ticket, customer) => {
 
 export const sendTicketClosedEmail = async (ticket, customer) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+  const { category } = getTicketMeta(ticket);
 
   return sendEmail(
     customer.email,
@@ -348,6 +378,8 @@ export const sendTicketClosedEmail = async (ticket, customer) => {
       customerName: customer.contactPerson || customer.companyName,
       ticketNumber: ticket.ticketNumber,
       subject: ticket.subject,
+      category,
+      ticketUrl,
     },
     { ticketId: ticket._id, userId: customer._id, userType: "customer" }
   );
@@ -356,6 +388,7 @@ export const sendTicketClosedEmail = async (ticket, customer) => {
 export const sendTicketDeliveredEmail = async (ticket, customer) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+  const { category } = getTicketMeta(ticket);
 
   return sendEmail(
     customer.email,
@@ -366,6 +399,7 @@ export const sendTicketDeliveredEmail = async (ticket, customer) => {
       customerName: customer.contactPerson || customer.companyName,
       ticketNumber: ticket.ticketNumber,
       subject: ticket.subject,
+      category,
       ticketUrl,
     },
     { ticketId: ticket._id, userId: customer._id, userType: "customer" }
@@ -429,6 +463,7 @@ export const sendWelcomeEmail = async (customer) => {
 export const sendSlaAlertEmail = async (ticket, assignee, variables = {}) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;
+  const { category } = getTicketMeta(ticket);
 
   return sendEmail(
     assignee.email,
@@ -443,6 +478,7 @@ export const sendSlaAlertEmail = async (ticket, assignee, variables = {}) => {
       priority: ticket.priority || "medium",
       slaDueDate: variables.slaDueDate || "N/A",
       timeRemaining: variables.timeRemaining || "N/A",
+      category,
       ticketUrl,
     },
     { ticketId: ticket._id, userId: assignee._id, userType: "consultant" }
