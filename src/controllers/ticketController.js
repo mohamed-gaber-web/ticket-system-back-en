@@ -698,7 +698,7 @@ const updateTicketStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "closed", "reopened", "delivered"];
+    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -913,8 +913,10 @@ const acceptTicket = async (req, res) => {
 
     // Populate the fields to return full information
     await ticket.populate("acceptedBy", "firstName lastName email");
-    await ticket.populate("customer", "companyName email");
+    await ticket.populate("customer", "companyName contactPerson email phone");
     await ticket.populate("category", "name");
+    await ticket.populate("scope", "name");
+    await ticket.populate("serviceType", "name");
 
     res.status(200).json({
       success: true,
@@ -1158,7 +1160,7 @@ const getTicketsByStatus = async (req, res) => {
     const { status } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "closed", "reopened", "delivered"];
+    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
