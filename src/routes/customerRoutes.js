@@ -8,6 +8,7 @@ import {
   getCustomerStats,
   setCustomerRole,
   getMyStats,
+  updateCustomerPassword,
 } from "../controllers/customerController.js";
 import { protect, authorize } from "../middleware/authMiddleware.js";
 
@@ -280,5 +281,7 @@ router
   .get(getCustomerById)
   .put(updateCustomer)
   .delete(deleteCustomer);
+
+router.put("/:id/password", updateCustomerPassword);
 
 export default router;

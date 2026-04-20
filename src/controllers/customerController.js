@@ -567,6 +567,59 @@ const getMyStats = async (req, res) => {
   }
 };
 
+// @desc    Update customer password (admin override)
+// @route   PUT /api/customers/:id/password
+// @access  Public
+const updateCustomerPassword = async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a new password",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    const customer = await Customer.findById(req.params.id);
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    customer.password = newPassword;
+    await customer.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password updated successfully",
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Error updating password",
+      error: error.message,
+    });
+  }
+};
+
 export {
   getAllCustomers,
   getCustomerById,
@@ -576,4 +629,5 @@ export {
   getCustomerStats,
   setCustomerRole,
   getMyStats,
+  updateCustomerPassword,
 };

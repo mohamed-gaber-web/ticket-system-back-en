@@ -168,6 +168,7 @@ const updateConsultant = async (req, res) => {
       lastName,
       email,
       phone,
+      position,
       role,
       status,
     } = req.body;
@@ -198,6 +199,7 @@ const updateConsultant = async (req, res) => {
         lastName,
         email,
         phone,
+        position,
         role,
         status,
       },
@@ -316,35 +318,33 @@ const getConsultantStats = async (req, res) => {
   }
 };
 
-// @desc    Update consultant password
+// @desc    Update consultant password (admin override)
 // @route   PUT /api/consultants/:id/password
 // @access  Public
 const updateConsultantPassword = async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
+    const { newPassword } = req.body;
 
-    if (!currentPassword || !newPassword) {
+    if (!newPassword) {
       return res.status(400).json({
         success: false,
-        message: "Please provide both current and new password",
+        message: "Please provide a new password",
       });
     }
 
-    const consultant = await Consultant.findById(req.params.id).select("+password");
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    const consultant = await Consultant.findById(req.params.id);
 
     if (!consultant) {
       return res.status(404).json({
         success: false,
         message: "Consultant not found",
-      });
-    }
-
-    const isPasswordMatch = await consultant.comparePassword(currentPassword);
-
-    if (!isPasswordMatch) {
-      return res.status(401).json({
-        success: false,
-        message: "Current password is incorrect",
       });
     }
 
