@@ -1285,6 +1285,17 @@ const createSubTicket = async (req, res) => {
       });
     }
 
+    // Customers may only create sub-tickets on tickets that belong to their company
+    if (req.userType === "customer") {
+      const parentCustomer = await Customer.findById(parentTicket.customer).select("companyName").lean();
+      if (!parentCustomer || parentCustomer.companyName !== req.user.companyName) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only create sub-tickets for your own company's tickets",
+        });
+      }
+    }
+
     // Create sub-ticket with parent ticket's customer and SLA
     const subNow = new Date();
     const subEstimation = await calcEstimation(parentTicket.customer, subNow);

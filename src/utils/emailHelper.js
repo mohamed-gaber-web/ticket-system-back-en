@@ -123,13 +123,23 @@ const sendEventEmail = async (eventType, data) => {
 
   switch (eventType) {
     case "new_ticket": {
-      console.log("[Email Debug] new_ticket - ticket.customer:", ticket.customer);
       const customer = await resolveCustomer(ticket.customer);
-      console.log("[Email Debug] resolveCustomer result:", customer);
       if (customer) {
-        await sendTicketCreatedEmail(ticket, customer, data.notifyEmails || []);
-      } else {
-        console.log("[Email Debug] customer is null/undefined - skipping email");
+        // Always CC the company_admin(s) for this company (covers both scenarios:
+        // admin creates ticket for a company_user, and company_user creates their own ticket)
+        const companyAdminEmails = [];
+        if (customer.companyName) {
+          const admins = await Customer.find({
+            companyName: customer.companyName,
+            role: "company_admin",
+            _id: { $ne: customer._id },
+          })
+            .select("email")
+            .lean();
+          admins.forEach((a) => { if (a.email) companyAdminEmails.push(a.email); });
+        }
+        const allNotifyEmails = [...(data.notifyEmails || []), ...companyAdminEmails];
+        await sendTicketCreatedEmail(ticket, customer, allNotifyEmails);
       }
       break;
     }

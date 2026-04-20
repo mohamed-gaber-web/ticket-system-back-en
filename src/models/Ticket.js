@@ -224,6 +224,8 @@ ticketSchema.index({ source: 1 });
 ticketSchema.pre("save", async function () {
   if (!this.isNew) return;
 
+  const TicketModel = mongoose.model("Ticket");
+
   // Get company prefix from customer (first 3 chars of companyName, uppercased)
   let prefix = "TKT";
   if (this.customer) {
@@ -236,15 +238,49 @@ ticketSchema.pre("save", async function () {
 
   if (this.isSubTicket && this.parentTicket) {
     // Sub-ticket format: {COMPANY_PREFIX}-SUB-{XXXX}
-    const subCount = await mongoose.model("Ticket").countDocuments({ parentTicket: this.parentTicket });
-    const subNum = String(subCount + 1).padStart(4, "0");
-    this.ticketNumber = `${prefix}-SUB-${subNum}`;
+    // Use highest existing sub-number instead of count — safe against deletions
+    const lastSub = await TicketModel
+      .findOne({ parentTicket: this.parentTicket, isSubTicket: true })
+      .sort({ createdAt: -1 })
+      .select("ticketNumber")
+      .lean();
+
+    let subSeq = 1;
+    if (lastSub?.ticketNumber) {
+      const match = lastSub.ticketNumber.match(/-SUB-(\d+)$/);
+      if (match) subSeq = parseInt(match[1], 10) + 1;
+    }
+
+    // Advance until the number is free (handles rare race conditions)
+    let candidate = `${prefix}-SUB-${String(subSeq).padStart(4, "0")}`;
+    while (await TicketModel.exists({ ticketNumber: candidate })) {
+      subSeq++;
+      candidate = `${prefix}-SUB-${String(subSeq).padStart(4, "0")}`;
+    }
+    this.ticketNumber = candidate;
   } else {
     // Regular ticket format: {COMPANY_PREFIX}-{YEAR}-{NNNNN}
+    // Use highest existing sequence for this year — safe against deletions
     const year = new Date().getFullYear();
-    const count = await mongoose.model("Ticket").countDocuments();
-    const ticketNum = String(count + 1).padStart(5, "0");
-    this.ticketNumber = `${prefix}-${year}-${ticketNum}`;
+    const lastTicket = await TicketModel
+      .findOne({ ticketNumber: new RegExp(`^[A-Z]{3}-${year}-\\d{5}$`), isSubTicket: { $ne: true } })
+      .sort({ ticketNumber: -1 })
+      .select("ticketNumber")
+      .lean();
+
+    let seq = 1;
+    if (lastTicket?.ticketNumber) {
+      const lastNum = parseInt(lastTicket.ticketNumber.split("-").pop(), 10);
+      if (!isNaN(lastNum)) seq = lastNum + 1;
+    }
+
+    // Advance until the number is free (handles rare race conditions)
+    let candidate = `${prefix}-${year}-${String(seq).padStart(5, "0")}`;
+    while (await TicketModel.exists({ ticketNumber: candidate })) {
+      seq++;
+      candidate = `${prefix}-${year}-${String(seq).padStart(5, "0")}`;
+    }
+    this.ticketNumber = candidate;
   }
 });
 

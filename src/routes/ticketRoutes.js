@@ -346,7 +346,7 @@ router.patch("/:id/feedback", addCustomerFeedback);
 router.get("/:id/sla-status", getTicketSLAStatus);
 
 // Sub-ticket routes
-router.post("/:id/sub-ticket", createSubTicket);
+router.post("/:id/sub-ticket", protect, createSubTicket);
 router.get("/:id/sub-tickets", getSubTickets);
 
 export default router;
