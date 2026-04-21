@@ -108,22 +108,29 @@ const getAllTickets = async (req, res) => {
       sortOrder = "desc",
     } = req.query;
 
+    // Helper: split a comma-separated param into an array; returns [] if empty
+    const toArray = (val) => (val ? val.split(",").filter(Boolean) : []);
+
     const query = {};
 
     if (status) {
-      query.status = status;
+      const vals = toArray(status);
+      query.status = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (priority) {
-      query.priority = priority;
+      const vals = toArray(priority);
+      query.priority = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (customer) {
-      query.customer = customer;
+      const vals = toArray(customer);
+      query.customer = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (companyName) {
-      const matchingCustomers = await Customer.find({ companyName }).select("_id").lean();
+      const names = toArray(companyName);
+      const matchingCustomers = await Customer.find({ companyName: { $in: names } }).select("_id").lean();
       const ids = matchingCustomers.map((c) => c._id);
       query.customer = { $in: ids };
     }
@@ -133,7 +140,8 @@ const getAllTickets = async (req, res) => {
     }
 
     if (assignedBy) {
-      query.assignedBy = assignedBy;
+      const vals = toArray(assignedBy);
+      query.assignedBy = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (category) {
@@ -153,7 +161,8 @@ const getAllTickets = async (req, res) => {
     }
 
     if (department) {
-      query.department = department;
+      const vals = toArray(department);
+      query.department = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (productType) {
@@ -161,7 +170,8 @@ const getAllTickets = async (req, res) => {
     }
 
     if (serviceType) {
-      query.serviceType = serviceType;
+      const vals = toArray(serviceType);
+      query.serviceType = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (scope) {
@@ -169,19 +179,21 @@ const getAllTickets = async (req, res) => {
     }
 
     if (source) {
-      query.source = source;
+      const vals = toArray(source);
+      query.source = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (acceptedBy) {
-      query.acceptedBy = acceptedBy;
-      console.log("Filtering by acceptedBy:", acceptedBy);
+      const vals = toArray(acceptedBy);
+      query.acceptedBy = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     // assignedConsultant: OR match across acceptedBy + assignedBy (for profile pages)
     if (assignedConsultant) {
+      const vals = toArray(assignedConsultant);
       query.$or = [
-        { acceptedBy: assignedConsultant },
-        { assignedBy: assignedConsultant },
+        { acceptedBy: vals.length > 1 ? { $in: vals } : vals[0] },
+        { assignedBy: vals.length > 1 ? { $in: vals } : vals[0] },
       ];
     }
 
