@@ -1,5 +1,7 @@
 import TicketAttachment from "../models/TicketAttachment.js";
 import Ticket from "../models/Ticket.js";
+import mongoose from "mongoose";
+import { getGridFSBucket } from "../config/gridfs.js";
 
 // @desc    Get all attachments
 // @route   GET /api/ticket-attachments
@@ -305,6 +307,18 @@ const deleteAttachment = async (req, res) => {
         success: false,
         message: "Attachment not found",
       });
+    }
+
+    // Extract GridFS file ID from filePath (e.g. "/api/files/abc123")
+    const fileIdMatch = attachment.filePath?.match(/\/api\/files\/([a-f\d]{24})$/i);
+    if (fileIdMatch) {
+      try {
+        const bucket = getGridFSBucket();
+        const fileId = new mongoose.Types.ObjectId(fileIdMatch[1]);
+        await bucket.delete(fileId);
+      } catch (gridfsErr) {
+        console.warn("GridFS delete warning:", gridfsErr.message);
+      }
     }
 
     await attachment.deleteOne();
