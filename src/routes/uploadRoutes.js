@@ -162,7 +162,8 @@ router.post("/upload", protect, upload.single("file"), async (req, res) => {
     readableStream.pipe(uploadStream);
 
     uploadStream.on("finish", () => {
-      const fileUrl = `/api/files/${uploadStream.id}`;
+      const baseUrl = process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`;
+      const fileUrl = `${baseUrl}/api/files/${uploadStream.id}`;
 
       res.status(200).json({
         success: true,
@@ -170,7 +171,7 @@ router.post("/upload", protect, upload.single("file"), async (req, res) => {
         data: {
           fileId: uploadStream.id.toString(),
           fileName: req.file.originalname,
-          filePath: fileUrl,
+          filePath: `/api/files/${uploadStream.id}`,
           fileSize: req.file.size,
           fileType: req.file.mimetype,
           url: fileUrl,
