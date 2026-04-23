@@ -242,7 +242,7 @@ router.get("/files/:id", async (req, res) => {
     // Set headers
     res.set("Content-Type", file.contentType || "application/octet-stream");
     res.set("Content-Length", file.length.toString());
-    res.set("Content-Disposition", `inline; filename="${file.metadata?.originalName || file.filename}"`);
+    res.set("Content-Disposition", `attachment; filename="${file.metadata?.originalName || file.filename}"`);
 
     // Stream file to response
     const downloadStream = bucket.openDownloadStream(fileId);
