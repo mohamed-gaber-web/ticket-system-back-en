@@ -106,6 +106,7 @@ const getAllTickets = async (req, res) => {
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
+      includeSubTickets,
     } = req.query;
 
     // Helper: split a comma-separated param into an array; returns [] if empty
@@ -233,10 +234,9 @@ const getAllTickets = async (req, res) => {
       ];
     }
 
-    // Exclude sub-tickets from general listings.
-    // When filtering by assignedConsultant (profile view), include them so the
-    // consultant can see all work assigned to them — main tickets AND sub-tickets.
-    if (!assignedConsultant) {
+    // Exclude sub-tickets from general listings unless explicitly requested.
+    // assignedConsultant (profile view) and includeSubTickets (export) bypass this.
+    if (!assignedConsultant && includeSubTickets !== 'true') {
       query.isSubTicket = { $ne: true };
     }
 
@@ -297,6 +297,7 @@ const getTicketById = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName description")
       .populate("assignedBy", "firstName lastName email")
+      .populate("acceptedBy", "firstName lastName email")
       .populate("environment", "name description")
       .populate("feature", "name")
       .populate("department", "name")
@@ -610,6 +611,7 @@ const updateTicket = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("acceptedBy", "firstName lastName email")
       .populate("environment", "name description")
       .populate("feature", "name")
       .populate("department", "name")
@@ -627,6 +629,14 @@ const updateTicket = async (req, res) => {
       if (ticket.assignedBy?._id) {
         recipients.push({ userId: ticket.assignedBy._id, userType: "consultant" });
       }
+      if (
+        ticket.acceptedBy?._id &&
+        ticket.acceptedBy._id.toString() !== ticket.assignedBy?._id?.toString()
+      ) {
+        recipients.push({ userId: ticket.acceptedBy._id, userType: "consultant" });
+      }
+
+      const assignee = ticket.acceptedBy || ticket.assignedBy || null;
 
       if (status === "resolved") {
         notifyAndEmail("ticket_resolved", {
@@ -634,7 +644,7 @@ const updateTicket = async (req, res) => {
           ticketNumber: ticket.ticketNumber,
           subject: ticket.subject,
           oldStatus,
-          assignee: ticket.assignedBy || null,
+          assignee,
           recipients,
         }).catch((err) => console.error("Email notification error:", err.message));
       } else if (status === "closed") {
@@ -643,7 +653,7 @@ const updateTicket = async (req, res) => {
           ticketNumber: ticket.ticketNumber,
           subject: ticket.subject,
           oldStatus,
-          assignee: ticket.assignedBy || null,
+          assignee,
           recipients,
         }).catch((err) => console.error("Email notification error:", err.message));
       } else if (status === "delivered") {
@@ -652,7 +662,7 @@ const updateTicket = async (req, res) => {
           ticketNumber: ticket.ticketNumber,
           subject: ticket.subject,
           oldStatus,
-          assignee: ticket.assignedBy || null,
+          assignee,
           recipients,
         }).catch((err) => console.error("Email notification error:", err.message));
       } else {
@@ -662,7 +672,7 @@ const updateTicket = async (req, res) => {
           subject: ticket.subject,
           oldStatus,
           newStatus: status,
-          assignee: ticket.assignedBy || null,
+          assignee,
           recipients,
         }).catch((err) => console.error("Email notification error:", err.message));
       }
@@ -712,7 +722,7 @@ const updateTicketStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered"];
+    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered", "not_related"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -752,9 +762,10 @@ const updateTicketStatus = async (req, res) => {
       .populate("customer", "companyName contactPerson email")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
-      .populate("assignedBy", "firstName lastName email");
+      .populate("assignedBy", "firstName lastName email")
+      .populate("acceptedBy", "firstName lastName email");
 
-    // Send email notifications based on new status (fire-and-forget)
+    // Build recipients: customer + all unique consultants (assignedBy + acceptedBy)
     const recipients = [];
     if (ticket.customer?._id) {
       recipients.push({ userId: ticket.customer._id, userType: "customer" });
@@ -762,6 +773,14 @@ const updateTicketStatus = async (req, res) => {
     if (ticket.assignedBy?._id) {
       recipients.push({ userId: ticket.assignedBy._id, userType: "consultant" });
     }
+    if (
+      ticket.acceptedBy?._id &&
+      ticket.acceptedBy._id.toString() !== ticket.assignedBy?._id?.toString()
+    ) {
+      recipients.push({ userId: ticket.acceptedBy._id, userType: "consultant" });
+    }
+
+    const assignee = ticket.acceptedBy || ticket.assignedBy || null;
 
     if (status === "resolved") {
       notifyAndEmail("ticket_resolved", {
@@ -769,7 +788,7 @@ const updateTicketStatus = async (req, res) => {
         ticketNumber: ticket.ticketNumber,
         subject: ticket.subject,
         oldStatus,
-        assignee: ticket.assignedBy || null,
+        assignee,
         recipients,
       }).catch((err) => console.error("Email notification error:", err.message));
     } else if (status === "closed") {
@@ -778,7 +797,7 @@ const updateTicketStatus = async (req, res) => {
         ticketNumber: ticket.ticketNumber,
         subject: ticket.subject,
         oldStatus,
-        assignee: ticket.assignedBy || null,
+        assignee,
         recipients,
       }).catch((err) => console.error("Email notification error:", err.message));
     } else if (status === "delivered") {
@@ -787,7 +806,7 @@ const updateTicketStatus = async (req, res) => {
         ticketNumber: ticket.ticketNumber,
         subject: ticket.subject,
         oldStatus,
-        assignee: ticket.assignedBy || null,
+        assignee,
         recipients,
       }).catch((err) => console.error("Email notification error:", err.message));
     } else {
@@ -797,7 +816,7 @@ const updateTicketStatus = async (req, res) => {
         subject: ticket.subject,
         oldStatus,
         newStatus: status,
-        assignee: ticket.assignedBy || null,
+        assignee,
         recipients,
       }).catch((err) => console.error("Email notification error:", err.message));
     }
@@ -1174,7 +1193,7 @@ const getTicketsByStatus = async (req, res) => {
     const { status } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered"];
+    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered", "not_related"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,

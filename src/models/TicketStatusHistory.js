@@ -19,6 +19,7 @@ const ticketStatusHistorySchema = mongoose.Schema(
         "closed",
         "reopened",
         "delivered",
+        "not_related",
       ],
     },
     newStatus: {
@@ -34,6 +35,7 @@ const ticketStatusHistorySchema = mongoose.Schema(
         "closed",
         "reopened",
         "delivered",
+        "not_related",
       ],
     },
     changedByUserId: {

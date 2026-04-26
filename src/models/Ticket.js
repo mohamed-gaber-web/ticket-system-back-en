@@ -44,6 +44,7 @@ const ticketSchema = mongoose.Schema(
         "closed",
         "reopened",
         "delivered",
+        "not_related",
       ],
       default: "new",
     },
@@ -302,7 +303,7 @@ ticketSchema.methods.checkSLABreach = function () {
 
   const now = new Date();
   const isBreached =
-    now > this.slaDueDate && !["closed", "resolved"].includes(this.status);
+    now > this.slaDueDate && !["closed", "resolved", "not_related"].includes(this.status);
 
   if (isBreached !== this.isSlaBreached) {
     this.isSlaBreached = isBreached;

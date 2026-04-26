@@ -397,6 +397,7 @@ const getStatusHistoryByTransition = async (req, res) => {
       "closed",
       "reopened",
       "delivered",
+      "not_related",
     ];
 
     if (!validStatuses.includes(oldStatus) || !validStatuses.includes(newStatus)) {
