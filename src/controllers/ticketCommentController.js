@@ -200,7 +200,7 @@ const getCommentsByTicket = async (req, res) => {
 // @access  Public
 const createComment = async (req, res) => {
   try {
-    const { ticket, commentText, commentByUserId, commentByUserType, isInternal } = req.body;
+    const { ticket, commentText, commentByUserId, commentByUserType, isInternal, images } = req.body;
 
     // Verify ticket exists
     const ticketExists = await Ticket.findById(ticket);
@@ -217,6 +217,7 @@ const createComment = async (req, res) => {
       commentByUserId,
       commentByUserType,
       isInternal: isInternal || false,
+      images: Array.isArray(images) ? images : [],
     });
 
     const foundComment = await TicketComment.findById(comment._id)

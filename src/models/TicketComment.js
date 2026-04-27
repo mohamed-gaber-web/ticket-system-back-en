@@ -25,6 +25,15 @@ const ticketCommentSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    images: [
+      {
+        url: { type: String, required: true },
+        fileName: { type: String, required: true },
+        fileSize: { type: Number },
+        fileType: { type: String },
+        fileId: { type: String },
+      },
+    ],
   },
   {
     timestamps: true,

@@ -1201,6 +1201,149 @@ const getAssignmentsByConsultant = async (req, res) => {
   }
 };
 
+// ─── Weekly Summary ──────────────────────────────────────────────────────────
+
+function countWeekdaysBetween(startDate, endDate) {
+  let count = 0;
+  const d = new Date(startDate);
+  const end = new Date(endDate);
+  while (d <= end) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
+}
+
+const getWeeklySummary = async (req, res) => {
+  try {
+    const { weekStart, weekEnd } = req.query;
+    if (!weekStart || !weekEnd) {
+      return res.status(400).json({ success: false, message: "weekStart and weekEnd are required" });
+    }
+
+    const start = new Date(weekStart);
+    const end = new Date(weekEnd);
+
+    const results = await TicketAssignment.aggregate([
+      { $unwind: "$assignedToConsultants" },
+      {
+        $match: {
+          "assignedToConsultants.assignedAt": { $gte: start, $lte: end },
+        },
+      },
+      {
+        $lookup: {
+          from: "tickets",
+          localField: "ticket",
+          foreignField: "_id",
+          as: "ticketData",
+        },
+      },
+      { $unwind: "$ticketData" },
+      {
+        $lookup: {
+          from: "consultants",
+          localField: "assignedToConsultants.consultant",
+          foreignField: "_id",
+          as: "consultantData",
+        },
+      },
+      { $unwind: "$consultantData" },
+      {
+        $group: {
+          _id: "$assignedToConsultants.consultant",
+          consultant: {
+            $first: {
+              _id: "$consultantData._id",
+              firstName: "$consultantData.firstName",
+              lastName: "$consultantData.lastName",
+              role: "$consultantData.role",
+              status: "$consultantData.status",
+            },
+          },
+          tickets: {
+            $push: {
+              _id: "$ticketData._id",
+              ticketNumber: "$ticketData.ticketNumber",
+              subject: "$ticketData.subject",
+              status: "$ticketData.status",
+              priority: "$ticketData.priority",
+              estimationDays: "$ticketData.estimationDays",
+              startDate: "$ticketData.startDate",
+              deliveryEstimationDate: "$ticketData.deliveryEstimationDate",
+              acceptedAt: "$ticketData.acceptedAt",
+              resolvedAt: "$ticketData.resolvedAt",
+              closedAt: "$ticketData.closedAt",
+              assignedAt: "$assignedToConsultants.assignedAt",
+              completedAt: "$assignedToConsultants.completedAt",
+              assignmentStatus: "$assignedToConsultants.status",
+            },
+          },
+        },
+      },
+    ]);
+
+    const DONE_STATUSES = ["resolved", "closed", "delivered", "tested"];
+
+    const data = results.map((row) => {
+      const tickets = row.tickets;
+      const resolvedCount = tickets.filter((t) => DONE_STATUSES.includes(t.status)).length;
+      const pendingCount = tickets.length - resolvedCount;
+      const totalEstimatedDays = tickets.reduce((sum, t) => sum + (t.estimationDays || 0), 0);
+
+      let totalActualDays = 0;
+      tickets.forEach((t) => {
+        const endDate = t.resolvedAt || t.closedAt;
+        if (endDate && t.acceptedAt) {
+          const diff = (new Date(endDate) - new Date(t.acceptedAt)) / (1000 * 60 * 60 * 24);
+          totalActualDays += Math.max(0, diff);
+        }
+      });
+
+      let availableDaysInWeek = 0;
+      if (pendingCount === 0 && tickets.length > 0) {
+        const completionDates = tickets
+          .map((t) => t.resolvedAt || t.closedAt)
+          .filter(Boolean)
+          .map((d) => new Date(d));
+        if (completionDates.length > 0) {
+          const lastDone = new Date(Math.max(...completionDates));
+          const dayAfter = new Date(lastDone);
+          dayAfter.setDate(dayAfter.getDate() + 1);
+          if (dayAfter <= end) {
+            availableDaysInWeek = countWeekdaysBetween(dayAfter, end);
+          }
+        }
+      }
+
+      return {
+        consultant: row.consultant,
+        totalTickets: tickets.length,
+        resolvedCount,
+        pendingCount,
+        totalEstimatedDays: Math.round(totalEstimatedDays * 10) / 10,
+        totalActualDays: Math.round(totalActualDays * 10) / 10,
+        availableDaysInWeek,
+        tickets,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      weekStart: start.toISOString(),
+      weekEnd: end.toISOString(),
+      data,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching weekly summary",
+      error: error.message,
+    });
+  }
+};
+
 export {
   getAllTicketAssignments,
   getTicketAssignmentById,
@@ -1219,4 +1362,5 @@ export {
   updateConsultantAssignmentStatus,
   removeConsultantFromAssignment,
   getAssignmentsByConsultant,
+  getWeeklySummary,
 };

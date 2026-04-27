@@ -17,12 +17,16 @@ import {
   updateConsultantAssignmentStatus,
   removeConsultantFromAssignment,
   getAssignmentsByConsultant,
+  getWeeklySummary,
 } from "../controllers/ticketAssignmentController.js";
 
 const router = express.Router();
 
 // Statistics route (must be before /:id route)
 router.get("/stats", getTicketAssignmentStats);
+
+// Weekly consultant summary
+router.get("/weekly-summary", getWeeklySummary);
 
 // Get assignments by team
 router.get("/team/:teamId", getAssignmentsByTeam);
