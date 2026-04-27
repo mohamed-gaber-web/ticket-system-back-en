@@ -240,10 +240,14 @@ router.get("/files/:id", async (req, res) => {
 
     const file = files[0];
 
-    // Set headers
+    // Set headers — use inline for images so the browser renders them directly
+    const isImage = (file.contentType || "").startsWith("image/");
     res.set("Content-Type", file.contentType || "application/octet-stream");
     res.set("Content-Length", file.length.toString());
-    res.set("Content-Disposition", `attachment; filename="${file.metadata?.originalName || file.filename}"`);
+    res.set(
+      "Content-Disposition",
+      `${isImage ? "inline" : "attachment"}; filename="${file.metadata?.originalName || file.filename}"`
+    );
 
     // Stream file to response
     const downloadStream = bucket.openDownloadStream(fileId);
