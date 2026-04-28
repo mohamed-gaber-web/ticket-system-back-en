@@ -10,9 +10,12 @@ import {
   getMyStats,
   updateCustomerPassword,
 } from "../controllers/customerController.js";
-import { protect, authorize } from "../middleware/authMiddleware.js";
+import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+
+const consultantAuth = [protect, authorize("consultant")];
+const adminAuth = [protect, authorize("consultant"), authorizeRole("admin")];
 
 /**
  * @swagger
@@ -31,7 +34,7 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.get("/stats", getCustomerStats);
+router.get("/stats", ...consultantAuth, getCustomerStats);
 router.get("/my-stats", protect, authorize("customer"), getMyStats);
 
 /**
@@ -159,7 +162,7 @@ router.get("/my-stats", protect, authorize("customer"), getMyStats);
  *       500:
  *         description: Server error
  */
-router.route("/").get(getAllCustomers).post(createCustomer);
+router.route("/").get(...consultantAuth, getAllCustomers).post(...adminAuth, createCustomer);
 
 /**
  * @swagger
@@ -278,10 +281,10 @@ router.put(
 
 router
   .route("/:id")
-  .get(getCustomerById)
-  .put(updateCustomer)
-  .delete(deleteCustomer);
+  .get(...consultantAuth, getCustomerById)
+  .put(...adminAuth, updateCustomer)
+  .delete(...adminAuth, deleteCustomer);
 
-router.put("/:id/password", updateCustomerPassword);
+router.put("/:id/password", ...adminAuth, updateCustomerPassword);
 
 export default router;

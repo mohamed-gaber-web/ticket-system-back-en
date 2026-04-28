@@ -8,8 +8,12 @@ import {
   getConsultantStats,
   updateConsultantPassword,
 } from "../controllers/consultantController.js";
+import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+
+const consultantAuth = [protect, authorize("consultant")];
+const adminAuth = [protect, authorize("consultant"), authorizeRole("admin")];
 
 /**
  * @swagger
@@ -51,7 +55,7 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.get("/stats", getConsultantStats);
+router.get("/stats", ...consultantAuth, getConsultantStats);
 
 /**
  * @swagger
@@ -179,7 +183,7 @@ router.get("/stats", getConsultantStats);
  *       500:
  *         description: Server error
  */
-router.route("/").get(getAllConsultants).post(createConsultant);
+router.route("/").get(...consultantAuth, getAllConsultants).post(...adminAuth, createConsultant);
 
 /**
  * @swagger
@@ -314,9 +318,9 @@ router.route("/").get(getAllConsultants).post(createConsultant);
  */
 router
   .route("/:id")
-  .get(getConsultantById)
-  .put(updateConsultant)
-  .delete(deleteConsultant);
+  .get(...consultantAuth, getConsultantById)
+  .put(...adminAuth, updateConsultant)
+  .delete(...adminAuth, deleteConsultant);
 
 /**
  * @swagger
@@ -375,6 +379,6 @@ router
  *       500:
  *         description: Server error
  */
-router.put("/:id/password", updateConsultantPassword);
+router.put("/:id/password", ...adminAuth, updateConsultantPassword);
 
 export default router;

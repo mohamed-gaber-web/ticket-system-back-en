@@ -223,7 +223,7 @@ router.post("/upload", protect, upload.single("file"), async (req, res) => {
  *       500:
  *         description: Server error during download
  */
-router.get("/files/:id", async (req, res) => {
+router.get("/files/:id", protect, async (req, res) => {
   try {
     const bucket = getGridFSBucket();
     const fileId = new mongoose.Types.ObjectId(req.params.id);
@@ -240,13 +240,14 @@ router.get("/files/:id", async (req, res) => {
 
     const file = files[0];
 
-    // Set headers — use inline for images so the browser renders them directly
-    const isImage = (file.contentType || "").startsWith("image/");
-    res.set("Content-Type", file.contentType || "application/octet-stream");
+    const contentType = file.contentType || "application/octet-stream";
+    // SVG must always be forced to attachment to prevent stored XSS
+    const isInlineImage = contentType.startsWith("image/") && contentType !== "image/svg+xml";
+    res.set("Content-Type", contentType);
     res.set("Content-Length", file.length.toString());
     res.set(
       "Content-Disposition",
-      `${isImage ? "inline" : "attachment"}; filename="${file.metadata?.originalName || file.filename}"`
+      `${isInlineImage ? "inline" : "attachment"}; filename="${file.metadata?.originalName || file.filename}"`
     );
 
     // Stream file to response
@@ -353,7 +354,7 @@ router.delete("/files/:id", protect, async (req, res) => {
  *       500:
  *         description: Server error
  */
-router.get("/files/:id/info", async (req, res) => {
+router.get("/files/:id/info", protect, async (req, res) => {
   try {
     const bucket = getGridFSBucket();
     const fileId = new mongoose.Types.ObjectId(req.params.id);

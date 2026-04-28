@@ -5,7 +5,6 @@ import TeamMember from "../models/TeamMember.js";
 import TeleSalesAgent from "../models/TeleSalesAgent.js";
 import { sendTokenResponse, generateResetToken } from "../utils/jwtUtils.js";
 import { sendPasswordResetEmail } from "../utils/emailService.js";
-import { log } from "console";
 
 // Helper function to get user model based on userType
 const getUserModel = (userType) => {
@@ -30,13 +29,11 @@ export const signup = async (req, res) => {
   try {
     const { userType, ...userData } = req.body;
 
-    // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
-    if (!userType || !validUserTypes.includes(userType)) {
+    // Only customers may self-register; staff accounts are created by admins
+    if (!userType || userType !== "customer") {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
+        message: "Invalid user type. Only customers may register via this endpoint.",
       });
     }
 
@@ -81,11 +78,8 @@ export const signin = async (req, res) => {
   try {
     const { email, password, userType } = req.body;
 
-    console.log("Sign in attempt - Email:", email, "UserType:", userType);
-
     // Validate input
     if (!email || !password || !userType) {
-      console.log("Missing required fields");
       return res.status(400).json({
         success: false,
         message: "Please provide email, password, and user type",
@@ -95,83 +89,51 @@ export const signin = async (req, res) => {
     // Validate userType
     const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
     if (!validUserTypes.includes(userType)) {
-      console.log("Invalid user type:", userType);
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
+        message: "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
       });
     }
 
     const Model = getUserModel(userType);
-    console.log("Using model for user type:", userType);
 
     // Find user and include password
     const user = await Model.findOne({ email }).select("+password");
 
-    console.log("User lookup complete", user ? "User found" : "User not found");
-
-    if (!user) {
-      console.log("User not found with email:", email);
+    if (!user || !user.password) {
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
-        debug: "User not found with this email",
       });
     }
-
-    console.log("User found - ID:", user._id, "Status:", user.status);
-
-    // Check if user has a password (important for debugging)
-    if (!user.password) {
-      console.error("User found but password is undefined. User ID:", user._id);
-      return res.status(500).json({
-        success: false,
-        message: "Account configuration error. Please contact support.",
-        error: "Password not set for this account",
-      });
-    }
-
-    console.log("Password exists, comparing...");
 
     // Check if password matches
     const isPasswordMatch = await user.comparePassword(password);
-    console.log("Password match result:", isPasswordMatch);
 
     if (!isPasswordMatch) {
-      console.log("Password mismatch for user:", email);
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
-        debug: "Password does not match",
       });
     }
 
     // Check user status
     if (user.status !== "active") {
-      console.log("User account is not active. Status:", user.status);
       return res.status(401).json({
         success: false,
         message: `Your account is ${user.status}. Please contact support.`,
       });
     }
 
-    console.log("Authentication successful, updating last login...");
-
     // Update last login
     await user.updateLastLogin();
-
-    console.log("Sending token response...");
 
     // Send token response
     return sendTokenResponse(user, 200, res, userType);
   } catch (error) {
-    console.error("Sign in error:", error);
     res.status(500).json({
       success: false,
       message: "Error signing in",
-      error: error.message,
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 };
@@ -252,7 +214,7 @@ export const updateProfile = async (req, res) => {
     const Model = getUserModel(req.userType);
 
     // Fields that cannot be updated via this route
-    const restrictedFields = ["password", "email", "role", "refreshToken"];
+    const restrictedFields = ["password", "email", "role", "status", "refreshToken"];
     const updateData = { ...req.body };
 
     // Remove restricted fields

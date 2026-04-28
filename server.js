@@ -2,6 +2,8 @@ import express from "express";
 import dotenv from "dotenv";
 import { connectDB } from "./src/config/db.js";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import routes from "./src/routes/index.js";
 import { startSLACron } from "./src/utils/slaCron.js";
@@ -24,10 +26,23 @@ const PORT = process.env.PORT || 8000;
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(helmet());
+app.use(cors({ origin: process.env.CLIENT_URL || false, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Rate limiting on auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { success: false, message: "Too many requests, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api/auth/signin", authLimiter);
+app.use("/api/auth/forgot-password", authLimiter);
+app.use("/api/auth/refresh-token", authLimiter);
 
 // Swagger API Documentation — dev only
 if (process.env.NODE_ENV !== "production") {
