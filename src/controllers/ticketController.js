@@ -176,7 +176,8 @@ const getAllTickets = async (req, res) => {
     }
 
     if (scope) {
-      query.scope = scope;
+      const vals = toArray(scope);
+      query.scope = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (source) {
@@ -253,6 +254,7 @@ const getAllTickets = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .populate("environment", "name description")
       .populate("feature", "name")
@@ -297,6 +299,7 @@ const getTicketById = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName description")
       .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .populate("environment", "name description")
       .populate("feature", "name")
@@ -358,6 +361,7 @@ const getTicketByNumber = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName")
       .populate({
         path: "comments",
         populate: {
@@ -463,6 +467,8 @@ const createTicket = async (req, res) => {
       estimationStartDate: estimation.estimationStartDate,
       deliveryEstimationDate: estimation.deliveryEstimationDate,
       estimationDays: estimation.estimationDays,
+      createdByType: req.userType,
+      createdByConsultant: req.userType === "consultant" ? req.user._id : undefined,
     });
 
     const populatedTicket = await Ticket.findById(ticket._id)
@@ -471,6 +477,7 @@ const createTicket = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName")
       .populate("environment", "name description")
       .populate("feature", "name")
       .populate("department", "name")
@@ -529,6 +536,7 @@ const createTicket = async (req, res) => {
 const updateTicket = async (req, res) => {
   try {
     const {
+      customer,
       subject,
       description,
       category,
@@ -578,6 +586,10 @@ const updateTicket = async (req, res) => {
       source,
     };
 
+    if (customer !== undefined) {
+      updateData.customer = customer;
+    }
+
     // Update timestamps based on status
     if (status && status !== ticket.status) {
       if (status === "resolved" && !ticket.resolvedAt) {
@@ -611,6 +623,7 @@ const updateTicket = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .populate("environment", "name description")
       .populate("feature", "name")
@@ -763,6 +776,7 @@ const updateTicketStatus = async (req, res) => {
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email");
 
     // Build recipients: customer + all unique consultants (assignedBy + acceptedBy)
@@ -878,7 +892,8 @@ const assignTicket = async (req, res) => {
       .populate("customer", "companyName contactPerson email")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
-      .populate("assignedBy", "firstName lastName email");
+      .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName");
 
     // Notify the assigned consultant (fire-and-forget)
     if (ticket.assignedBy) {
@@ -1012,7 +1027,8 @@ const addCustomerFeedback = async (req, res) => {
       .populate("customer", "companyName email")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
-      .populate("assignedBy", "firstName lastName email");
+      .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName");
 
     res.status(200).json({
       success: true,
@@ -1208,6 +1224,7 @@ const getTicketsByStatus = async (req, res) => {
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
+      .populate("createdByConsultant", "firstName lastName")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -1254,6 +1271,7 @@ const getTicketsByPriority = async (req, res) => {
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
+      .populate("createdByConsultant", "firstName lastName")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -1365,6 +1383,7 @@ const createSubTicket = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("createdByConsultant", "firstName lastName")
       .populate("environment", "name description")
       .populate("feature", "name")
       .populate("department", "name")
@@ -1456,6 +1475,7 @@ const getSubTickets = async (req, res) => {
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
+      .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))

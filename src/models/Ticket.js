@@ -60,6 +60,14 @@ const ticketSchema = mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Consultant",
     },
+    createdByType: {
+      type: String,
+      enum: ["customer", "consultant"],
+    },
+    createdByConsultant: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+    },
     acceptedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Consultant",
