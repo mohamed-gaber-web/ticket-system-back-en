@@ -28,11 +28,16 @@ const app = express();
 // Middleware
 app.use(helmet());
 
-// Support comma-separated origins in CLIENT_URL (e.g. "https://ts.growpath.net,http://localhost:5173")
-const allowedOrigins = (process.env.CLIENT_URL || '')
+// Known production frontend — always allowed
+const PRODUCTION_ORIGIN = 'https://ts.growpath.net';
+
+// Additional origins from env var (comma-separated, e.g. "http://localhost:5173")
+const envOrigins = (process.env.CLIENT_URL || '')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
+
+const allowedOrigins = Array.from(new Set([PRODUCTION_ORIGIN, ...envOrigins]));
 
 app.use(
   cors({
