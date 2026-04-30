@@ -99,6 +99,16 @@ const getAllTickets = async (req, res) => {
       createdDateTo,
       closedDateFrom,
       closedDateTo,
+      resolvedDateFrom,
+      resolvedDateTo,
+      deliveryDateFrom,
+      deliveryDateTo,
+      acceptedDateFrom,
+      acceptedDateTo,
+      deliveredDateFrom,
+      deliveredDateTo,
+      updatedDateFrom,
+      updatedDateTo,
       customerName,
       companyName,
       page = 1,
@@ -146,7 +156,8 @@ const getAllTickets = async (req, res) => {
     }
 
     if (category) {
-      query.category = category;
+      const vals = toArray(category);
+      query.category = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (isSlaBreached !== undefined) {
@@ -158,7 +169,8 @@ const getAllTickets = async (req, res) => {
     }
 
     if (feature) {
-      query.feature = feature;
+      const vals = toArray(feature);
+      query.feature = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
     if (department) {
@@ -224,6 +236,56 @@ const getAllTickets = async (req, res) => {
         const toDate = new Date(closedDateTo);
         toDate.setHours(23, 59, 59, 999);
         query.closedAt.$lte = toDate;
+      }
+    }
+
+    if (resolvedDateFrom || resolvedDateTo) {
+      query.resolvedAt = {};
+      if (resolvedDateFrom) query.resolvedAt.$gte = new Date(resolvedDateFrom);
+      if (resolvedDateTo) {
+        const toDate = new Date(resolvedDateTo);
+        toDate.setHours(23, 59, 59, 999);
+        query.resolvedAt.$lte = toDate;
+      }
+    }
+
+    if (deliveryDateFrom || deliveryDateTo) {
+      query.deliveryEstimationDate = {};
+      if (deliveryDateFrom) query.deliveryEstimationDate.$gte = new Date(deliveryDateFrom);
+      if (deliveryDateTo) {
+        const toDate = new Date(deliveryDateTo);
+        toDate.setHours(23, 59, 59, 999);
+        query.deliveryEstimationDate.$lte = toDate;
+      }
+    }
+
+    if (acceptedDateFrom || acceptedDateTo) {
+      query.acceptedAt = {};
+      if (acceptedDateFrom) query.acceptedAt.$gte = new Date(acceptedDateFrom);
+      if (acceptedDateTo) {
+        const toDate = new Date(acceptedDateTo);
+        toDate.setHours(23, 59, 59, 999);
+        query.acceptedAt.$lte = toDate;
+      }
+    }
+
+    if (deliveredDateFrom || deliveredDateTo) {
+      query.deliveredAt = {};
+      if (deliveredDateFrom) query.deliveredAt.$gte = new Date(deliveredDateFrom);
+      if (deliveredDateTo) {
+        const toDate = new Date(deliveredDateTo);
+        toDate.setHours(23, 59, 59, 999);
+        query.deliveredAt.$lte = toDate;
+      }
+    }
+
+    if (updatedDateFrom || updatedDateTo) {
+      query.updatedAt = {};
+      if (updatedDateFrom) query.updatedAt.$gte = new Date(updatedDateFrom);
+      if (updatedDateTo) {
+        const toDate = new Date(updatedDateTo);
+        toDate.setHours(23, 59, 59, 999);
+        query.updatedAt.$lte = toDate;
       }
     }
 
@@ -1471,8 +1533,9 @@ const getSubTickets = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const subTickets = await Ticket.find(query)
-      .populate("customer", "companyName email")
+      .populate("customer", "companyName email contactPerson")
       .populate("category", "name description")
+      .populate("scope", "name")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
       .populate("createdByConsultant", "firstName lastName")
