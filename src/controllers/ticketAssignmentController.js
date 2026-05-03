@@ -1228,8 +1228,15 @@ const getWeeklySummary = async (req, res) => {
     const results = await TicketAssignment.aggregate([
       { $unwind: "$assignedToConsultants" },
       {
+        // Show tickets that were active during the week:
+        // assigned before the week ends AND (not yet resolved OR resolved after week start)
         $match: {
-          "assignedToConsultants.assignedAt": { $gte: start, $lte: end },
+          "assignedToConsultants.assignedAt": { $lte: end },
+          $or: [
+            { "assignedToConsultants.completedAt": { $exists: false } },
+            { "assignedToConsultants.completedAt": null },
+            { "assignedToConsultants.completedAt": { $gte: start } },
+          ],
         },
       },
       {
@@ -1278,6 +1285,9 @@ const getWeeklySummary = async (req, res) => {
               assignedAt: "$assignedToConsultants.assignedAt",
               completedAt: "$assignedToConsultants.completedAt",
               assignmentStatus: "$assignedToConsultants.status",
+              internalDeliveryDate: "$ticketData.internalDeliveryDate",
+              durationHours: "$ticketData.durationHours",
+              scheduledWeek: "$ticketData.scheduledWeek",
             },
           },
         },
@@ -1285,12 +1295,14 @@ const getWeeklySummary = async (req, res) => {
     ]);
 
     const DONE_STATUSES = ["resolved", "closed", "delivered", "tested"];
+    const now = new Date();
 
     const data = results.map((row) => {
       const tickets = row.tickets;
       const resolvedCount = tickets.filter((t) => DONE_STATUSES.includes(t.status)).length;
       const pendingCount = tickets.length - resolvedCount;
       const totalEstimatedDays = tickets.reduce((sum, t) => sum + (t.estimationDays || 0), 0);
+      const totalActualHours = tickets.reduce((sum, t) => sum + (t.durationHours || 0), 0);
 
       let totalActualDays = 0;
       tickets.forEach((t) => {
@@ -1299,6 +1311,19 @@ const getWeeklySummary = async (req, res) => {
           const diff = (new Date(endDate) - new Date(t.acceptedAt)) / (1000 * 60 * 60 * 24);
           totalActualDays += Math.max(0, diff);
         }
+      });
+
+      // Annotate each ticket with delayedDays (vs customer-facing delivery date)
+      const ticketsWithDelay = tickets.map((t) => {
+        let delayedDays = 0;
+        if (t.deliveryEstimationDate) {
+          const deliveryDate = new Date(t.deliveryEstimationDate);
+          const endDate = t.resolvedAt || t.closedAt;
+          const compareDate = endDate ? new Date(endDate) : now;
+          const diff = Math.floor((compareDate - deliveryDate) / (1000 * 60 * 60 * 24));
+          delayedDays = Math.max(0, diff);
+        }
+        return { ...t, delayedDays };
       });
 
       let availableDaysInWeek = 0;
@@ -1324,8 +1349,9 @@ const getWeeklySummary = async (req, res) => {
         pendingCount,
         totalEstimatedDays: Math.round(totalEstimatedDays * 10) / 10,
         totalActualDays: Math.round(totalActualDays * 10) / 10,
+        totalActualHours: Math.round(totalActualHours * 10) / 10,
         availableDaysInWeek,
-        tickets,
+        tickets: ticketsWithDelay,
       };
     });
 

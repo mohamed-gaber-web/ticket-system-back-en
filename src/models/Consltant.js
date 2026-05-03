@@ -51,6 +51,11 @@ const consultantSchema = mongoose.Schema(
       enum: ["active", "inactive", "on_leave"],
       default: "active",
     },
+    monthlyTargetHours: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
     lastLogin: {
       type: Date,
     },

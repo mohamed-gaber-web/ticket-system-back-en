@@ -7,6 +7,8 @@ import {
   deleteConsultant,
   getConsultantStats,
   updateConsultantPassword,
+  getConsultantMonthlyHours,
+  getConsultantTotalHours,
 } from "../controllers/consultantController.js";
 import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
 
@@ -380,5 +382,8 @@ router
  *         description: Server error
  */
 router.put("/:id/password", ...adminAuth, updateConsultantPassword);
+
+router.get("/:id/monthly-hours", ...consultantAuth, getConsultantMonthlyHours);
+router.get("/:id/total-hours", ...consultantAuth, getConsultantTotalHours);
 
 export default router;

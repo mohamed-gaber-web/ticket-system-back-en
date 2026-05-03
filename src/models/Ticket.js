@@ -127,6 +127,18 @@ const ticketSchema = mongoose.Schema(
       type: Number, // snapshot of WorkingHours.estimationDays at creation time
       min: 0,
     },
+    internalDeliveryDate: {
+      type: Date,
+    },
+    scheduledWeek: {
+      type: Number,
+      min: 1,
+      max: 53,
+    },
+    durationHours: {
+      type: Number,
+      min: 0,
+    },
     environment: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Environment",

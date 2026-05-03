@@ -76,7 +76,6 @@ const populateCommentBy = async (comment) => {
 // @access  Public
 const getAllTickets = async (req, res) => {
   try {
-    console.log("=== RAW req.query ===", req.query);
     const {
       status,
       priority,
@@ -111,6 +110,7 @@ const getAllTickets = async (req, res) => {
       updatedDateTo,
       customerName,
       companyName,
+      scheduledWeek,
       page = 1,
       limit = 10,
       search,
@@ -202,6 +202,11 @@ const getAllTickets = async (req, res) => {
       query.acceptedBy = vals.length > 1 ? { $in: vals } : vals[0];
     }
 
+    if (scheduledWeek) {
+      const vals = toArray(scheduledWeek).map(Number).filter((n) => !isNaN(n));
+      if (vals.length) query.scheduledWeek = vals.length > 1 ? { $in: vals } : vals[0];
+    }
+
     // assignedConsultant: OR match across acceptedBy + assignedBy (for profile pages)
     if (assignedConsultant) {
       const vals = toArray(assignedConsultant);
@@ -290,11 +295,17 @@ const getAllTickets = async (req, res) => {
     }
 
     if (search) {
-      query.$or = [
+      const searchOr = [
         { ticketNumber: { $regex: search, $options: "i" } },
         { subject: { $regex: search, $options: "i" } },
         { description: { $regex: search, $options: "i" } },
       ];
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: searchOr }];
+        delete query.$or;
+      } else {
+        query.$or = searchOr;
+      }
     }
 
     // Exclude sub-tickets from general listings unless explicitly requested.
@@ -306,9 +317,6 @@ const getAllTickets = async (req, res) => {
     const skip = (page - 1) * limit;
     const sort = {};
     sort[sortBy] = sortOrder === "asc" ? 1 : -1;
-
-    console.log("Ticket query params:", JSON.stringify(req.query));
-    console.log("Ticket DB query:", JSON.stringify(query));
 
     const tickets = await Ticket.find(query)
       .populate("customer", "companyName email contactPerson")
@@ -477,6 +485,9 @@ const createTicket = async (req, res) => {
       scope,
       source,
       notifyEmails,
+      internalDeliveryDate,
+      scheduledWeek,
+      durationHours,
     } = req.body;
 
     // If user is a customer, automatically use their ID
@@ -526,6 +537,9 @@ const createTicket = async (req, res) => {
       scope: Array.isArray(scope) ? scope : scope ? [scope] : [],
       source,
       notifyEmails: Array.isArray(notifyEmails) ? notifyEmails : [],
+      internalDeliveryDate: req.userType === "consultant" ? internalDeliveryDate : undefined,
+      scheduledWeek: req.userType === "consultant" ? scheduledWeek : undefined,
+      durationHours: req.userType === "consultant" ? durationHours : undefined,
       estimationStartDate: estimation.estimationStartDate,
       deliveryEstimationDate: estimation.deliveryEstimationDate,
       estimationDays: estimation.estimationDays,
@@ -565,8 +579,6 @@ const createTicket = async (req, res) => {
       data: populatedTicket,
     });
   } catch (error) {
-    console.error("Create Ticket Error:", error);
-
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({
@@ -616,6 +628,9 @@ const updateTicket = async (req, res) => {
       serviceType,
       scope,
       source,
+      internalDeliveryDate,
+      scheduledWeek,
+      durationHours,
     } = req.body;
 
     let ticket = await Ticket.findById(req.params.id);
@@ -646,6 +661,9 @@ const updateTicket = async (req, res) => {
       serviceType,
       scope: Array.isArray(scope) ? scope : scope ? [scope] : [],
       source,
+      ...(internalDeliveryDate !== undefined && { internalDeliveryDate }),
+      ...(scheduledWeek !== undefined && { scheduledWeek }),
+      ...(durationHours !== undefined && { durationHours }),
     };
 
     if (customer !== undefined) {
@@ -1484,8 +1502,6 @@ const createSubTicket = async (req, res) => {
       data: populatedSubTicket,
     });
   } catch (error) {
-    console.error("Create Sub-Ticket Error:", error);
-
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({

@@ -1,4 +1,5 @@
 import Consultant from "../models/Consltant.js";
+import Ticket from "../models/Ticket.js";
 import { sendConsultantWelcomeEmail } from "../utils/emailService.js";
 
 // @desc    Get all consultants
@@ -105,6 +106,7 @@ const createConsultant = async (req, res) => {
       password,
       role,
       status,
+      monthlyTargetHours,
     } = req.body;
 
     const consultantExists = await Consultant.findOne({ email });
@@ -125,6 +127,7 @@ const createConsultant = async (req, res) => {
       password,
       role,
       status,
+      monthlyTargetHours: monthlyTargetHours ?? null,
     });
 
     const consultantResponse = await Consultant.findById(consultant._id).select(
@@ -171,6 +174,7 @@ const updateConsultant = async (req, res) => {
       position,
       role,
       status,
+      monthlyTargetHours,
     } = req.body;
 
     let consultant = await Consultant.findById(req.params.id);
@@ -202,6 +206,7 @@ const updateConsultant = async (req, res) => {
         position,
         role,
         status,
+        ...(monthlyTargetHours !== undefined && { monthlyTargetHours: monthlyTargetHours ?? null }),
       },
       {
         new: true,
@@ -371,6 +376,115 @@ const updateConsultantPassword = async (req, res) => {
   }
 };
 
+// @desc    Get consultant total actual hours (all time)
+// @route   GET /api/consultants/:id/total-hours
+// @access  Private (consultant)
+const getConsultantTotalHours = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const consultant = await Consultant.findById(id).select("_id");
+    if (!consultant) {
+      return res.status(404).json({ success: false, message: "Consultant not found" });
+    }
+
+    // Sum durationHours across all tickets where this consultant is involved
+    // (accepted, assigned by, or created by)
+    const result = await Ticket.aggregate([
+      {
+        $match: {
+          $or: [
+            { acceptedBy: consultant._id },
+            { assignedBy: consultant._id },
+            { createdByConsultant: consultant._id },
+          ],
+          durationHours: { $exists: true, $gt: 0 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalHours: { $sum: "$durationHours" },
+          ticketCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalHours: Math.round((result[0]?.totalHours || 0) * 10) / 10,
+        ticketCount: result[0]?.ticketCount || 0,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching total hours",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get consultant total actual hours per month
+// @route   GET /api/consultants/:id/monthly-hours
+// @access  Private (consultant)
+// Query params: year (number), month (0-indexed number, defaults to current month)
+const getConsultantMonthlyHours = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const now = new Date();
+    const year = parseInt(req.query.year) || now.getFullYear();
+    const month = req.query.month !== undefined ? parseInt(req.query.month) : now.getMonth();
+
+    const consultant = await Consultant.findById(id).select("_id");
+    if (!consultant) {
+      return res.status(404).json({ success: false, message: "Consultant not found" });
+    }
+
+    const monthStart = new Date(year, month, 1);
+    const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+    // Sum durationHours for tickets accepted by this consultant in the target month.
+    // Uses acceptedAt when available, falls back to createdAt.
+    const result = await Ticket.aggregate([
+      {
+        $match: {
+          acceptedBy: consultant._id,
+          durationHours: { $exists: true, $gt: 0 },
+          $or: [
+            { acceptedAt: { $gte: monthStart, $lte: monthEnd } },
+            { acceptedAt: null, createdAt: { $gte: monthStart, $lte: monthEnd } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalHours: { $sum: "$durationHours" },
+          ticketCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        year,
+        month,
+        totalHours: Math.round((result[0]?.totalHours || 0) * 10) / 10,
+        ticketCount: result[0]?.ticketCount || 0,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching monthly hours",
+      error: error.message,
+    });
+  }
+};
+
 export {
   getAllConsultants,
   getConsultantById,
@@ -379,4 +493,6 @@ export {
   deleteConsultant,
   getConsultantStats,
   updateConsultantPassword,
+  getConsultantMonthlyHours,
+  getConsultantTotalHours,
 };
