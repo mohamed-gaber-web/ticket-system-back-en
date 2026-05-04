@@ -40,10 +40,11 @@ const upload = multer({
       "application/x-zip",
     ];
 
-    if (allowedTypes.includes(file.mimetype)) {
+    const ext = file.originalname.split('.').pop()?.toLowerCase();
+    if (allowedTypes.includes(file.mimetype) || ext === 'zip') {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type. Only images, videos, documents, spreadsheets, and text files are allowed."));
+      cb(new Error("Invalid file type. Only images, videos, documents, spreadsheets, text files, and ZIP archives are allowed."));
     }
   },
 });
