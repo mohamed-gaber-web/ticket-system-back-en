@@ -7,12 +7,12 @@ import {
   deleteAgent,
   toggleAgentStatus,
 } from "../controllers/teleSalesAgentController.js";
-import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
+import { protect, authorizeTeleSalesAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// All routes: tele_sales admin only
-router.use(protect, authorize("tele_sales"), authorizeRole("admin"));
+// All routes: tele_sales admin OR consultant admin only
+router.use(protect, authorizeTeleSalesAdmin);
 
 router.post("/", createAgent);
 router.get("/", getAllAgents);

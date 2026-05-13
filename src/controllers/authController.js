@@ -128,6 +128,11 @@ export const signin = async (req, res) => {
     // Update last login
     await user.updateLastLogin();
 
+    // Populate department for consultants
+    if (userType === "consultant" && user.department) {
+      await user.populate("department", "name isActive");
+    }
+
     // Send token response
     return sendTokenResponse(user, 200, res, userType);
   } catch (error) {
@@ -188,6 +193,8 @@ export const getProfile = async (req, res) => {
         "slaMapping",
         "name responseTime resolutionTime"
       );
+    } else if (req.userType === "consultant") {
+      user = await Model.findById(req.user._id).populate("department", "name isActive");
     } else {
       user = await Model.findById(req.user._id);
     }

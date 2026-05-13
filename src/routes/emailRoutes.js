@@ -4,6 +4,7 @@ import {
   getEmailStats,
   sendTestEmail,
   sendCommentEmailToExternal,
+  sendTaskAssignedEmailHandler,
 } from "../controllers/emailController.js";
 import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
 
@@ -25,5 +26,8 @@ router.get("/test", ...adminOnly, sendTestEmail);
 
 // POST /api/emails/send-comment - Send a comment to external email recipients
 router.post("/send-comment", protect, sendCommentEmailToExternal);
+
+// POST /api/emails/send-task-assigned - Notify a consultant about a new task assignment
+router.post("/send-task-assigned", protect, sendTaskAssignedEmailHandler);
 
 export default router;

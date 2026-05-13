@@ -223,4 +223,80 @@ const sendCommentEmailToExternal = async (req, res) => {
   }
 };
 
-export { getEmailLogs, getEmailStats, sendTestEmail, sendCommentEmailToExternal };
+// @desc    Send task-assigned email to the consultant
+// @route   POST /api/emails/send-task-assigned
+// @access  Private
+const sendTaskAssignedEmailHandler = async (req, res) => {
+  try {
+    const {
+      taskId,
+      taskName,
+      description,
+      departmentName,
+      startDate,
+      endDate,
+      scheduledWeek,
+      weekRange,
+      duration,
+      status,
+      recipients,
+      senderName,
+    } = req.body;
+
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ success: false, message: "No recipients provided" });
+    }
+    if (!taskName) {
+      return res.status(400).json({ success: false, message: "Task name is required" });
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const taskUrl = taskId ? `${frontendUrl}/tasks/${taskId}` : `${frontendUrl}/tasks`;
+
+    const fmtDate = (d) => {
+      if (!d) return null;
+      return new Date(d).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    };
+
+    const descriptionRow = description ? `<p><strong>Description:</strong> ${description}</p>` : "";
+    const weekRow = scheduledWeek != null
+      ? `<p><strong>Scheduled Week:</strong> W${scheduledWeek}${weekRange ? ` (${weekRange})` : ""}</p>`
+      : "";
+    const durationRow = duration != null ? `<p><strong>Duration:</strong> ${duration}h</p>` : "";
+    const startDateRow = startDate ? `<p><strong>Start Date:</strong> ${fmtDate(startDate)}</p>` : "";
+    const endDateRow = endDate ? `<p><strong>End Date:</strong> ${fmtDate(endDate)}</p>` : "";
+
+    const results = await Promise.allSettled(
+      recipients.map((email) =>
+        sendEmail(
+          email,
+          `New Task Assigned: ${taskName}`,
+          "task-assigned",
+          {
+            headerTitle: "Task Assigned",
+            assigneeName: email,
+            taskName,
+            descriptionRow,
+            departmentName: departmentName || "—",
+            status: status || "pending",
+            weekRow,
+            durationRow,
+            startDateRow,
+            endDateRow,
+            senderName: senderName || "System",
+            taskUrl,
+          }
+        )
+      )
+    );
+
+    const sent = results.filter((r) => r.status === "fulfilled" && r.value?.success).length;
+    const failed = results.length - sent;
+
+    res.status(200).json({ success: true, message: `Emails sent: ${sent}, failed: ${failed}`, sent, failed });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error sending task assigned email", error: error.message });
+  }
+};
+
+export { getEmailLogs, getEmailStats, sendTestEmail, sendCommentEmailToExternal, sendTaskAssignedEmailHandler };

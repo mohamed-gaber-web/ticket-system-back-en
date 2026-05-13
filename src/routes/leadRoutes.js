@@ -15,12 +15,12 @@ import {
   deleteFollowUp,
 } from "../controllers/followUpController.js";
 import { addAttachment, getAttachments, deleteAttachment } from "../controllers/leadAttachmentController.js";
-import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
+import { protect, authorizeTeleSalesAccess, authorizeRole } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Base middleware: must be tele_sales
-router.use(protect, authorize("tele_sales"));
+// Base middleware: tele_sales OR consultant admin OR consultant sales/marketing
+router.use(protect, authorizeTeleSalesAccess);
 
 // Lead CRUD
 router.post("/", createLead);

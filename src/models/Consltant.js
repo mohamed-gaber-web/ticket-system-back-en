@@ -46,6 +46,11 @@ const consultantSchema = mongoose.Schema(
       enum: ["consultant", "senior_consultant", "admin"],
       default: "consultant",
     },
+    department: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Department",
+      default: null,
+    },
     status: {
       type: String,
       enum: ["active", "inactive", "on_leave"],

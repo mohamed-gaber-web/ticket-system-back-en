@@ -34,7 +34,7 @@ export const protect = async (req, res, next) => {
     if (decoded.userType === "customer") {
       user = await Customer.findById(decoded.id).select("-password");
     } else if (decoded.userType === "consultant") {
-      user = await Consultant.findById(decoded.id).select("-password");
+      user = await Consultant.findById(decoded.id).select("-password").populate("department", "name");
     } else if (decoded.userType === "team_member") {
       user = await TeamMember.findById(decoded.id)
         .select("-password")
@@ -96,6 +96,36 @@ export const authorizeRole = (...roles) => {
     }
     next();
   };
+};
+
+// Allow tele_sales users OR consultant admin OR consultant with sales/marketing department
+export const authorizeTeleSalesAccess = (req, res, next) => {
+  const { userType, user } = req;
+  if (userType === "tele_sales") return next();
+  if (userType === "consultant") {
+    if (user.role === "admin") return next();
+    const dept =
+      typeof user.department === "object"
+        ? String(user.department?.name ?? "").toLowerCase()
+        : String(user.department ?? "").toLowerCase();
+    if (dept === "sales" || dept === "marketing") return next();
+  }
+  return res.status(403).json({
+    success: false,
+    message: `User type '${userType}' is not authorized to access this route`,
+  });
+};
+
+// Allow tele_sales admin OR consultant admin (for agent management)
+export const authorizeTeleSalesAdmin = (req, res, next) => {
+  const { userType, user } = req;
+  if ((userType === "tele_sales" || userType === "consultant") && user.role === "admin") {
+    return next();
+  }
+  return res.status(403).json({
+    success: false,
+    message: "Admin access required for this route",
+  });
 };
 
 // Authorize company admin customers only

@@ -1,0 +1,23 @@
+<p>Dear {{assigneeName}},</p>
+
+<p>A new task has been assigned to you. Please review the details below and take action accordingly.</p>
+
+<div class="info-box">
+  <h3>Task Details</h3>
+  <p><strong>Task Name:</strong> {{taskName}}</p>
+  {{descriptionRow}}
+  <p><strong>Department:</strong> {{departmentName}}</p>
+  <p><strong>Status:</strong> {{status}}</p>
+  {{weekRow}}
+  {{durationRow}}
+  {{startDateRow}}
+  {{endDateRow}}
+</div>
+
+<p>Assigned by: <strong>{{senderName}}</strong></p>
+
+<a href="{{taskUrl}}" class="btn">View Task</a>
+
+<p>Please review this task at your earliest convenience.</p>
+
+<p>Best regards,<br>{{senderName}}</p>

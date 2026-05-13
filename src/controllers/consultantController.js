@@ -31,6 +31,7 @@ const getAllConsultants = async (req, res) => {
 
     const consultants = await Consultant.find(query)
       .select("-password -refreshToken")
+      .populate("department", "name")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -61,6 +62,7 @@ const getConsultantById = async (req, res) => {
   try {
     const consultant = await Consultant.findById(req.params.id)
       .select("-password -refreshToken")
+      .populate("department", "name")
       .populate({
         path: "assignments",
         select: "title status priority createdAt",
@@ -107,6 +109,7 @@ const createConsultant = async (req, res) => {
       role,
       status,
       monthlyTargetHours,
+      department,
     } = req.body;
 
     const consultantExists = await Consultant.findOne({ email });
@@ -128,11 +131,12 @@ const createConsultant = async (req, res) => {
       role,
       status,
       monthlyTargetHours: monthlyTargetHours ?? null,
+      ...(department && { department }),
     });
 
-    const consultantResponse = await Consultant.findById(consultant._id).select(
-      "-password -refreshToken"
-    );
+    const consultantResponse = await Consultant.findById(consultant._id)
+      .select("-password -refreshToken")
+      .populate("department", "name");
 
     sendConsultantWelcomeEmail(consultant).catch((err) =>
       console.error("Consultant welcome email error:", err.message)
@@ -175,6 +179,7 @@ const updateConsultant = async (req, res) => {
       role,
       status,
       monthlyTargetHours,
+      department,
     } = req.body;
 
     let consultant = await Consultant.findById(req.params.id);
@@ -207,12 +212,13 @@ const updateConsultant = async (req, res) => {
         role,
         status,
         ...(monthlyTargetHours !== undefined && { monthlyTargetHours: monthlyTargetHours ?? null }),
+        ...(department !== undefined && { department: department || null }),
       },
       {
         new: true,
         runValidators: true,
       }
-    ).select("-password -refreshToken");
+    ).select("-password -refreshToken").populate("department", "name");
 
     res.status(200).json({
       success: true,
