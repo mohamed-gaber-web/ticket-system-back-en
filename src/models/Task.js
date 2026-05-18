@@ -44,6 +44,11 @@ const taskSchema = mongoose.Schema(
       enum: ["pending", "in_progress", "done"],
       default: "pending",
     },
+    responsible: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+      default: null,
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Consultant",

@@ -30,6 +30,8 @@ import teleSalesAgentRoutes from "./teleSalesAgentRoutes.js";
 import leadRoutes from "./leadRoutes.js";
 import followUpRoutes from "./followUpRoutes.js";
 import taskRoutes from "./taskRoutes.js";
+import taskAttachmentRoutes from "./taskAttachmentRoutes.js";
+import taskCommentRoutes from "./taskCommentRoutes.js";
 
 const router = express.Router();
 
@@ -122,6 +124,8 @@ router.use("/followups", followUpRoutes);
 
 // Task routes
 router.use("/tasks", taskRoutes);
+router.use("/task-attachments", taskAttachmentRoutes);
+router.use("/task-comments", taskCommentRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

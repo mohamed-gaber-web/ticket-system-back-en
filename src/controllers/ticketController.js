@@ -634,6 +634,9 @@ const updateTicket = async (req, res) => {
       internalDeliveryDate,
       scheduledWeek,
       durationHours,
+      resolvedAt,
+      closedAt,
+      createdAt,
     } = req.body;
 
     let ticket = await Ticket.findById(req.params.id);
@@ -668,18 +671,20 @@ const updateTicket = async (req, res) => {
       ...(internalDeliveryDate !== undefined && { internalDeliveryDate }),
       ...(scheduledWeek !== undefined && { scheduledWeek }),
       ...(durationHours !== undefined && { durationHours }),
+      ...(resolvedAt !== undefined && { resolvedAt }),
+      ...(closedAt !== undefined && { closedAt }),
     };
 
     if (customer !== undefined) {
       updateData.customer = customer;
     }
 
-    // Update timestamps based on status
+    // Update timestamps based on status (skip if a manual value was provided)
     if (status && status !== ticket.status) {
-      if (status === "resolved" && !ticket.resolvedAt) {
+      if (status === "resolved" && !ticket.resolvedAt && !updateData.resolvedAt) {
         updateData.resolvedAt = new Date();
       }
-      if (status === "closed" && !ticket.closedAt) {
+      if (status === "closed" && !ticket.closedAt && !updateData.closedAt) {
         updateData.closedAt = new Date();
       }
       if (status === "delivered" && !ticket.deliveredAt) {
@@ -716,6 +721,16 @@ const updateTicket = async (req, res) => {
       .populate("serviceType", "name")
       .populate("scope", "name")
       .populate("source", "name");
+
+    // createdAt is immutable in Mongoose timestamps — update it directly via the driver
+    if (createdAt && ticket) {
+      await Ticket.collection.updateOne(
+        { _id: ticket._id },
+        { $set: { createdAt: new Date(createdAt) } }
+      );
+      ticket = ticket.toObject({ virtuals: true });
+      ticket.createdAt = new Date(createdAt);
+    }
 
     // Send email on any status change
     if (status && status !== oldStatus) {

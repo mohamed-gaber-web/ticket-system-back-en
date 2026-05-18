@@ -1,5 +1,4 @@
 import Task from "../models/Task.js";
-import Department from "../models/Department.js";
 
 // @desc    Get all tasks (filtered by department for non-admins)
 // @route   GET /api/tasks
@@ -19,12 +18,12 @@ const getTasks = async (req, res) => {
 
     const query = {};
 
-    // Non-admin consultants only see their department's tasks
+    // Non-admin consultants only see their department's tasks.
+    // req.user.department is populated as an object by the auth middleware.
     const callerDept = req.user?.department;
     const callerRole = req.user?.role;
     if (callerRole !== "admin" && callerDept) {
-      const deptDoc = await Department.findOne({ name: new RegExp(`^${callerDept}$`, "i") });
-      if (deptDoc) query.department = deptDoc._id;
+      query.department = typeof callerDept === "object" ? callerDept._id : callerDept;
     } else if (department) {
       query.department = department;
     }
@@ -47,15 +46,17 @@ const getTasks = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const tasks = await Task.find(query)
-      .populate("assignedTo", "firstName lastName email")
-      .populate("createdBy", "firstName lastName")
-      .populate("department", "name")
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip(skip);
-
-    const total = await Task.countDocuments(query);
+    const [tasks, total] = await Promise.all([
+      Task.find(query)
+        .populate("assignedTo", "firstName lastName email")
+        .populate("responsible", "firstName lastName email")
+        .populate("createdBy", "firstName lastName")
+        .populate("department", "name")
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .skip(skip),
+      Task.countDocuments(query),
+    ]);
 
     res.status(200).json({
       success: true,
@@ -76,6 +77,7 @@ const getTaskById = async (req, res) => {
   try {
     const task = await Task.findById(req.params.id)
       .populate("assignedTo", "firstName lastName email")
+      .populate("responsible", "firstName lastName email")
       .populate("createdBy", "firstName lastName")
       .populate("department", "name");
 
@@ -93,7 +95,7 @@ const getTaskById = async (req, res) => {
 // @route   POST /api/tasks
 const createTask = async (req, res) => {
   try {
-    const { name, description, department, startDate, endDate, assignedTo, scheduledWeek, duration, status } = req.body;
+    const { name, description, department, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status } = req.body;
 
     const task = await Task.create({
       name,
@@ -102,6 +104,7 @@ const createTask = async (req, res) => {
       startDate: startDate || null,
       endDate: endDate || null,
       assignedTo: assignedTo || null,
+      responsible: responsible || null,
       scheduledWeek: scheduledWeek ?? null,
       duration: duration ?? null,
       status: status || "pending",
@@ -110,6 +113,7 @@ const createTask = async (req, res) => {
 
     const populated = await Task.findById(task._id)
       .populate("assignedTo", "firstName lastName email")
+      .populate("responsible", "firstName lastName email")
       .populate("createdBy", "firstName lastName")
       .populate("department", "name");
 
@@ -127,12 +131,7 @@ const createTask = async (req, res) => {
 // @route   PATCH /api/tasks/:id
 const updateTask = async (req, res) => {
   try {
-    const { name, description, department, startDate, endDate, assignedTo, scheduledWeek, duration, status } = req.body;
-
-    const task = await Task.findById(req.params.id);
-    if (!task) {
-      return res.status(404).json({ success: false, message: "Task not found" });
-    }
+    const { name, description, department, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status } = req.body;
 
     const updateData = {};
     if (name !== undefined) updateData.name = name;
@@ -141,6 +140,7 @@ const updateTask = async (req, res) => {
     if (startDate !== undefined) updateData.startDate = startDate || null;
     if (endDate !== undefined) updateData.endDate = endDate || null;
     if (assignedTo !== undefined) updateData.assignedTo = assignedTo || null;
+    if (responsible !== undefined) updateData.responsible = responsible || null;
     if (scheduledWeek !== undefined) updateData.scheduledWeek = scheduledWeek ?? null;
     if (duration !== undefined) updateData.duration = duration ?? null;
     if (status !== undefined) updateData.status = status;
@@ -150,8 +150,13 @@ const updateTask = async (req, res) => {
       runValidators: true,
     })
       .populate("assignedTo", "firstName lastName email")
+      .populate("responsible", "firstName lastName email")
       .populate("createdBy", "firstName lastName")
       .populate("department", "name");
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Task not found" });
+    }
 
     res.status(200).json({ success: true, message: "Task updated successfully", data: updated });
   } catch (error) {
