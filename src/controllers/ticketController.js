@@ -294,11 +294,21 @@ const getAllTickets = async (req, res) => {
       }
     }
 
+    let matchedSubTicketIds = [];
+
     if (search) {
+      // Find sub-tickets whose ticketNumber matches so they can be returned directly
+      const matchingSubs = await Ticket.find({
+        ticketNumber: { $regex: search, $options: "i" },
+        isSubTicket: true,
+      }).select("_id").lean();
+      matchedSubTicketIds = matchingSubs.map((s) => s._id);
+
       const searchOr = [
         { ticketNumber: { $regex: search, $options: "i" } },
         { subject: { $regex: search, $options: "i" } },
         { description: { $regex: search, $options: "i" } },
+        ...(matchedSubTicketIds.length ? [{ _id: { $in: matchedSubTicketIds } }] : []),
       ];
       if (query.$or) {
         query.$and = [{ $or: query.$or }, { $or: searchOr }];
@@ -309,9 +319,28 @@ const getAllTickets = async (req, res) => {
     }
 
     // Exclude sub-tickets from general listings unless explicitly requested.
-    // assignedConsultant (profile view) and includeSubTickets (export) bypass this.
-    if (!assignedConsultant && includeSubTickets !== 'true') {
-      query.isSubTicket = { $ne: true };
+    // When the search matched specific sub-tickets, allow those through.
+    if (!assignedConsultant && includeSubTickets !== "true") {
+      if (matchedSubTicketIds.length > 0) {
+        // Convert any top-level $or to $and so we can safely append
+        if (query.$or && !query.$and) {
+          query.$and = [{ $or: query.$or }];
+          delete query.$or;
+        }
+        const subTicketFilter = {
+          $or: [
+            { isSubTicket: { $ne: true } },
+            { _id: { $in: matchedSubTicketIds } },
+          ],
+        };
+        if (query.$and) {
+          query.$and.push(subTicketFilter);
+        } else {
+          query.$and = [subTicketFilter];
+        }
+      } else {
+        query.isSubTicket = { $ne: true };
+      }
     }
 
     const skip = (page - 1) * limit;
