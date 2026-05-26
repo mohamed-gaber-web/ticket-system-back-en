@@ -32,6 +32,7 @@ import followUpRoutes from "./followUpRoutes.js";
 import taskRoutes from "./taskRoutes.js";
 import taskAttachmentRoutes from "./taskAttachmentRoutes.js";
 import taskCommentRoutes from "./taskCommentRoutes.js";
+import aiRoutes from "./aiRoutes.js";
 
 const router = express.Router();
 
@@ -126,6 +127,9 @@ router.use("/followups", followUpRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/task-attachments", taskAttachmentRoutes);
 router.use("/task-comments", taskCommentRoutes);
+
+// AI routes
+router.use("/ai", aiRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);
