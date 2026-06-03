@@ -82,6 +82,40 @@ Return ONLY the JSON object, no explanation, no markdown.`;
   }
 };
 
+export const suggestDescription = async (req, res) => {
+  try {
+    const { subject } = req.body;
+    if (!subject || subject.trim().length < 3) {
+      return res.status(400).json({ success: false, message: "Subject is too short to suggest a description." });
+    }
+
+    const prompt = `You are a support agent drafting a support ticket. Based only on the short subject line below, write a clear, professional ticket description that a developer reading it would understand.
+
+Subject: "${subject.trim()}"
+
+Guidelines:
+- Expand the subject into 2-4 sentences describing the problem.
+- State what the user is experiencing, where/when it happens, and the expected vs. actual behaviour.
+- Use neutral, professional language. Do not invent specific names, IDs, or dates.
+- Return ONLY the description text — no greeting, no subject line, no quotes, no markdown.`;
+
+    const text = await generate(prompt);
+    const suggestedDescription = (text || "")
+      .replace(/^```[a-z]*\n?|\n?```$/g, "")
+      .replace(/^["']|["']$/g, "")
+      .trim();
+
+    if (!suggestedDescription) {
+      return res.status(422).json({ success: false, message: "Could not generate a description. Please try again." });
+    }
+
+    res.json({ success: true, data: { suggestedDescription } });
+  } catch (error) {
+    console.error("AI suggestDescription error:", error?.message || error);
+    res.status(422).json({ success: false, message: "Could not generate a description. Please try again." });
+  }
+};
+
 export const draftReply = async (req, res) => {
   try {
     const { ticketSubject, ticketDescription, ticketStatus, previousComments } = req.body;
