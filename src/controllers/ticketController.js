@@ -711,28 +711,26 @@ const updateTicket = async (req, res) => {
       updateData.customer = customer;
     }
 
-    // Update timestamps based on status (skip if a manual value was provided)
-    if (status && status !== ticket.status) {
-      if (status === "resolved" && !ticket.resolvedAt && !updateData.resolvedAt) {
-        updateData.resolvedAt = new Date();
-      }
-      if (status === "closed" && !ticket.closedAt && !updateData.closedAt) {
-        updateData.closedAt = new Date();
-      }
-      if (status === "delivered" && !ticket.deliveredAt) {
-        updateData.deliveredAt = new Date();
-      }
-    }
-
     // Track who performed this update / resolution / closure (consultants only)
     const actingConsultantId = req.userType === "consultant" ? req.user._id : null;
     if (actingConsultantId) {
       updateData.updatedBy = actingConsultantId;
-      if (updateData.resolvedAt && !ticket.resolvedAt) {
-        updateData.resolvedBy = actingConsultantId;
+    }
+
+    // Update timestamps / actor based on the status transition (status is changing
+    // *into* resolved/closed), not on an empty timestamp — so re-resolving/re-closing
+    // re-stamps who & when. A manually supplied resolvedAt/closedAt is preserved.
+    if (status && status !== ticket.status) {
+      if (status === "resolved") {
+        if (!updateData.resolvedAt) updateData.resolvedAt = new Date();
+        if (actingConsultantId) updateData.resolvedBy = actingConsultantId;
       }
-      if (updateData.closedAt && !ticket.closedAt) {
-        updateData.closedBy = actingConsultantId;
+      if (status === "closed") {
+        if (!updateData.closedAt) updateData.closedAt = new Date();
+        if (actingConsultantId) updateData.closedBy = actingConsultantId;
+      }
+      if (status === "delivered" && !ticket.deliveredAt) {
+        updateData.deliveredAt = new Date();
       }
     }
 
@@ -906,12 +904,14 @@ const updateTicketStatus = async (req, res) => {
       updateData.updatedBy = actingConsultantId;
     }
 
-    // Update timestamps based on status
-    if (status === "resolved" && !ticket.resolvedAt) {
+    // Update timestamps / actor based on the status transition. Keyed on the
+    // transition (status is changing *into* resolved/closed) rather than on an
+    // empty timestamp, so re-resolving/re-closing re-stamps who & when.
+    if (status === "resolved" && ticket.status !== "resolved") {
       updateData.resolvedAt = new Date();
       if (actingConsultantId) updateData.resolvedBy = actingConsultantId;
     }
-    if (status === "closed" && !ticket.closedAt) {
+    if (status === "closed" && ticket.status !== "closed") {
       updateData.closedAt = new Date();
       if (actingConsultantId) updateData.closedBy = actingConsultantId;
     }
