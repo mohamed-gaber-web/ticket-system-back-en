@@ -327,11 +327,11 @@ router.route("/").get(getAllTickets).post(protect, createTicket);
 router
   .route("/:id")
   .get(getTicketById)
-  .put(updateTicket)
+  .put(protect, updateTicket)
   .delete(deleteTicket);
 
 // Update ticket status
-router.patch("/:id/status", updateTicketStatus);
+router.patch("/:id/status", protect, updateTicketStatus);
 
 // Assign ticket
 router.patch("/:id/assign", assignTicket);
