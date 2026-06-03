@@ -400,6 +400,9 @@ const getTicketById = async (req, res) => {
       .populate("assignedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
+      .populate("updatedBy", "firstName lastName email")
+      .populate("resolvedBy", "firstName lastName email")
+      .populate("closedBy", "firstName lastName email")
       .populate("environment", "name description")
       .populate("feature", "name")
       .populate("department", "name")
@@ -721,6 +724,18 @@ const updateTicket = async (req, res) => {
       }
     }
 
+    // Track who performed this update / resolution / closure (consultants only)
+    const actingConsultantId = req.userType === "consultant" ? req.user._id : null;
+    if (actingConsultantId) {
+      updateData.updatedBy = actingConsultantId;
+      if (updateData.resolvedAt && !ticket.resolvedAt) {
+        updateData.resolvedBy = actingConsultantId;
+      }
+      if (updateData.closedAt && !ticket.closedAt) {
+        updateData.closedBy = actingConsultantId;
+      }
+    }
+
     // Set first response time if being assigned for the first time
     if (assignedBy && !ticket.firstResponseAt) {
       updateData.firstResponseAt = new Date();
@@ -743,6 +758,9 @@ const updateTicket = async (req, res) => {
       .populate("assignedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
+      .populate("updatedBy", "firstName lastName email")
+      .populate("resolvedBy", "firstName lastName email")
+      .populate("closedBy", "firstName lastName email")
       .populate("environment", "name description")
       .populate("feature", "name")
       .populate("department", "name")
@@ -882,12 +900,20 @@ const updateTicketStatus = async (req, res) => {
 
     const updateData = { status };
 
+    // Track who performed this status change / resolution / closure (consultants only)
+    const actingConsultantId = req.userType === "consultant" ? req.user._id : null;
+    if (actingConsultantId) {
+      updateData.updatedBy = actingConsultantId;
+    }
+
     // Update timestamps based on status
     if (status === "resolved" && !ticket.resolvedAt) {
       updateData.resolvedAt = new Date();
+      if (actingConsultantId) updateData.resolvedBy = actingConsultantId;
     }
     if (status === "closed" && !ticket.closedAt) {
       updateData.closedAt = new Date();
+      if (actingConsultantId) updateData.closedBy = actingConsultantId;
     }
     if (status === "delivered" && !ticket.deliveredAt) {
       updateData.deliveredAt = new Date();
@@ -905,7 +931,10 @@ const updateTicketStatus = async (req, res) => {
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
-      .populate("acceptedBy", "firstName lastName email");
+      .populate("acceptedBy", "firstName lastName email")
+      .populate("updatedBy", "firstName lastName email")
+      .populate("resolvedBy", "firstName lastName email")
+      .populate("closedBy", "firstName lastName email");
 
     // Build recipients: customer + all unique consultants (assignedBy + acceptedBy)
     const recipients = [];

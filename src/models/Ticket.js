@@ -93,6 +93,21 @@ const ticketSchema = mongoose.Schema(
     deliveredAt: {
       type: Date,
     },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+      default: null,
+    },
+    resolvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+      default: null,
+    },
+    closedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+      default: null,
+    },
     slaDueDate: {
       type: Date,
     },
