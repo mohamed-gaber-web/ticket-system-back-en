@@ -5,7 +5,7 @@ import Department from "../models/Department.js";
 // @access  Public
 export const createDepartment = async (req, res) => {
   try {
-    const { name, isActive } = req.body;
+    const { name, isActive, head } = req.body;
 
     // Validate required fields
     if (!name || name.trim() === "") {
@@ -22,6 +22,10 @@ export const createDepartment = async (req, res) => {
 
     if (typeof isActive === "boolean") {
       departmentData.isActive = isActive;
+    }
+
+    if (head !== undefined) {
+      departmentData.head = head || null;
     }
 
     const department = new Department(departmentData);
@@ -88,6 +92,7 @@ export const getAllDepartments = async (req, res) => {
     const total = await Department.countDocuments(query);
 
     const departments = await Department.find(query)
+      .populate("head", "firstName lastName email")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -115,7 +120,10 @@ export const getAllDepartments = async (req, res) => {
 // @access  Public
 export const getDepartmentById = async (req, res) => {
   try {
-    const department = await Department.findById(req.params.id);
+    const department = await Department.findById(req.params.id).populate(
+      "head",
+      "firstName lastName email"
+    );
 
     if (!department) {
       return res.status(404).json({
@@ -149,7 +157,7 @@ export const getDepartmentById = async (req, res) => {
 // @access  Public
 export const updateDepartment = async (req, res) => {
   const updates = Object.keys(req.body);
-  const allowedUpdates = ["name", "isActive"];
+  const allowedUpdates = ["name", "isActive", "head"];
   const isValidOperation = updates.every((update) =>
     allowedUpdates.includes(update)
   );

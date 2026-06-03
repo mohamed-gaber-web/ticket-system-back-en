@@ -11,6 +11,13 @@ const departmentSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // Department head — a Consultant who approves employee requests (vacation/excuse)
+  // for employees in this department.
+  head: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Consultant",
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

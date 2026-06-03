@@ -32,6 +32,8 @@ import followUpRoutes from "./followUpRoutes.js";
 import taskRoutes from "./taskRoutes.js";
 import taskAttachmentRoutes from "./taskAttachmentRoutes.js";
 import taskCommentRoutes from "./taskCommentRoutes.js";
+import employeeRequestRoutes from "./employeeRequestRoutes.js";
+import employeeBalanceRoutes from "./employeeBalanceRoutes.js";
 import aiRoutes from "./aiRoutes.js";
 
 const router = express.Router();
@@ -127,6 +129,10 @@ router.use("/followups", followUpRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/task-attachments", taskAttachmentRoutes);
 router.use("/task-comments", taskCommentRoutes);
+
+// Employee Request routes (vacation / excuse / approvals / balances)
+router.use("/employee-requests", employeeRequestRoutes);
+router.use("/employee-balances", employeeBalanceRoutes);
 
 // AI routes
 router.use("/ai", aiRoutes);
