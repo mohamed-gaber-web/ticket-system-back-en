@@ -551,6 +551,38 @@ export const sendDeliveryReminderEmail = async (ticket, recipient, variables = {
   );
 };
 
+// Notify all admins that a new vacation request needs review.
+// `admins` is an array of { email, firstName, lastName }. Each admin gets a
+// personalised email. Returns the per-admin send results.
+export const sendVacationRequestEmail = async (admins, variables = {}) => {
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const requestUrl = `${frontendUrl}/employee-requests/approvals`;
+
+  const results = [];
+  for (const admin of admins) {
+    if (!admin?.email) continue;
+    const result = await sendEmail(
+      admin.email,
+      "New Vacation Request Awaiting Review",
+      "vacation-request",
+      {
+        headerTitle: "New Vacation Request",
+        adminName: `${admin.firstName || ""} ${admin.lastName || ""}`.trim() || "Admin",
+        employeeName: variables.employeeName || "N/A",
+        department: variables.department || "N/A",
+        startDate: variables.startDate || "N/A",
+        endDate: variables.endDate || "N/A",
+        days: variables.days ?? "N/A",
+        reason: variables.reason || "—",
+        requestUrl,
+      },
+      { userId: admin._id, userType: "consultant" }
+    );
+    results.push({ adminEmail: admin.email, ...result });
+  }
+  return results;
+};
+
 export const sendSlaBreachEmail = async (ticket, assignee, variables = {}) => {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const ticketUrl = `${frontendUrl}/tickets/view/${ticket._id}`;

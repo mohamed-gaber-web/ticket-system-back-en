@@ -1,7 +1,41 @@
 import EmployeeRequest from "../models/EmployeeRequest.js";
 import EmployeeBalance from "../models/EmployeeBalance.js";
-import Department from "../models/Department.js";
+import Consultant from "../models/Consltant.js";
 import { ensureBalance, USERTYPE_TO_MODEL } from "./employeeBalanceController.js";
+import { sendVacationRequestEmail } from "../utils/emailService.js";
+
+// Email all admins that a new vacation request needs review.
+// Fire-and-forget: never blocks or fails the request creation.
+const notifyAdminsOfVacationRequest = async (request) => {
+  try {
+    const admins = await Consultant.find({ role: "admin", status: "active" })
+      .select("firstName lastName email")
+      .lean();
+    if (!admins.length) return;
+
+    const employee = request.employee;
+    const employeeName =
+      employee && typeof employee === "object"
+        ? `${employee.firstName} ${employee.lastName}`
+        : "Employee";
+    const department =
+      request.department && typeof request.department === "object"
+        ? request.department.name
+        : "N/A";
+    const fmt = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "N/A");
+
+    await sendVacationRequestEmail(admins, {
+      employeeName,
+      department,
+      startDate: fmt(request.startDate),
+      endDate: fmt(request.endDate),
+      days: request.days,
+      reason: request.reason,
+    });
+  } catch (err) {
+    console.error("Vacation request admin email error:", err.message);
+  }
+};
 
 // --- helpers ---------------------------------------------------------------
 
@@ -37,15 +71,9 @@ const resolveDepartmentId = (req) => {
   return null;
 };
 
-// Whether the current user may approve/reject the given request.
-// Approvers are consultants: admins (any request) or the head of the request's department.
-const canApprove = async (req, request) => {
-  if (req.userType !== "consultant") return false;
-  if (req.user?.role === "admin") return true;
-  if (!request.department) return false;
-  const dept = await Department.findById(request.department).select("head");
-  return !!dept?.head && String(dept.head) === String(req.user._id);
-};
+// Whether the current user may approve/reject requests. Only consultant admins can approve.
+const canApprove = (req) =>
+  req.userType === "consultant" && req.user?.role === "admin";
 
 // Apply an approved vacation to the employee's balance (once).
 const applyVacationToBalance = async (request) => {
@@ -111,13 +139,13 @@ const getRequests = async (req, res) => {
       query.employee = req.user._id;
       query.employeeModel = USERTYPE_TO_MODEL[req.userType];
     } else if (scope === "approvals") {
-      // Requests this user can review: admins see all; heads see their departments'.
+      // Only admins can review requests; everyone else gets an empty queue.
       if (!isAdmin) {
-        const headedDepts = await Department.find({ head: req.user._id }).select("_id");
-        query.department = { $in: headedDepts.map((d) => d._id) };
-      } else if (department) {
-        query.department = department;
+        return res.status(200).json({
+          success: true, count: 0, total: 0, page: 1, pages: 0, data: [],
+        });
       }
+      if (department) query.department = department;
     } else {
       // scope=all — admin only; otherwise fall back to own requests
       if (!isAdmin) {
@@ -246,6 +274,11 @@ const createRequest = async (req, res) => {
     const created = await EmployeeRequest.create(doc);
     const populated = await populateRequest(EmployeeRequest.findById(created._id));
 
+    // Notify all admins by email when a vacation request is submitted (non-blocking)
+    if (populated.type === "vacation") {
+      notifyAdminsOfVacationRequest(populated);
+    }
+
     res.status(201).json({
       success: true,
       message: "Request submitted successfully",
@@ -274,7 +307,7 @@ const approveRequest = async (req, res) => {
     if (!request) {
       return res.status(404).json({ success: false, message: "Request not found" });
     }
-    if (!(await canApprove(req, request))) {
+    if (!canApprove(req)) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to approve this request",
@@ -322,7 +355,7 @@ const rejectRequest = async (req, res) => {
     if (!request) {
       return res.status(404).json({ success: false, message: "Request not found" });
     }
-    if (!(await canApprove(req, request))) {
+    if (!canApprove(req)) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to reject this request",
