@@ -54,6 +54,11 @@ const taskSchema = mongoose.Schema(
       ref: "Consultant",
       default: null,
     },
+    parentTask: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -64,6 +69,7 @@ taskSchema.index({ department: 1 });
 taskSchema.index({ status: 1 });
 taskSchema.index({ assignedTo: 1 });
 taskSchema.index({ scheduledWeek: 1 });
+taskSchema.index({ parentTask: 1 });
 
 const Task = mongoose.model("Task", taskSchema);
 export default Task;

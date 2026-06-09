@@ -14,6 +14,7 @@ const getTasks = async (req, res) => {
       startDate,
       endDate,
       search,
+      parentTask,
     } = req.query;
 
     const query = {};
@@ -33,6 +34,10 @@ const getTasks = async (req, res) => {
       if (startDate) query.startDate.$gte = new Date(startDate);
       if (endDate) query.startDate.$lte = new Date(endDate);
     }
+
+    // When parentTask is provided fetch subtasks of that task;
+    // otherwise default to top-level tasks only (parentTask: null).
+    query.parentTask = parentTask ? parentTask : null;
 
     if (status) query.status = status;
     if (assignedTo) query.assignedTo = assignedTo;
@@ -58,13 +63,27 @@ const getTasks = async (req, res) => {
       Task.countDocuments(query),
     ]);
 
+    // Attach subTaskCount to each task in one aggregation query
+    const taskIds = tasks.map((t) => t._id);
+    const subCounts = await Task.aggregate([
+      { $match: { parentTask: { $in: taskIds } } },
+      { $group: { _id: "$parentTask", count: { $sum: 1 } } },
+    ]);
+    const countMap = {};
+    subCounts.forEach(({ _id, count }) => { countMap[_id.toString()] = count; });
+
+    const data = tasks.map((t) => ({
+      ...t.toObject(),
+      subTaskCount: countMap[t._id.toString()] ?? 0,
+    }));
+
     res.status(200).json({
       success: true,
-      count: tasks.length,
+      count: data.length,
       total,
       page: parseInt(page),
       pages: Math.ceil(total / parseInt(limit)),
-      data: tasks,
+      data,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching tasks", error: error.message });
@@ -95,7 +114,7 @@ const getTaskById = async (req, res) => {
 // @route   POST /api/tasks
 const createTask = async (req, res) => {
   try {
-    const { name, description, department, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status } = req.body;
+    const { name, description, department, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status, parentTask } = req.body;
 
     const task = await Task.create({
       name,
@@ -109,6 +128,7 @@ const createTask = async (req, res) => {
       duration: duration ?? null,
       status: status || "pending",
       createdBy: req.user?._id || null,
+      parentTask: parentTask || null,
     });
 
     const populated = await Task.findById(task._id)
@@ -131,7 +151,7 @@ const createTask = async (req, res) => {
 // @route   PATCH /api/tasks/:id
 const updateTask = async (req, res) => {
   try {
-    const { name, description, department, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status } = req.body;
+    const { name, description, department, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status, parentTask } = req.body;
 
     const updateData = {};
     if (name !== undefined) updateData.name = name;
@@ -144,6 +164,7 @@ const updateTask = async (req, res) => {
     if (scheduledWeek !== undefined) updateData.scheduledWeek = scheduledWeek ?? null;
     if (duration !== undefined) updateData.duration = duration ?? null;
     if (status !== undefined) updateData.status = status;
+    if (parentTask !== undefined) updateData.parentTask = parentTask || null;
 
     const updated = await Task.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
@@ -176,6 +197,8 @@ const deleteTask = async (req, res) => {
     if (!task) {
       return res.status(404).json({ success: false, message: "Task not found" });
     }
+    // Cascade-delete all subtasks belonging to this task
+    await Task.deleteMany({ parentTask: req.params.id });
     await task.deleteOne();
     res.status(200).json({ success: true, message: "Task deleted successfully", data: {} });
   } catch (error) {
