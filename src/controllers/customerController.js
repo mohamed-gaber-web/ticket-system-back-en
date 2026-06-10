@@ -499,8 +499,8 @@ const getMyStats = async (req, res) => {
   try {
     let customerIds = [req.user._id];
 
-    // company_admin sees stats for all users in their company
-    if (req.user.role === "company_admin" && req.user.company) {
+    // All company members see stats for their entire company
+    if (req.user.company) {
       const companyCustomers = await Customer.find({
         company: req.user.company,
       }).select("_id");
