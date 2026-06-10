@@ -896,6 +896,16 @@ const updateTicketStatus = async (req, res) => {
       });
     }
 
+    // Customers may only move customer_pending → new
+    if (req.userType === "customer") {
+      if (ticket.status !== "customer_pending" || status !== "new") {
+        return res.status(403).json({
+          success: false,
+          message: "Customers can only update status to 'new' when ticket is in 'customer pending' state",
+        });
+      }
+    }
+
     const updateData = { status };
 
     // Track who performed this status change / resolution / closure (consultants only)
