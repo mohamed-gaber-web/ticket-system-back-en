@@ -28,6 +28,8 @@ const notificationSchema = new mongoose.Schema(
         "ticket_resolved",
         "ticket_closed",
         "ticket_reopened",
+        "vacation_request",
+        "excuse_request",
       ],
     },
     message: {

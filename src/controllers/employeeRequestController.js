@@ -1,12 +1,61 @@
 import EmployeeRequest from "../models/EmployeeRequest.js";
 import EmployeeBalance from "../models/EmployeeBalance.js";
 import Consultant from "../models/Consltant.js";
+import Notification from "../models/notification.js";
 import { ensureBalance, USERTYPE_TO_MODEL } from "./employeeBalanceController.js";
 import { sendVacationRequestEmail } from "../utils/emailService.js";
+import { emitNotification } from "../socket/io.js";
 
-// Email all admins that a new vacation request needs review.
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "N/A");
+
+// One-line summary used as the in-app notification message.
+const requestSummary = (request, employeeName) => {
+  if (request.type === "vacation") {
+    return `${employeeName} requested vacation (${request.days ?? 0} day(s)): ${fmtDate(
+      request.startDate
+    )} → ${fmtDate(request.endDate)}`;
+  }
+  return `${employeeName} requested an excuse (${request.hours ?? 0} hour(s)) on ${fmtDate(
+    request.date
+  )}: ${request.fromTime ?? ""}–${request.toTime ?? ""}`;
+};
+
+// Create an in-app notification for every admin and push it over the socket
+// in real time so the bell/dropdown updates without a refetch.
+const notifyAdminsInApp = async (request, admins, employeeName) => {
+  if (!admins.length) return;
+
+  const notificationType =
+    request.type === "vacation" ? "vacation_request" : "excuse_request";
+  const message = requestSummary(request, employeeName);
+
+  const docs = admins.map((a) => ({
+    userId: a._id,
+    userType: "consultant",
+    notificationType,
+    message,
+  }));
+
+  const inserted = await Notification.insertMany(docs);
+
+  emitNotification(
+    inserted.map((doc) => ({
+      _id: doc._id,
+      userId: doc.userId,
+      userType: doc.userType,
+      notificationType: doc.notificationType,
+      message: doc.message,
+      isRead: false,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    }))
+  );
+};
+
+// Notify all admins that a new request needs review: an in-app notification
+// (vacation + excuse) plus an email (vacation only, existing behaviour).
 // Fire-and-forget: never blocks or fails the request creation.
-const notifyAdminsOfVacationRequest = async (request) => {
+const notifyAdminsOfRequest = async (request) => {
   try {
     const admins = await Consultant.find({ role: "admin", status: "active" })
       .select("firstName lastName email")
@@ -18,22 +67,30 @@ const notifyAdminsOfVacationRequest = async (request) => {
       employee && typeof employee === "object"
         ? `${employee.firstName} ${employee.lastName}`
         : "Employee";
-    const department =
-      request.department && typeof request.department === "object"
-        ? request.department.name
-        : "N/A";
-    const fmt = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "N/A");
 
-    await sendVacationRequestEmail(admins, {
-      employeeName,
-      department,
-      startDate: fmt(request.startDate),
-      endDate: fmt(request.endDate),
-      days: request.days,
-      reason: request.reason,
-    });
+    // In-app notification + real-time push for both vacation and excuse
+    await notifyAdminsInApp(request, admins, employeeName).catch((err) =>
+      console.error("Employee request in-app notify error:", err.message)
+    );
+
+    // Email only for vacation requests (existing behaviour)
+    if (request.type === "vacation") {
+      const department =
+        request.department && typeof request.department === "object"
+          ? request.department.name
+          : "N/A";
+
+      await sendVacationRequestEmail(admins, {
+        employeeName,
+        department,
+        startDate: fmtDate(request.startDate),
+        endDate: fmtDate(request.endDate),
+        days: request.days,
+        reason: request.reason,
+      });
+    }
   } catch (err) {
-    console.error("Vacation request admin email error:", err.message);
+    console.error("Notify admins of request error:", err.message);
   }
 };
 
@@ -274,10 +331,8 @@ const createRequest = async (req, res) => {
     const created = await EmployeeRequest.create(doc);
     const populated = await populateRequest(EmployeeRequest.findById(created._id));
 
-    // Notify all admins by email when a vacation request is submitted (non-blocking)
-    if (populated.type === "vacation") {
-      notifyAdminsOfVacationRequest(populated);
-    }
+    // Notify all admins (in-app + email) that a new request needs review (non-blocking)
+    notifyAdminsOfRequest(populated);
 
     res.status(201).json({
       success: true,

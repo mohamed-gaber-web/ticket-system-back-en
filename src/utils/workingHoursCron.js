@@ -215,23 +215,30 @@ const sendDeliveryReminders = async () => {
 // ---------------------------------------------------------------------------
 
 export const startWorkingHoursCron = () => {
-  // Auto-close: check once per hour
-  cron.schedule("0 * * * *", () => {
+  // Day-of-week "0-5" = Sunday → Friday, i.e. every day EXCEPT Saturday (6).
+  // Reminders and auto-actions must not run on Saturday; transactional emails
+  // are event-driven and keep firing every day of the week.
+  const SKIP_SATURDAY = "0-5";
+
+  // Auto-close: check once per hour, every day except Saturday
+  cron.schedule(`0 * * * ${SKIP_SATURDAY}`, () => {
     console.log("🔒 Running auto-close check...");
     autoCloseResolvedTickets();
   });
 
-  // Pending reminder: check once per day at 9 AM
-  cron.schedule("0 9 * * *", () => {
+  // Pending reminder: check once per day at 9 AM, every day except Saturday
+  cron.schedule(`0 9 * * ${SKIP_SATURDAY}`, () => {
     console.log("📨 Running pending reminder check...");
     sendPendingReminders();
   });
 
-  // Delivery reminder: check once per day at 8 AM
-  cron.schedule("0 8 * * *", () => {
+  // Delivery reminder: check once per day at 8 AM, every day except Saturday
+  cron.schedule(`0 8 * * ${SKIP_SATURDAY}`, () => {
     console.log("🔔 Running delivery reminder check...");
     sendDeliveryReminders();
   });
 
-  console.log("✅ Working hours cron jobs started (auto-close: hourly | reminders: daily)");
+  console.log(
+    "✅ Working hours cron jobs started (auto-close: hourly | reminders: daily | skips Saturday)"
+  );
 };

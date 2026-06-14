@@ -3,6 +3,7 @@ import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import TeamMember from "../models/TeamMember.js";
 import Ticket from "../models/Ticket.js";
+import { emitNotification } from "../socket/io.js";
 import {
   sendTicketCreatedEmail,
   sendTicketAssignedEmail,
@@ -74,7 +75,32 @@ const createNotification = async (eventType, data) => {
     message,
   }));
 
-  await Notification.insertMany(notifications);
+  const inserted = await Notification.insertMany(notifications);
+
+  // Push each saved notification to its owner's room in real time.
+  // Shape matches the frontend Notification type so the bell/dropdown can
+  // render it without a refetch.
+  const ticketMeta = {
+    _id: ticket._id,
+    ticketNumber: data.ticketNumber || ticket.ticketNumber,
+    subject: data.subject || ticket.subject,
+    status: ticket.status,
+    priority: ticket.priority,
+  };
+
+  emitNotification(
+    inserted.map((doc) => ({
+      _id: doc._id,
+      ticket: ticketMeta,
+      userId: doc.userId,
+      userType: doc.userType,
+      notificationType: doc.notificationType,
+      message: doc.message,
+      isRead: false,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    }))
+  );
 };
 
 // ---------------------------------------------------------------------------

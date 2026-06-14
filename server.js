@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import dotenv from "dotenv";
 import { connectDB } from "./src/config/db.js";
 import cors from "cors";
@@ -8,6 +9,7 @@ import cookieParser from "cookie-parser";
 import routes from "./src/routes/index.js";
 import { startSLACron } from "./src/utils/slaCron.js";
 import { startWorkingHoursCron } from "./src/utils/workingHoursCron.js";
+import { initSocket } from "./src/socket/io.js";
 
 // Load environment variables
 dotenv.config();
@@ -105,8 +107,12 @@ const startServer = async () => {
     // Connect to MongoDB and initialize GridFS first
     await connectDB();
 
-    // Then start the Express server
-    app.listen(PORT, "0.0.0.0", () => {
+    // Wrap Express in an HTTP server so Socket.io can attach to it
+    const server = http.createServer(app);
+    initSocket(server, allowedOrigins);
+
+    // Then start the server
+    server.listen(PORT, "0.0.0.0", () => {
       console.log(`Server is running on port ${PORT}`);
       console.log(
         `API Documentation available at: http://localhost:${PORT}/api-docs`
