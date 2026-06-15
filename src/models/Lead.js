@@ -57,6 +57,10 @@ const leadSchema = mongoose.Schema(
       type: String,
       trim: true,
     },
+    address: {
+      type: String,
+      trim: true,
+    },
 
     // Lead Details
     leadSource: {

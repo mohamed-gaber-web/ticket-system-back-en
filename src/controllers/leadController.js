@@ -25,6 +25,151 @@ export const createLead = async (req, res) => {
   }
 };
 
+const EMAIL_REGEX = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+const VALID_STATUSES = Lead.schema.path("status").enumValues;
+const VALID_SOURCES = Lead.schema.path("leadSource").enumValues;
+const VALID_PRIORITIES = Lead.schema.path("priority").enumValues;
+
+const cleanStr = (v) => (v == null ? "" : String(v).trim());
+
+// @desc    Bulk import leads (from Excel / CSV / markdown parsed on the client)
+// @route   POST /api/leads/import
+// @access  Private (tele_sales)
+export const importLeads = async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body) ? req.body : req.body.leads;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, message: "No leads provided to import" });
+    }
+    if (rows.length > 5000) {
+      return res.status(400).json({ success: false, message: "Cannot import more than 5000 leads at once" });
+    }
+
+    // Optional batch-wide defaults
+    const defaultAssignedTo =
+      req.user.role === "admin" && cleanStr(req.body.assignedTo) ? cleanStr(req.body.assignedTo) : undefined;
+    const defaultStatus = VALID_STATUSES.includes(req.body.status) ? req.body.status : "New Lead";
+    const defaultSource = VALID_SOURCES.includes(req.body.leadSource) ? req.body.leadSource : undefined;
+    const skipDuplicates = req.body.skipDuplicates !== false; // default true
+
+    const errors = [];
+    const seenInBatch = new Set();
+    const candidates = []; // { doc, phoneKeys }
+
+    rows.forEach((row, i) => {
+      const rowNum = i + 1;
+      const contactPersonName = cleanStr(row.contactPersonName ?? row.contactName ?? row.name);
+
+      // Collect phone numbers (accept `phones` array or flat phone/phone2 fields)
+      let phoneValues = [];
+      if (Array.isArray(row.phones)) {
+        phoneValues = row.phones.map((p) => (typeof p === "string" ? { number: p } : p));
+      } else {
+        phoneValues = [
+          { number: row.phone ?? row.mobile, label: "Primary" },
+          { number: row.phone2 ?? row.mobile2, label: "Secondary" },
+        ];
+      }
+      const phones = phoneValues
+        .map((p) => ({ number: cleanStr(p?.number), label: cleanStr(p?.label) || "Primary" }))
+        .filter((p) => p.number);
+
+      if (!contactPersonName) {
+        errors.push({ row: rowNum, reason: "Missing contact person name" });
+        return;
+      }
+      if (phones.length === 0) {
+        errors.push({ row: rowNum, reason: "Missing phone number" });
+        return;
+      }
+
+      // Duplicate detection within the batch (by any phone number)
+      const phoneKeys = phones.map((p) => p.number);
+      if (skipDuplicates && phoneKeys.some((k) => seenInBatch.has(k))) {
+        errors.push({ row: rowNum, reason: "Duplicate phone within file", duplicate: true });
+        return;
+      }
+      phoneKeys.forEach((k) => seenInBatch.add(k));
+
+      const email = cleanStr(row.email);
+      const tags = Array.isArray(row.tags) ? row.tags.map(cleanStr).filter(Boolean) : [];
+      const department = cleanStr(row.department);
+      if (department) tags.push(department);
+
+      const doc = {
+        companyName: cleanStr(row.companyName) || contactPersonName, // company is required; fall back to contact
+        contactPersonName,
+        phones,
+        jobTitle: cleanStr(row.jobTitle) || undefined,
+        industry: cleanStr(row.industry) || undefined,
+        companySize: cleanStr(row.companySize) || undefined,
+        address: cleanStr(row.address) || undefined,
+        leadSource: VALID_SOURCES.includes(row.leadSource) ? row.leadSource : defaultSource,
+        priority: VALID_PRIORITIES.includes(row.priority) ? row.priority : "Medium",
+        status: VALID_STATUSES.includes(row.status) ? row.status : defaultStatus,
+        tags,
+        createdBy: req.user._id,
+      };
+      if (email && EMAIL_REGEX.test(email)) doc.email = email.toLowerCase();
+      if (defaultAssignedTo) doc.assignedTo = defaultAssignedTo;
+
+      candidates.push({ doc, phoneKeys, rowNum });
+    });
+
+    // Duplicate detection against existing leads (by phone number)
+    let toInsert = candidates;
+    let dbDuplicates = 0;
+    if (skipDuplicates && candidates.length > 0) {
+      const allNumbers = [...new Set(candidates.flatMap((c) => c.phoneKeys))];
+      const existing = await Lead.find({ "phones.number": { $in: allNumbers } }).select("phones").lean();
+      const existingNumbers = new Set(existing.flatMap((l) => l.phones.map((p) => p.number)));
+      toInsert = candidates.filter((c) => {
+        const dup = c.phoneKeys.some((k) => existingNumbers.has(k));
+        if (dup) {
+          dbDuplicates += 1;
+          errors.push({ row: c.rowNum, reason: "Phone already exists in database", duplicate: true });
+        }
+        return !dup;
+      });
+    }
+
+    let inserted = 0;
+    if (toInsert.length > 0) {
+      try {
+        const result = await Lead.insertMany(
+          toInsert.map((c) => c.doc),
+          { ordered: false }
+        );
+        inserted = result.length;
+      } catch (bulkErr) {
+        // ordered:false → partial success; insertedDocs holds the ones that made it
+        inserted = bulkErr.insertedDocs?.length ?? 0;
+        const writeErrors = bulkErr.writeErrors || bulkErr.results || [];
+        writeErrors.forEach((we) => {
+          const idx = we.index ?? we?.err?.index;
+          const cand = idx != null ? toInsert[idx] : null;
+          errors.push({
+            row: cand?.rowNum ?? null,
+            reason: we?.err?.errmsg || we?.errmsg || bulkErr.message || "Insert failed",
+          });
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Imported ${inserted} of ${rows.length} leads`,
+      inserted,
+      skipped: rows.length - inserted,
+      duplicates: errors.filter((e) => e.duplicate).length,
+      total: rows.length,
+      errors,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error importing leads", error: error.message });
+  }
+};
+
 // @desc    Get all leads
 // @route   GET /api/leads
 // @access  Private (tele_sales) — admin: all, user: own assigned
@@ -160,7 +305,7 @@ export const updateLead = async (req, res) => {
 
     const allowedFields = [
       "companyName", "contactPersonName", "phones", "email", "jobTitle",
-      "industry", "companySize", "leadSource", "priority", "potentialValue",
+      "industry", "companySize", "address", "leadSource", "priority", "potentialValue",
       "status", "painPoints", "customerNeeds", "budget", "isDecisionMaker", "tags",
     ];
 

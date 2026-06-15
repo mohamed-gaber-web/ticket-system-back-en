@@ -1,6 +1,7 @@
 import express from "express";
 import {
   createLead,
+  importLeads,
   getAllLeads,
   getLeadStats,
   getLeadById,
@@ -24,6 +25,7 @@ router.use(protect, authorizeTeleSalesAccess);
 
 // Lead CRUD
 router.post("/", createLead);
+router.post("/import", importLeads);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
 router.get("/:id", getLeadById);
