@@ -98,6 +98,10 @@ app.use("/api", routes);
 // Error handling middleware
 app.use((err, _req, res, _next) => {
   console.error(err.stack);
+  // CORS rejection
+  if (err.message && err.message.startsWith("CORS:")) {
+    return res.status(403).json({ success: false, error: err.message });
+  }
   // Payload too large (e.g. very large bulk imports)
   if (err.type === "entity.too.large" || err.status === 413) {
     return res.status(413).json({
