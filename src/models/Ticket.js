@@ -158,6 +158,10 @@ const ticketSchema = mongoose.Schema(
       type: Number,
       min: 0,
     },
+    adminPoints: {
+      type: Number,
+      default: null,
+    },
     environment: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Environment",

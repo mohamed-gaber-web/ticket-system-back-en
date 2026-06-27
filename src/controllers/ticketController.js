@@ -1678,6 +1678,33 @@ const getSubTickets = async (req, res) => {
   }
 };
 
+// @desc    Set admin points override on a ticket
+// @route   PATCH /api/tickets/:id/admin-points
+// @access  Admin only
+const setTicketAdminPoints = async (req, res) => {
+  try {
+    const { points } = req.body;
+
+    if (points !== null && points !== undefined && typeof points !== "number") {
+      return res.status(400).json({ success: false, message: "points must be a number or null" });
+    }
+
+    const ticket = await Ticket.findByIdAndUpdate(
+      req.params.id,
+      { adminPoints: points ?? null },
+      { new: true, runValidators: true }
+    ).select("_id ticketNumber adminPoints");
+
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+
+    res.status(200).json({ success: true, data: ticket });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error updating admin points", error: error.message });
+  }
+};
+
 export {
   getAllTickets,
   getTicketById,
@@ -1695,4 +1722,5 @@ export {
   getTicketsByPriority,
   createSubTicket,
   getSubTickets,
+  setTicketAdminPoints,
 };

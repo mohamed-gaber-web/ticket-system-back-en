@@ -16,6 +16,7 @@ import {
   getTicketsByPriority,
   createSubTicket,
   getSubTickets,
+  setTicketAdminPoints,
 } from "../controllers/ticketController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
@@ -348,5 +349,8 @@ router.get("/:id/sla-status", getTicketSLAStatus);
 // Sub-ticket routes
 router.post("/:id/sub-ticket", protect, createSubTicket);
 router.get("/:id/sub-tickets", getSubTickets);
+
+// Admin points override
+router.patch("/:id/admin-points", protect, setTicketAdminPoints);
 
 export default router;

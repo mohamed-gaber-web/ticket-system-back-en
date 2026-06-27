@@ -35,6 +35,8 @@ import taskCommentRoutes from "./taskCommentRoutes.js";
 import employeeRequestRoutes from "./employeeRequestRoutes.js";
 import employeeBalanceRoutes from "./employeeBalanceRoutes.js";
 import aiRoutes from "./aiRoutes.js";
+import kpiRoutes from "./kpiRoutes.js";
+import evaluationRoutes from "./evaluationRoutes.js";
 
 const router = express.Router();
 
@@ -136,6 +138,12 @@ router.use("/employee-balances", employeeBalanceRoutes);
 
 // AI routes
 router.use("/ai", aiRoutes);
+
+// KPI routes
+router.use("/kpi", kpiRoutes);
+
+// Employee Evaluation routes
+router.use("/evaluations", evaluationRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);
