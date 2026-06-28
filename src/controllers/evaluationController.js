@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import Consultant from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
 import EmployeeEvaluation from "../models/EmployeeEvaluation.js";
-import { calculateTicketPerformance, calculateEvaluation } from "../utils/evaluationCalculator.js";
+import { calculateTicketPerformance, calculateEvaluation, buildTicketDetails } from "../utils/evaluationCalculator.js";
 
 // Parses "YYYY-MM" → { year, month } (month is 0-indexed). Returns null on invalid input.
 const parseMonthParam = (param) => {
@@ -81,7 +81,7 @@ export const getEvaluation = async (req, res) => {
         createdAt: { $gte: monthStart, $lte: monthEnd },
         isSubTicket: { $ne: true },
       })
-        .select("status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate")
+        .select("ticketNumber subject status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate createdAt")
         .lean(),
     ]);
 
@@ -90,6 +90,7 @@ export const getEvaluation = async (req, res) => {
     }
 
     const ticketMetrics = calculateTicketPerformance(tickets);
+    const ticketDetails = buildTicketDetails(tickets);
     const evaluation    = calculateEvaluation(ticketMetrics, storedEval ?? {});
 
     res.status(200).json({
@@ -115,6 +116,7 @@ export const getEvaluation = async (req, res) => {
           aiSolutionsScore:       storedEval?.aiSolutionsScore       ?? 0,
           notes:                  storedEval?.notes                  ?? "",
         },
+        tickets: ticketDetails,
         ...evaluation,
       },
     });

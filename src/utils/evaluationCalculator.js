@@ -72,6 +72,42 @@ export const calculateTicketPerformance = (tickets) => {
   };
 };
 
+const CATEGORY_POINTS = { early: 2, onTime: 1, late: -1 };
+
+/**
+ * Build a per-ticket breakdown explaining how each ticket contributed to the
+ * ticket-performance score. Returns one row per ticket with its deadline,
+ * resolved date, category ('early' | 'onTime' | 'late' | null for not-counted)
+ * and the points it earned. Sorted by deadline ascending (no-deadline last).
+ */
+export const buildTicketDetails = (tickets) => {
+  const rows = tickets.map((ticket) => {
+    const category = categorizeTicket(ticket); // 'early' | 'onTime' | 'late' | null
+    const deadline = ticket.deliveryEstimationDate ?? ticket.internalDeliveryDate ?? null;
+    const resolvedDate = ticket.resolvedAt ?? ticket.deliveredAt ?? ticket.closedAt ?? null;
+    return {
+      _id: ticket._id,
+      ticketNumber: ticket.ticketNumber ?? null,
+      subject: ticket.subject ?? "",
+      status: ticket.status,
+      deadline,
+      resolvedDate,
+      category,
+      counted: category !== null,
+      points: category ? CATEGORY_POINTS[category] : 0,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (!a.deadline && !b.deadline) return 0;
+    if (!a.deadline) return 1;
+    if (!b.deadline) return -1;
+    return new Date(a.deadline) - new Date(b.deadline);
+  });
+
+  return rows;
+};
+
 /**
  * Assemble the full 100-point evaluation from ticket metrics + admin scores.
  *
