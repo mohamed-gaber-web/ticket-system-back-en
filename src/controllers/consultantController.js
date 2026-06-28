@@ -110,6 +110,7 @@ const createConsultant = async (req, res) => {
       status,
       monthlyTargetHours,
       department,
+      profilePicture,
     } = req.body;
 
     const consultantExists = await Consultant.findOne({ email });
@@ -132,6 +133,7 @@ const createConsultant = async (req, res) => {
       status,
       monthlyTargetHours: monthlyTargetHours ?? null,
       ...(department && { department }),
+      ...(profilePicture !== undefined && { profilePicture }),
     });
 
     const consultantResponse = await Consultant.findById(consultant._id)
@@ -180,6 +182,7 @@ const updateConsultant = async (req, res) => {
       status,
       monthlyTargetHours,
       department,
+      profilePicture,
     } = req.body;
 
     let consultant = await Consultant.findById(req.params.id);
@@ -213,6 +216,7 @@ const updateConsultant = async (req, res) => {
         status,
         ...(monthlyTargetHours !== undefined && { monthlyTargetHours: monthlyTargetHours ?? null }),
         ...(department !== undefined && { department: department || null }),
+        ...(profilePicture !== undefined && { profilePicture: profilePicture || null }),
       },
       {
         new: true,

@@ -15,6 +15,37 @@ const parseMonthParam = (param) => {
 };
 
 const clamp = (n) => Math.min(100, Math.max(0, Number(n) || 0));
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// Parses a comma-separated list of "YYYY-MM" into a deduped, chronologically
+// sorted array of { year, month }. Returns null if empty or any token is invalid.
+const parseMonthsQuery = (param) => {
+  if (!param) return null;
+  const parts = String(param)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+
+  const seen = new Set();
+  const months = [];
+  for (const part of parts) {
+    const parsed = parseMonthParam(part);
+    if (!parsed) return null; // reject the whole request on any bad token
+    const key = `${parsed.year}-${parsed.month}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    months.push(parsed);
+  }
+  months.sort((a, b) => a.year - b.year || a.month - b.month);
+  return months;
+};
+
+const monthShortLabel = ({ year, month }) =>
+  new Date(year, month).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+
+const monthLongLabel = ({ year, month }) =>
+  new Date(year, month).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
 // @desc    Get full evaluation breakdown for an employee in a specific month
 // @route   GET /api/evaluations/:employeeId/:month  (month = YYYY-MM)
@@ -227,6 +258,148 @@ export const getAllEvaluations = async (req, res) => {
     });
   } catch (error) {
     console.error("[evaluationController:getAllEvaluations]", error);
+    res.status(500).json({ success: false, message: "Error fetching evaluations" });
+  }
+};
+
+// @desc    Get combined evaluations for ALL consultants across one or more months
+// @route   GET /api/evaluations/all?months=YYYY-MM,YYYY-MM,...
+// @access  Admin only
+//
+// Combines the selected months into a single score per consultant: tickets are
+// pooled across the whole range (so ticket performance is computed over every
+// ticket in the window, exactly like a single month over a wider span) and the
+// admin-input KPI scores are averaged across the months that have a stored
+// record. Certification counts if achieved in any of the selected months.
+export const getAllEvaluationsRange = async (req, res) => {
+  try {
+    const months = parseMonthsQuery(req.query.months);
+    if (!months) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide one or more months as ?months=YYYY-MM,YYYY-MM",
+      });
+    }
+
+    // One full-calendar-month range per selected month — works for any
+    // selection, contiguous or not.
+    const dateRanges = months.map(({ year, month }) => ({
+      createdAt: {
+        $gte: new Date(year, month, 1),
+        $lte: new Date(year, month + 1, 0, 23, 59, 59, 999),
+      },
+    }));
+    const monthPairs = months.map(({ year, month }) => ({ year, month }));
+
+    const [consultants, storedEvals, allTickets] = await Promise.all([
+      Consultant.find({ role: { $ne: "team_member" } })
+        .select("firstName lastName position role")
+        .lean(),
+      EmployeeEvaluation.find({ $or: monthPairs }).lean(),
+      Ticket.find({
+        $or: dateRanges,
+        isSubTicket: { $ne: true },
+      })
+        .select("status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate acceptedBy assignedBy")
+        .lean(),
+    ]);
+
+    // Group stored evals by consultant (one per month → possibly several here)
+    const evalsByConsultant = new Map();
+    for (const e of storedEvals) {
+      const cid = e.consultant.toString();
+      if (!evalsByConsultant.has(cid)) evalsByConsultant.set(cid, []);
+      evalsByConsultant.get(cid).push(e);
+    }
+
+    // Group tickets by consultant. Dedupe per consultant so a ticket where the
+    // same consultant is both acceptedBy and assignedBy is counted once —
+    // matching the single-employee endpoint's $or query.
+    const ticketsByConsultant = new Map();
+    for (const ticket of allTickets) {
+      const ids = new Set();
+      for (const field of ["acceptedBy", "assignedBy"]) {
+        const cid = ticket[field]?.toString();
+        if (cid) ids.add(cid);
+      }
+      for (const cid of ids) {
+        if (!ticketsByConsultant.has(cid)) ticketsByConsultant.set(cid, []);
+        ticketsByConsultant.get(cid).push(ticket);
+      }
+    }
+
+    // Average numeric admin scores over the months that actually have a record;
+    // certification is true if earned in any selected month.
+    const combineAdminScores = (evals) => {
+      if (!evals || evals.length === 0) {
+        return {
+          hasCertification: false,
+          clientPunctualityScore: 0,
+          managerEvaluationScore: 0,
+          studyingModuleScore: 0,
+          aiSolutionsScore: 0,
+        };
+      }
+      const avg = (key) =>
+        evals.reduce((sum, e) => sum + (e[key] ?? 0), 0) / evals.length;
+      return {
+        hasCertification: evals.some((e) => e.hasCertification === true),
+        clientPunctualityScore: avg("clientPunctualityScore"),
+        managerEvaluationScore: avg("managerEvaluationScore"),
+        studyingModuleScore: avg("studyingModuleScore"),
+        aiSolutionsScore: avg("aiSolutionsScore"),
+      };
+    };
+
+    const results = consultants.map((consultant) => {
+      const cid = consultant._id.toString();
+      const evals = evalsByConsultant.get(cid) ?? [];
+      const tickets = ticketsByConsultant.get(cid) ?? [];
+
+      const adminScores = combineAdminScores(evals);
+      const ticketMetrics = calculateTicketPerformance(tickets);
+      const evaluation = calculateEvaluation(ticketMetrics, adminScores);
+
+      return {
+        consultant: {
+          _id: consultant._id,
+          firstName: consultant.firstName,
+          lastName: consultant.lastName,
+          position: consultant.position ?? null,
+          role: consultant.role,
+        },
+        totalScore: evaluation.totalScore,
+        breakdown: evaluation.breakdown,
+        ticketCount: ticketMetrics.totalTickets,
+        monthsEvaluated: evals.length,
+        adminScores: {
+          hasCertification: adminScores.hasCertification,
+          clientPunctualityScore: round2(adminScores.clientPunctualityScore),
+          managerEvaluationScore: round2(adminScores.managerEvaluationScore),
+          studyingModuleScore: round2(adminScores.studyingModuleScore),
+          aiSolutionsScore: round2(adminScores.aiSolutionsScore),
+        },
+      };
+    });
+
+    results.sort((a, b) => b.totalScore - a.totalScore);
+
+    const label =
+      months.length === 1
+        ? monthLongLabel(months[0])
+        : `${monthShortLabel(months[0])} – ${monthShortLabel(months[months.length - 1])}`;
+
+    res.status(200).json({
+      success: true,
+      period: {
+        label,
+        months: monthPairs,
+      },
+      count: results.length,
+      data: results,
+    });
+  } catch (error) {
+    console.error("[evaluationController:getAllEvaluationsRange]", error);
     res.status(500).json({ success: false, message: "Error fetching evaluations" });
   }
 };

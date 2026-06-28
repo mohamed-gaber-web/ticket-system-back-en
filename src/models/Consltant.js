@@ -61,6 +61,10 @@ const consultantSchema = mongoose.Schema(
       min: 0,
       default: null,
     },
+    profilePicture: {
+      type: String,
+      default: null,
+    },
     lastLogin: {
       type: Date,
     },

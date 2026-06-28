@@ -47,6 +47,10 @@ const teleSalesAgentSchema = mongoose.Schema(
       enum: ["active", "inactive"],
       default: "active",
     },
+    profilePicture: {
+      type: String,
+      default: null,
+    },
     lastLogin: {
       type: Date,
     },

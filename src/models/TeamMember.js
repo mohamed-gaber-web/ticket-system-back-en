@@ -52,6 +52,10 @@ const teamMemberSchema = mongoose.Schema(
       enum: ["active", "inactive", "on_leave"],
       default: "active",
     },
+    profilePicture: {
+      type: String,
+      default: null,
+    },
     lastLogin: {
       type: Date,
     },

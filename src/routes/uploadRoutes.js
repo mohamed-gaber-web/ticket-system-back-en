@@ -49,6 +49,28 @@ const upload = multer({
   },
 });
 
+// Separate, stricter multer config for profile pictures: raster images only,
+// 5MB cap. SVG is intentionally excluded to avoid stored-XSS via inline SVG.
+const avatarUpload = multer({
+  storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedImageTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+    ];
+    if (allowedImageTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type. Profile pictures must be a JPEG, PNG, GIF, or WebP image."));
+    }
+  },
+});
+
 /**
  * @swagger
  * /upload:
@@ -394,6 +416,177 @@ router.get("/files/:id/info", protect, async (req, res) => {
       message: "Error retrieving file information",
       error: error.message,
     });
+  }
+});
+
+/**
+ * @swagger
+ * /avatar:
+ *   post:
+ *     summary: Upload a profile picture to GridFS
+ *     description: >
+ *       Stores an image in GridFS tagged as an avatar and returns its id and a
+ *       public URL. The returned fileId is meant to be saved on a user's
+ *       `profilePicture` field (e.g. when creating/updating a user or via the
+ *       profile endpoint). The image itself is served publicly from /api/avatars/:id.
+ *     tags: [Upload]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - avatar
+ *             properties:
+ *               avatar:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Avatar uploaded successfully
+ *       400:
+ *         description: No file provided or invalid image type
+ */
+router.post("/avatar", protect, avatarUpload.single("avatar"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No image provided",
+      });
+    }
+
+    let bucket;
+    try {
+      bucket = getGridFSBucket();
+    } catch (error) {
+      return res.status(503).json({
+        success: false,
+        message: "File storage service not available. Please try again in a moment.",
+        error: error.message,
+      });
+    }
+
+    const readableStream = Readable.from(req.file.buffer);
+    const timestamp = Date.now();
+    const filename = `avatar-${timestamp}-${req.file.originalname}`;
+
+    const uploadStream = bucket.openUploadStream(filename, {
+      contentType: req.file.mimetype,
+      metadata: {
+        // category marks this file as a publicly-servable avatar — the
+        // /api/avatars/:id route refuses to stream anything without it.
+        category: "avatar",
+        originalName: req.file.originalname,
+        uploadedAt: new Date(),
+        uploadedBy: req.user._id,
+        uploadedByType: req.userType,
+      },
+    });
+
+    readableStream.pipe(uploadStream);
+
+    uploadStream.on("finish", () => {
+      const baseUrl = process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`;
+      res.status(200).json({
+        success: true,
+        message: "Profile picture uploaded successfully",
+        data: {
+          fileId: uploadStream.id.toString(),
+          url: `${baseUrl}/api/avatars/${uploadStream.id}`,
+        },
+      });
+    });
+
+    uploadStream.on("error", (error) => {
+      console.error("GridFS avatar upload error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error uploading profile picture",
+        error: error.message,
+      });
+    });
+  } catch (error) {
+    console.error("Avatar upload error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error during avatar upload",
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /avatars/{id}:
+ *   get:
+ *     summary: Stream a profile picture (public)
+ *     description: >
+ *       Publicly streams an avatar image so it can be used directly in an
+ *       <img> tag. Only files tagged as avatars are served; any other GridFS
+ *       file returns 404, keeping the auth-protected /api/files/:id route the
+ *       sole way to reach non-avatar uploads.
+ *     tags: [Upload]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Image stream
+ *       404:
+ *         description: Avatar not found
+ */
+router.get("/avatars/:id", async (req, res) => {
+  try {
+    const bucket = getGridFSBucket();
+
+    let fileId;
+    try {
+      fileId = new mongoose.Types.ObjectId(req.params.id);
+    } catch {
+      return res.status(404).json({ success: false, message: "Avatar not found" });
+    }
+
+    const files = await bucket.find({ _id: fileId }).toArray();
+    const file = files?.[0];
+
+    // Only serve files explicitly tagged as avatars — never expose other uploads.
+    if (!file || file.metadata?.category !== "avatar") {
+      return res.status(404).json({ success: false, message: "Avatar not found" });
+    }
+
+    const contentType = file.contentType || "image/jpeg";
+    res.set("Content-Type", contentType);
+    res.set("Content-Length", file.length.toString());
+    res.set("Content-Disposition", "inline");
+    res.set("Cache-Control", "public, max-age=86400");
+    // Allow the image to be embedded cross-origin (frontend served from a
+    // different origin than the API).
+    res.set("Cross-Origin-Resource-Policy", "cross-origin");
+
+    const downloadStream = bucket.openDownloadStream(fileId);
+    downloadStream.on("error", (error) => {
+      console.error("GridFS avatar download error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, message: "Error streaming avatar" });
+      }
+    });
+    downloadStream.pipe(res);
+  } catch (error) {
+    console.error("Avatar download error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: "Server error while streaming avatar",
+        error: error.message,
+      });
+    }
   }
 });
 

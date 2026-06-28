@@ -90,6 +90,10 @@ const customerSchema = new mongoose.Schema(
         ref: "ProductType",
       },
     ],
+    profilePicture: {
+      type: String,
+      default: null,
+    },
     lastLogin: {
       type: Date,
     },

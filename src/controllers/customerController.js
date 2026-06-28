@@ -120,6 +120,7 @@ const createCustomer = async (req, res) => {
       erpType,
       consultants,
       productTypes,
+      profilePicture,
     } = req.body;
 
     const companyDoc = await Company.findById(company);
@@ -151,6 +152,7 @@ const createCustomer = async (req, res) => {
       erpType,
       consultants,
       productTypes,
+      ...(profilePicture !== undefined && { profilePicture }),
     });
 
     const populatedCustomer = await Customer.findById(customer._id)
@@ -244,6 +246,7 @@ const updateCustomer = async (req, res) => {
       erpType,
       consultants,
       productTypes,
+      profilePicture,
     } = req.body;
 
     let customer = await Customer.findById(req.params.id);
@@ -283,6 +286,7 @@ const updateCustomer = async (req, res) => {
     customer.slaMapping = slaMapping || customer.slaMapping;
     customer.versionNumber = versionNumber || customer.versionNumber;
     customer.erpType = erpType || customer.erpType;
+    if (profilePicture !== undefined) customer.profilePicture = profilePicture || null;
 
     if (productTypes !== undefined) customer.productTypes = productTypes;
 
