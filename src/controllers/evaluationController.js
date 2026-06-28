@@ -74,7 +74,7 @@ export const getEvaluation = async (req, res) => {
     const monthEnd   = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
     const [consultant, storedEval, tickets] = await Promise.all([
-      Consultant.findById(employeeId).select("firstName lastName position role").lean(),
+      Consultant.findById(employeeId).select("firstName lastName position role profilePicture").lean(),
       EmployeeEvaluation.findOne({ consultant: consultantId, year, month }).lean(),
       Ticket.find({
         $or: [{ acceptedBy: consultantId }, { assignedBy: consultantId }],
@@ -102,6 +102,7 @@ export const getEvaluation = async (req, res) => {
           lastName:  consultant.lastName,
           position:  consultant.position ?? null,
           role:      consultant.role,
+          profilePicture: consultant.profilePicture ?? null,
         },
         period: {
           year,
@@ -197,7 +198,7 @@ export const getAllEvaluations = async (req, res) => {
     // Fetch all consultants + stored evals + all tickets for the month in parallel
     const [consultants, storedEvals, allTickets] = await Promise.all([
       Consultant.find({ role: { $ne: "team_member" } })
-        .select("firstName lastName position role")
+        .select("firstName lastName position role profilePicture")
         .lean(),
       EmployeeEvaluation.find({ year, month }).lean(),
       Ticket.find({
@@ -235,6 +236,7 @@ export const getAllEvaluations = async (req, res) => {
           lastName:  consultant.lastName,
           position:  consultant.position ?? null,
           role:      consultant.role,
+          profilePicture: consultant.profilePicture ?? null,
         },
         totalScore:   evaluation.totalScore,
         breakdown:    evaluation.breakdown,
@@ -295,7 +297,7 @@ export const getAllEvaluationsRange = async (req, res) => {
 
     const [consultants, storedEvals, allTickets] = await Promise.all([
       Consultant.find({ role: { $ne: "team_member" } })
-        .select("firstName lastName position role")
+        .select("firstName lastName position role profilePicture")
         .lean(),
       EmployeeEvaluation.find({ $or: monthPairs }).lean(),
       Ticket.find({
