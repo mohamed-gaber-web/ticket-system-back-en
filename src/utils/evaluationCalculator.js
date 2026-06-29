@@ -1,35 +1,36 @@
 const round2 = (n) => Math.round(n * 100) / 100;
 
-const RESOLVED_STATUSES = new Set(["resolved", "closed", "delivered", "tested"]);
-
 const toDay = (date) => new Date(date).setHours(0, 0, 0, 0);
 
 /**
  * Categorize a single ticket as 'early', 'onTime', 'late', or null (not counted).
  *
- * - Early  : resolved at least 1 day before the deadline  → +2 pts
- * - On-Time: resolved on the deadline day                  → +1 pt
- * - Late   : resolved after deadline, OR still open past deadline → −1 pt
- * - null   : no deadline set, or unresolved with time still remaining
+ * Delay is measured as the customer delivery date vs. the moment the ticket's
+ * status was set to "delivered" (stored as `deliveredAt`). Nothing else — a
+ * ticket resolved/closed without ever being delivered has no delivery moment,
+ * so it stays uncounted unless its customer delivery date has already passed.
+ *
+ * - Early  : delivered at least 1 day before the customer delivery date  → +2 pts
+ * - On-Time: delivered on the customer delivery date                     → +1 pt
+ * - Late   : delivered after it, OR not delivered yet but past it        → −1 pt
+ * - null   : no customer delivery date, or not delivered with time still left
  */
 export const categorizeTicket = (ticket) => {
-  const deadline = ticket.deliveryEstimationDate ?? ticket.internalDeliveryDate ?? null;
+  const deadline = ticket.deliveryEstimationDate ?? null; // customer delivery date
   if (!deadline) return null;
 
   const deadlineDay = toDay(deadline);
-  const todayDay = toDay(new Date());
-  const isResolved = RESOLVED_STATUSES.has(ticket.status);
+  const deliveredDate = ticket.deliveredAt ?? null; // when status → "delivered"
 
-  if (isResolved) {
-    const resolvedDate = ticket.resolvedAt ?? ticket.deliveredAt ?? ticket.closedAt ?? null;
-    if (!resolvedDate) return null;
-    const resolvedDay = toDay(resolvedDate);
-    if (resolvedDay < deadlineDay) return "early";
-    if (resolvedDay === deadlineDay) return "onTime";
+  if (deliveredDate) {
+    const deliveredDay = toDay(deliveredDate);
+    if (deliveredDay < deadlineDay) return "early";
+    if (deliveredDay === deadlineDay) return "onTime";
     return "late";
   }
 
-  // Unresolved: only count as late if deadline has passed
+  // Not delivered yet: only count as late once the customer delivery date passed
+  const todayDay = toDay(new Date());
   if (todayDay > deadlineDay) return "late";
   return null;
 };
@@ -83,8 +84,8 @@ const CATEGORY_POINTS = { early: 2, onTime: 1, late: -1 };
 export const buildTicketDetails = (tickets) => {
   const rows = tickets.map((ticket) => {
     const category = categorizeTicket(ticket); // 'early' | 'onTime' | 'late' | null
-    const deadline = ticket.deliveryEstimationDate ?? ticket.internalDeliveryDate ?? null;
-    const resolvedDate = ticket.resolvedAt ?? ticket.deliveredAt ?? ticket.closedAt ?? null;
+    const deadline = ticket.deliveryEstimationDate ?? null; // customer delivery date
+    const resolvedDate = ticket.deliveredAt ?? null; // when status → "delivered"
     return {
       _id: ticket._id,
       ticketNumber: ticket.ticketNumber ?? null,

@@ -18,113 +18,101 @@ const daysFromNow = (days) => {
   return d.toISOString();
 };
 
+// Delay is measured as: customer delivery date (deliveryEstimationDate) vs. the
+// moment the ticket was set to "delivered" (deliveredAt). Default ticket is
+// delivered today against a customer delivery date of today → on-time.
 const makeTicket = (overrides = {}) => ({
-  status: "resolved",
-  resolvedAt: daysFromNow(-5),
-  deliveredAt: null,
-  closedAt: null,
-  deliveryEstimationDate: daysFromNow(0),   // deadline = today
-  internalDeliveryDate: null,
+  status: "delivered",
+  deliveredAt: daysFromNow(0),
+  deliveryEstimationDate: daysFromNow(0), // customer delivery date = today
   ...overrides,
 });
 
 // ── categorizeTicket ───────────────────────────────────────────────────────────
 
 describe("categorizeTicket", () => {
-  it("returns null when no deadline is set", () => {
-    const ticket = makeTicket({ deliveryEstimationDate: null, internalDeliveryDate: null });
+  it("returns null when no customer delivery date is set", () => {
+    const ticket = makeTicket({ deliveryEstimationDate: null });
     assert.equal(categorizeTicket(ticket), null);
   });
 
-  it("classifies as 'early' when resolved before deadline", () => {
+  it("classifies as 'early' when delivered before the customer delivery date", () => {
     const ticket = makeTicket({
-      resolvedAt: daysFromNow(-3),
-      deliveryEstimationDate: daysFromNow(2), // deadline 2 days in future
-    });
-    assert.equal(categorizeTicket(ticket), "early");
-  });
-
-  it("classifies as 'onTime' when resolved on the deadline day", () => {
-    const today = new Date();
-    const ticket = makeTicket({
-      resolvedAt: today.toISOString(),
-      deliveryEstimationDate: today.toISOString(),
-    });
-    assert.equal(categorizeTicket(ticket), "onTime");
-  });
-
-  it("classifies as 'late' when resolved after deadline", () => {
-    const ticket = makeTicket({
-      resolvedAt: daysFromNow(0),           // resolved today
-      deliveryEstimationDate: daysFromNow(-3), // deadline was 3 days ago
-    });
-    assert.equal(categorizeTicket(ticket), "late");
-  });
-
-  it("classifies open ticket as 'late' when deadline has passed", () => {
-    const ticket = makeTicket({
-      status: "in_progress",
-      resolvedAt: null,
-      deliveryEstimationDate: daysFromNow(-5), // past deadline
-    });
-    assert.equal(categorizeTicket(ticket), "late");
-  });
-
-  it("returns null for open ticket that still has time", () => {
-    const ticket = makeTicket({
-      status: "in_progress",
-      resolvedAt: null,
-      deliveryEstimationDate: daysFromNow(5), // deadline in future
-    });
-    assert.equal(categorizeTicket(ticket), null);
-  });
-
-  it("falls back to internalDeliveryDate when deliveryEstimationDate is missing", () => {
-    const ticket = makeTicket({
-      resolvedAt: daysFromNow(-2),
-      deliveryEstimationDate: null,
-      internalDeliveryDate: daysFromNow(5),
-    });
-    assert.equal(categorizeTicket(ticket), "early");
-  });
-
-  it("classifies 'delivered' status tickets using resolvedDate logic", () => {
-    const ticket = makeTicket({
-      status: "delivered",
       deliveredAt: daysFromNow(-3),
-      resolvedAt: null,
-      deliveryEstimationDate: daysFromNow(2),
+      deliveryEstimationDate: daysFromNow(2), // delivery date 2 days in future
     });
     assert.equal(categorizeTicket(ticket), "early");
   });
 
-  it("classifies 'closed' status tickets using closedAt date", () => {
-    const ticket = makeTicket({
-      status: "closed",
-      resolvedAt: null,
-      deliveredAt: null,
-      closedAt: daysFromNow(0),
-      deliveryEstimationDate: daysFromNow(-1),
-    });
-    assert.equal(categorizeTicket(ticket), "late");
-  });
-
-  it("classifies 'tested' status tickets correctly", () => {
+  it("classifies as 'onTime' when delivered on the customer delivery date", () => {
     const today = new Date().toISOString();
     const ticket = makeTicket({
-      status: "tested",
-      resolvedAt: today,
+      deliveredAt: today,
       deliveryEstimationDate: today,
     });
     assert.equal(categorizeTicket(ticket), "onTime");
   });
 
-  it("returns null when resolved ticket has no date fields set", () => {
+  it("classifies as 'late' when delivered after the customer delivery date", () => {
+    const ticket = makeTicket({
+      deliveredAt: daysFromNow(0),             // delivered today
+      deliveryEstimationDate: daysFromNow(-3), // delivery date was 3 days ago
+    });
+    assert.equal(categorizeTicket(ticket), "late");
+  });
+
+  it("classifies a not-yet-delivered ticket as 'late' when the customer delivery date has passed", () => {
+    const ticket = makeTicket({
+      status: "in_progress",
+      deliveredAt: null,
+      deliveryEstimationDate: daysFromNow(-5), // past delivery date
+    });
+    assert.equal(categorizeTicket(ticket), "late");
+  });
+
+  it("returns null for a not-yet-delivered ticket that still has time", () => {
+    const ticket = makeTicket({
+      status: "in_progress",
+      deliveredAt: null,
+      deliveryEstimationDate: daysFromNow(5), // delivery date in future
+    });
+    assert.equal(categorizeTicket(ticket), null);
+  });
+
+  it("does NOT fall back to internalDeliveryDate when the customer delivery date is missing", () => {
+    const ticket = makeTicket({
+      deliveredAt: daysFromNow(-2),
+      deliveryEstimationDate: null,
+      internalDeliveryDate: daysFromNow(5),
+    });
+    assert.equal(categorizeTicket(ticket), null);
+  });
+
+  it("does NOT count a resolved ticket that was never delivered (within its delivery date)", () => {
     const ticket = makeTicket({
       status: "resolved",
-      resolvedAt: null,
       deliveredAt: null,
-      closedAt: null,
+      resolvedAt: daysFromNow(-1),
+      deliveryEstimationDate: daysFromNow(5),
+    });
+    assert.equal(categorizeTicket(ticket), null);
+  });
+
+  it("ignores closedAt — only the delivered moment drives the delay", () => {
+    const ticket = makeTicket({
+      status: "closed",
+      deliveredAt: null,
+      closedAt: daysFromNow(0),
+      deliveryEstimationDate: daysFromNow(-1),
+    });
+    // Not delivered, but the customer delivery date has passed → late.
+    assert.equal(categorizeTicket(ticket), "late");
+  });
+
+  it("returns null when a delivered ticket somehow has no deliveredAt and time remains", () => {
+    const ticket = makeTicket({
+      status: "delivered",
+      deliveredAt: null,
       deliveryEstimationDate: daysFromNow(5),
     });
     assert.equal(categorizeTicket(ticket), null);
@@ -146,17 +134,17 @@ describe("calculateTicketPerformance — spec reference example", () => {
     const futureDeadline = daysFromNow(5);
 
     const tickets = [
-      // 70 on-time (resolved on deadline day)
+      // 70 on-time (delivered on the customer delivery date)
       ...Array.from({ length: 70 }, () =>
-        makeTicket({ resolvedAt: today, deliveryEstimationDate: today })
+        makeTicket({ deliveredAt: today, deliveryEstimationDate: today })
       ),
-      // 10 early (resolved before deadline)
+      // 10 early (delivered before the customer delivery date)
       ...Array.from({ length: 10 }, () =>
-        makeTicket({ resolvedAt: daysFromNow(-5), deliveryEstimationDate: futureDeadline })
+        makeTicket({ deliveredAt: daysFromNow(-5), deliveryEstimationDate: futureDeadline })
       ),
-      // 20 late (resolved after deadline)
+      // 20 late (delivered after the customer delivery date)
       ...Array.from({ length: 20 }, () =>
-        makeTicket({ resolvedAt: today, deliveryEstimationDate: pastDeadline })
+        makeTicket({ deliveredAt: today, deliveryEstimationDate: pastDeadline })
       ),
     ];
 
@@ -174,10 +162,10 @@ describe("calculateTicketPerformance — spec reference example", () => {
 
 describe("calculateTicketPerformance — division by zero guard", () => {
   it("returns 0 for all metrics when no countable tickets", () => {
-    // Tickets with no deadline → all return null from categorize → totalTickets = 0
+    // Tickets with no customer delivery date → all return null → totalTickets = 0
     const tickets = [
-      makeTicket({ deliveryEstimationDate: null, internalDeliveryDate: null }),
-      makeTicket({ deliveryEstimationDate: null, internalDeliveryDate: null }),
+      makeTicket({ deliveryEstimationDate: null }),
+      makeTicket({ deliveryEstimationDate: null }),
     ];
     const result = calculateTicketPerformance(tickets);
     assert.equal(result.totalTickets, 0);
@@ -196,7 +184,7 @@ describe("calculateTicketPerformance — division by zero guard", () => {
 describe("calculateTicketPerformance — all late scenario", () => {
   it("produces negative net points when all tickets are late", () => {
     const tickets = Array.from({ length: 5 }, () =>
-      makeTicket({ resolvedAt: daysFromNow(0), deliveryEstimationDate: daysFromNow(-3) })
+      makeTicket({ deliveredAt: daysFromNow(0), deliveryEstimationDate: daysFromNow(-3) })
     );
     const result = calculateTicketPerformance(tickets);
     assert.equal(result.lateCount, 5);
