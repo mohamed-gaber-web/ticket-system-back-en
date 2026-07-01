@@ -499,7 +499,7 @@ export const sendAutoCloseEmail = async (ticket, customer, variables = {}) => {
       ticketNumber: ticket.ticketNumber,
       subject: ticket.subject,
       autoCloseDays: variables.autoCloseDays || "N/A",
-      resolvedAt: variables.resolvedAt || "N/A",
+      deliveredAt: variables.deliveredAt || "N/A",
       closedAt: variables.closedAt || new Date().toLocaleDateString(),
       ticketUrl,
     },

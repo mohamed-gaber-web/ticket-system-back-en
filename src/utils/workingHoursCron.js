@@ -26,20 +26,38 @@ const startOfDay = (date) => {
   return d;
 };
 
+// Count business (working) days elapsed between two dates, excluding the
+// configured weekend/off days (Egypt default: Friday=5 & Saturday=6). Days off
+// do not advance the interval, so a 2-day interval spanning a weekend waits
+// until 2 actual working days have passed.
+const businessDaysBetween = (fromDate, toDate, weekendDays = [5, 6]) => {
+  const start = startOfDay(fromDate);
+  const end = startOfDay(toDate);
+  if (end <= start) return 0;
+  let count = 0;
+  const cur = new Date(start);
+  while (cur < end) {
+    cur.setDate(cur.getDate() + 1);
+    if (!weekendDays.includes(cur.getDay())) count++;
+  }
+  return count;
+};
+
 // ---------------------------------------------------------------------------
-// Job 1 — Auto-close resolved tickets
+// Job 1 — Auto-close delivered tickets
 // ---------------------------------------------------------------------------
 
-const autoCloseResolvedTickets = async () => {
+const autoCloseDeliveredTickets = async () => {
   try {
     const config = await getConfig();
     const { autoCloseDays } = config;
 
     const cutoff = new Date(Date.now() - autoCloseDays * msPerDay);
 
+    // Close tickets that have sat in "delivered" status for autoCloseDays.
     const tickets = await Ticket.find({
-      status: "resolved",
-      resolvedAt: { $exists: true, $ne: null, $lte: cutoff },
+      status: "delivered",
+      deliveredAt: { $exists: true, $ne: null, $lte: cutoff },
     })
       .populate("customer", "companyName contactPerson email")
       .populate("assignedBy", "firstName lastName email")
@@ -47,7 +65,7 @@ const autoCloseResolvedTickets = async () => {
 
     if (tickets.length === 0) return;
 
-    console.log(`🔒 Auto-closing ${tickets.length} resolved ticket(s)...`);
+    console.log(`🔒 Auto-closing ${tickets.length} delivered ticket(s)...`);
 
     for (const ticket of tickets) {
       const closedAt = new Date();
@@ -60,8 +78,8 @@ const autoCloseResolvedTickets = async () => {
       const customer = ticket.customer;
       const assignee = ticket.assignedBy;
 
-      const resolvedAtFormatted = ticket.resolvedAt
-        ? new Date(ticket.resolvedAt).toLocaleDateString("en-GB")
+      const deliveredAtFormatted = ticket.deliveredAt
+        ? new Date(ticket.deliveredAt).toLocaleDateString("en-GB")
         : "N/A";
       const closedAtFormatted = closedAt.toLocaleDateString("en-GB");
 
@@ -74,7 +92,7 @@ const autoCloseResolvedTickets = async () => {
         ticketNumber: ticket.ticketNumber,
         subject: ticket.subject,
         autoCloseDays,
-        resolvedAt: resolvedAtFormatted,
+        deliveredAt: deliveredAtFormatted,
         closedAt: closedAtFormatted,
         recipients,
       });
@@ -93,7 +111,13 @@ const autoCloseResolvedTickets = async () => {
 const sendPendingReminders = async () => {
   try {
     const config = await getConfig();
-    const { pendingReminderIntervalDays } = config;
+    const { pendingReminderIntervalDays, weekendDays } = config;
+
+    // Skip weekend/off days (Egypt: Fri & Sat). Prevents day-off reminders and
+    // avoids a duplicate send on Friday, when the business-day count matches
+    // Thursday's (weekend days don't advance the count).
+    const offDays = weekendDays ?? [5, 6];
+    if (offDays.includes(new Date().getDay())) return;
 
     const tickets = await Ticket.find({
       status: "customer_pending",
@@ -107,9 +131,10 @@ const sendPendingReminders = async () => {
     const now = new Date();
 
     for (const ticket of tickets) {
-      // Calculate days since status was last updated to customer_pending
+      // Working days since the ticket last moved to customer_pending, excluding
+      // Egypt weekend (Fri/Sat) so days off don't count toward the interval.
       const updatedAt = new Date(ticket.updatedAt);
-      const daysPending = daysBetween(now, updatedAt);
+      const daysPending = businessDaysBetween(updatedAt, now, weekendDays);
 
       // Send reminder when daysPending is a non-zero multiple of the interval
       if (daysPending > 0 && daysPending % pendingReminderIntervalDays === 0) {
@@ -223,7 +248,7 @@ export const startWorkingHoursCron = () => {
   // Auto-close: check once per hour, every day except Saturday
   cron.schedule(`0 * * * ${SKIP_SATURDAY}`, () => {
     console.log("🔒 Running auto-close check...");
-    autoCloseResolvedTickets();
+    autoCloseDeliveredTickets();
   });
 
   // Pending reminder: check once per day at 9 AM, every day except Saturday
