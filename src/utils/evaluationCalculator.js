@@ -48,12 +48,19 @@ export const calculateTicketPerformance = (tickets) => {
   let onTimeCount = 0;
   let earlyCount = 0;
   let lateCount = 0;
+  // Split of the *counted* tickets between main tickets and sub-tickets.
+  let mainTickets = 0;
+  let subTickets = 0;
 
   for (const ticket of tickets) {
     const cat = categorizeTicket(ticket);
     if (cat === "onTime") onTimeCount++;
     else if (cat === "early") earlyCount++;
     else if (cat === "late") lateCount++;
+    else continue; // not counted → skip main/sub tally too
+
+    if (ticket.isSubTicket) subTickets++;
+    else mainTickets++;
   }
 
   const totalTickets = onTimeCount + earlyCount + lateCount;
@@ -68,6 +75,8 @@ export const calculateTicketPerformance = (tickets) => {
     lateCount,
     netPoints,
     totalTickets,
+    mainTickets,
+    subTickets,
     performancePercentage: round2(performancePercentage),
     contribution: round2(contribution),
   };
@@ -96,6 +105,8 @@ export const buildTicketDetails = (tickets) => {
       category,
       counted: category !== null,
       points: category ? CATEGORY_POINTS[category] : 0,
+      isSubTicket: Boolean(ticket.isSubTicket),
+      parentTicket: ticket.parentTicket ?? null,
     };
   });
 

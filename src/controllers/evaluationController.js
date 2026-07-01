@@ -1,8 +1,22 @@
 import mongoose from "mongoose";
 import Consultant from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
+import Category from "../models/Category.js";
 import EmployeeEvaluation from "../models/EmployeeEvaluation.js";
 import { calculateTicketPerformance, calculateEvaluation, buildTicketDetails } from "../utils/evaluationCalculator.js";
+
+// Categories that represent meetings rather than real support work — tickets in
+// these categories are excluded from every evaluation calculation.
+const MEETING_CATEGORY_NAMES = ["Online Meeting", "On Site Meeting"];
+
+// Resolve the meeting category names to their ObjectIds so ticket queries can
+// exclude them with `category: { $nin: [...] }`. Returns [] if none exist.
+const getMeetingCategoryIds = async () => {
+  const cats = await Category.find({ name: { $in: MEETING_CATEGORY_NAMES } })
+    .select("_id")
+    .lean();
+  return cats.map((c) => c._id);
+};
 
 // Parses "YYYY-MM" → { year, month } (month is 0-indexed). Returns null on invalid input.
 const parseMonthParam = (param) => {
@@ -73,15 +87,19 @@ export const getEvaluation = async (req, res) => {
     const monthStart = new Date(year, month, 1);
     const monthEnd   = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
+    const meetingCategoryIds = await getMeetingCategoryIds();
+
     const [consultant, storedEval, tickets] = await Promise.all([
       Consultant.findById(employeeId).select("firstName lastName position role profilePicture").lean(),
       EmployeeEvaluation.findOne({ consultant: consultantId, year, month }).lean(),
+      // Include sub-tickets so they are evaluated alongside main tickets, but
+      // exclude meeting-category tickets (Online / On Site Meeting).
       Ticket.find({
         $or: [{ acceptedBy: consultantId }, { assignedBy: consultantId }],
         createdAt: { $gte: monthStart, $lte: monthEnd },
-        isSubTicket: { $ne: true },
+        category: { $nin: meetingCategoryIds },
       })
-        .select("ticketNumber subject status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate createdAt")
+        .select("ticketNumber subject status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate createdAt isSubTicket parentTicket")
         .lean(),
     ]);
 
@@ -195,27 +213,37 @@ export const getAllEvaluations = async (req, res) => {
     const monthEnd   = new Date(year, month + 1, 0, 23, 59, 59, 999);
     const periodLabel = new Date(year, month).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
+    const meetingCategoryIds = await getMeetingCategoryIds();
+
     // Fetch all consultants + stored evals + all tickets for the month in parallel
     const [consultants, storedEvals, allTickets] = await Promise.all([
       Consultant.find({ role: { $ne: "team_member" } })
         .select("firstName lastName position role profilePicture")
         .lean(),
       EmployeeEvaluation.find({ year, month }).lean(),
+      // Include sub-tickets so they are evaluated alongside main tickets, but
+      // exclude meeting-category tickets (Online / On Site Meeting).
       Ticket.find({
         createdAt: { $gte: monthStart, $lte: monthEnd },
-        isSubTicket: { $ne: true },
+        category: { $nin: meetingCategoryIds },
       })
-        .select("status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate acceptedBy assignedBy")
+        .select("status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate acceptedBy assignedBy isSubTicket")
         .lean(),
     ]);
 
-    // Index stored evals and tickets by consultant id for O(1) lookup
+    // Index stored evals and tickets by consultant id for O(1) lookup.
+    // Dedupe per consultant so a ticket where the same consultant is both
+    // acceptedBy and assignedBy is counted once — matching the single-employee
+    // ($or) and range endpoints.
     const evalByConsultant = new Map(storedEvals.map((e) => [e.consultant.toString(), e]));
     const ticketsByConsultant = new Map();
     for (const ticket of allTickets) {
+      const ids = new Set();
       for (const field of ["acceptedBy", "assignedBy"]) {
         const cid = ticket[field]?.toString();
-        if (!cid) continue;
+        if (cid) ids.add(cid);
+      }
+      for (const cid of ids) {
         if (!ticketsByConsultant.has(cid)) ticketsByConsultant.set(cid, []);
         ticketsByConsultant.get(cid).push(ticket);
       }
@@ -295,16 +323,20 @@ export const getAllEvaluationsRange = async (req, res) => {
     }));
     const monthPairs = months.map(({ year, month }) => ({ year, month }));
 
+    const meetingCategoryIds = await getMeetingCategoryIds();
+
     const [consultants, storedEvals, allTickets] = await Promise.all([
       Consultant.find({ role: { $ne: "team_member" } })
         .select("firstName lastName position role profilePicture")
         .lean(),
       EmployeeEvaluation.find({ $or: monthPairs }).lean(),
+      // Include sub-tickets so they are evaluated alongside main tickets, but
+      // exclude meeting-category tickets (Online / On Site Meeting).
       Ticket.find({
         $or: dateRanges,
-        isSubTicket: { $ne: true },
+        category: { $nin: meetingCategoryIds },
       })
-        .select("status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate acceptedBy assignedBy")
+        .select("status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate acceptedBy assignedBy isSubTicket")
         .lean(),
     ]);
 

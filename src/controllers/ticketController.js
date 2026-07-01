@@ -1484,6 +1484,10 @@ const createSubTicket = async (req, res) => {
       scope,
       source,
       notifyEmails,
+      deliveryEstimationDate,
+      internalDeliveryDate,
+      scheduledWeek,
+      durationHours,
     } = req.body;
 
     // Verify parent ticket exists
@@ -1540,8 +1544,13 @@ const createSubTicket = async (req, res) => {
       source: source || parentTicket.source,
       notifyEmails: Array.isArray(notifyEmails) ? notifyEmails : [],
       estimationStartDate: subEstimation.estimationStartDate,
-      deliveryEstimationDate: subEstimation.deliveryEstimationDate,
+      // Prefer an explicitly provided customer delivery date; fall back to the
+      // SLA-calculated estimation when none is supplied (e.g. customer-created).
+      deliveryEstimationDate: deliveryEstimationDate || subEstimation.deliveryEstimationDate,
       estimationDays: subEstimation.estimationDays,
+      ...(internalDeliveryDate !== undefined && { internalDeliveryDate }),
+      ...(scheduledWeek !== undefined && { scheduledWeek }),
+      ...(durationHours !== undefined && { durationHours }),
     });
 
     const populatedSubTicket = await Ticket.findById(subTicket._id)
