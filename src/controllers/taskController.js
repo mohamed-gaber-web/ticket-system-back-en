@@ -22,6 +22,21 @@ const SORT_FIELDS = {
 
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
 
+// Completion-aware delay (whole days) reused by list + stats aggregations.
+// done → completedAt − endDate; otherwise now − endDate. Never negative.
+const DELAY_EXPR = {
+  $let: {
+    vars: { ref: { $cond: [{ $eq: ["$status", "done"] }, "$completedAt", "$$NOW"] } },
+    in: {
+      $cond: [
+        { $and: [{ $ne: ["$endDate", null] }, { $ne: ["$$ref", null] }] },
+        { $max: [0, { $ceil: { $divide: [{ $subtract: ["$$ref", "$endDate"] }, 86400000] } }] },
+        0,
+      ],
+    },
+  },
+};
+
 // Reusable $lookup + $unwind stage that projects only the fields the client needs,
 // matching the shape the old .populate() calls returned.
 const lookupOne = (from, localField, fields) => [
@@ -116,32 +131,7 @@ const getTasks = async (req, res) => {
           pipeline: [{ $project: { _id: 1 } }],
         },
       },
-      { $addFields: { subTaskCount: { $size: "$subTasks" } } },
-      // Delay (in whole days): completion-aware.
-      // done  → completedAt − endDate; otherwise now − endDate. Never negative.
-      {
-        $addFields: {
-          delayDays: {
-            $let: {
-              vars: {
-                ref: { $cond: [{ $eq: ["$status", "done"] }, "$completedAt", "$$NOW"] },
-              },
-              in: {
-                $cond: [
-                  { $and: [{ $ne: ["$endDate", null] }, { $ne: ["$$ref", null] }] },
-                  {
-                    $max: [
-                      0,
-                      { $ceil: { $divide: [{ $subtract: ["$$ref", "$endDate"] }, 86400000] } },
-                    ],
-                  },
-                  0,
-                ],
-              },
-            },
-          },
-        },
-      },
+      { $addFields: { subTaskCount: { $size: "$subTasks" }, delayDays: DELAY_EXPR } },
       { $project: { subTasks: 0 } },
       {
         $facet: {
@@ -275,6 +265,146 @@ const updateTask = async (req, res) => {
   }
 };
 
+// @desc    Aggregated stats for the tasks dashboard
+// @route   GET /api/tasks/stats
+const getTaskStats = async (req, res) => {
+  try {
+    const { department } = req.query;
+
+    // Same department scoping as getTasks: non-admins are locked to their department.
+    const match = {};
+    const callerDept = req.user?.department;
+    const callerRole = req.user?.role;
+    if (callerRole !== "admin" && callerDept) {
+      match.department = toObjectId(typeof callerDept === "object" ? callerDept._id : callerDept);
+    } else if (department) {
+      match.department = toObjectId(department);
+    }
+
+    const [facet] = await Task.aggregate([
+      { $match: match },
+      { $addFields: { delayDays: DELAY_EXPR } },
+      {
+        $facet: {
+          totals: [
+            {
+              $group: {
+                _id: null,
+                total: { $sum: 1 },
+                pending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
+                inProgress: { $sum: { $cond: [{ $eq: ["$status", "in_progress"] }, 1, 0] } },
+                done: { $sum: { $cond: [{ $eq: ["$status", "done"] }, 1, 0] } },
+                // Currently overdue = still open (not done) and past its end date.
+                overdue: {
+                  $sum: {
+                    $cond: [{ $and: [{ $ne: ["$status", "done"] }, { $gt: ["$delayDays", 0] }] }, 1, 0],
+                  },
+                },
+                totalDelayDays: {
+                  $sum: {
+                    $cond: [{ $and: [{ $ne: ["$status", "done"] }, { $gt: ["$delayDays", 0] }] }, "$delayDays", 0],
+                  },
+                },
+              },
+            },
+          ],
+          byCategory: [
+            { $group: { _id: "$category", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 8 },
+            { $lookup: { from: "taskcategories", localField: "_id", foreignField: "_id", as: "cat" } },
+            { $unwind: { path: "$cat", preserveNullAndEmptyArrays: true } },
+            { $project: { _id: 0, name: { $ifNull: ["$cat.name", "Uncategorized"] }, count: 1 } },
+          ],
+          byDepartment: [
+            { $group: { _id: "$department", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 8 },
+            { $lookup: { from: "departments", localField: "_id", foreignField: "_id", as: "dept" } },
+            { $unwind: { path: "$dept", preserveNullAndEmptyArrays: true } },
+            { $project: { _id: 0, name: { $ifNull: ["$dept.name", "—"] }, count: 1 } },
+          ],
+          byWeek: [
+            { $match: { scheduledWeek: { $ne: null } } },
+            { $group: { _id: "$scheduledWeek", count: { $sum: 1 } } },
+            { $sort: { _id: 1 } },
+            { $project: { _id: 0, week: "$_id", count: 1 } },
+          ],
+          topAssignees: [
+            { $match: { assignedTo: { $ne: null } } },
+            { $group: { _id: "$assignedTo", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 6 },
+            { $lookup: { from: "consultants", localField: "_id", foreignField: "_id", as: "c" } },
+            { $unwind: { path: "$c", preserveNullAndEmptyArrays: true } },
+            {
+              $project: {
+                _id: 0,
+                name: {
+                  $trim: { input: { $concat: [{ $ifNull: ["$c.firstName", ""] }, " ", { $ifNull: ["$c.lastName", ""] }] } },
+                },
+                count: 1,
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const t = facet.totals[0] ?? { total: 0, pending: 0, inProgress: 0, done: 0, overdue: 0, totalDelayDays: 0 };
+    const completionRate = t.total > 0 ? Math.round((t.done / t.total) * 100) : 0;
+    const avgDelayDays = t.overdue > 0 ? Math.round((t.totalDelayDays / t.overdue) * 10) / 10 : 0;
+
+    // Populated task lists for the dashboard panels.
+    const now = new Date();
+    const listFields = "taskNumber name status endDate scheduledWeek duration assignedTo department category createdAt";
+    const [recent, upcoming, overdue] = await Promise.all([
+      populateTask(Task.find(match).sort({ createdAt: -1 }).limit(6).select(listFields)),
+      populateTask(
+        Task.find({ ...match, status: { $ne: "done" }, endDate: { $gte: now } })
+          .sort({ endDate: 1 })
+          .limit(6)
+          .select(listFields)
+      ),
+      populateTask(
+        Task.find({ ...match, status: { $ne: "done" }, endDate: { $lt: now, $ne: null } })
+          .sort({ endDate: 1 })
+          .limit(6)
+          .select(listFields)
+      ),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totals: {
+          total: t.total,
+          pending: t.pending,
+          inProgress: t.inProgress,
+          done: t.done,
+          overdue: t.overdue,
+          completionRate,
+          avgDelayDays,
+        },
+        byStatus: [
+          { status: "pending", count: t.pending },
+          { status: "in_progress", count: t.inProgress },
+          { status: "done", count: t.done },
+        ],
+        byCategory: facet.byCategory,
+        byDepartment: facet.byDepartment,
+        byWeek: facet.byWeek,
+        topAssignees: facet.topAssignees,
+        recent,
+        upcoming,
+        overdue,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error fetching task stats", error: error.message });
+  }
+};
+
 // @desc    Delete task
 // @route   DELETE /api/tasks/:id
 const deleteTask = async (req, res) => {
@@ -292,4 +422,4 @@ const deleteTask = async (req, res) => {
   }
 };
 
-export { getTasks, getTaskById, createTask, updateTask, deleteTask };
+export { getTasks, getTaskStats, getTaskById, createTask, updateTask, deleteTask };
