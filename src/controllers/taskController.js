@@ -1,6 +1,43 @@
+import mongoose from "mongoose";
 import Task from "../models/Task.js";
 
-// @desc    Get all tasks (filtered by department for non-admins)
+// Whitelist of sortable fields → actual document path used by the aggregation $sort.
+// Guards against injection and lets the client sort on populated names + computed delay.
+const SORT_FIELDS = {
+  taskNumber: "taskNumber",
+  name: "name",
+  department: "department.name",
+  category: "category.name",
+  assignedTo: "assignedTo.firstName",
+  responsible: "responsible.firstName",
+  scheduledWeek: "scheduledWeek",
+  duration: "duration",
+  startDate: "startDate",
+  endDate: "endDate",
+  status: "status",
+  delay: "delayDays",
+  delayDays: "delayDays",
+  createdAt: "createdAt",
+};
+
+const toObjectId = (id) => new mongoose.Types.ObjectId(id);
+
+// Reusable $lookup + $unwind stage that projects only the fields the client needs,
+// matching the shape the old .populate() calls returned.
+const lookupOne = (from, localField, fields) => [
+  {
+    $lookup: {
+      from,
+      localField,
+      foreignField: "_id",
+      as: localField,
+      pipeline: [{ $project: fields }],
+    },
+  },
+  { $unwind: { path: `$${localField}`, preserveNullAndEmptyArrays: true } },
+];
+
+// @desc    Get all tasks (filtered by department for non-admins, sortable on all columns)
 // @route   GET /api/tasks
 const getTasks = async (req, res) => {
   try {
@@ -8,6 +45,7 @@ const getTasks = async (req, res) => {
       page = 1,
       limit = 20,
       department,
+      category,
       status,
       assignedTo,
       scheduledWeek,
@@ -15,67 +53,107 @@ const getTasks = async (req, res) => {
       endDate,
       search,
       parentTask,
+      sort,
+      order,
     } = req.query;
 
-    const query = {};
+    const match = {};
 
     // Non-admin consultants only see their department's tasks.
     // req.user.department is populated as an object by the auth middleware.
     const callerDept = req.user?.department;
     const callerRole = req.user?.role;
     if (callerRole !== "admin" && callerDept) {
-      query.department = typeof callerDept === "object" ? callerDept._id : callerDept;
+      match.department = toObjectId(typeof callerDept === "object" ? callerDept._id : callerDept);
     } else if (department) {
-      query.department = department;
+      match.department = toObjectId(department);
     }
 
+    if (category) match.category = toObjectId(category);
+
     if (startDate || endDate) {
-      query.startDate = {};
-      if (startDate) query.startDate.$gte = new Date(startDate);
-      if (endDate) query.startDate.$lte = new Date(endDate);
+      match.startDate = {};
+      if (startDate) match.startDate.$gte = new Date(startDate);
+      if (endDate) match.startDate.$lte = new Date(endDate);
     }
 
     // When parentTask is provided fetch subtasks of that task;
     // otherwise default to top-level tasks only (parentTask: null).
-    query.parentTask = parentTask ? parentTask : null;
+    match.parentTask = parentTask ? toObjectId(parentTask) : null;
 
-    if (status) query.status = status;
-    if (assignedTo) query.assignedTo = assignedTo;
-    if (scheduledWeek) query.scheduledWeek = parseInt(scheduledWeek);
+    if (status) match.status = status;
+    if (assignedTo) match.assignedTo = toObjectId(assignedTo);
+    if (scheduledWeek) match.scheduledWeek = parseInt(scheduledWeek);
     if (search) {
-      query.$or = [
+      match.$or = [
         { name: { $regex: search, $options: "i" } },
         { description: { $regex: search, $options: "i" } },
       ];
     }
 
+    const sortField = SORT_FIELDS[sort] || "createdAt";
+    const sortOrder = order === "asc" ? 1 : -1;
+    const sortStage = { [sortField]: sortOrder };
+    // Stable tie-breaker so equal values keep a deterministic order across pages.
+    if (sortField !== "createdAt") sortStage.createdAt = -1;
+
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const [tasks, total] = await Promise.all([
-      Task.find(query)
-        .populate("assignedTo", "firstName lastName email")
-        .populate("responsible", "firstName lastName email")
-        .populate("createdBy", "firstName lastName")
-        .populate("department", "name")
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .skip(skip),
-      Task.countDocuments(query),
-    ]);
+    const pipeline = [
+      { $match: match },
+      ...lookupOne("departments", "department", { name: 1 }),
+      ...lookupOne("consultants", "assignedTo", { firstName: 1, lastName: 1, email: 1 }),
+      ...lookupOne("consultants", "responsible", { firstName: 1, lastName: 1, email: 1 }),
+      ...lookupOne("consultants", "createdBy", { firstName: 1, lastName: 1 }),
+      ...lookupOne("taskcategories", "category", { name: 1 }),
+      // Count direct subtasks for each task.
+      {
+        $lookup: {
+          from: "tasks",
+          localField: "_id",
+          foreignField: "parentTask",
+          as: "subTasks",
+          pipeline: [{ $project: { _id: 1 } }],
+        },
+      },
+      { $addFields: { subTaskCount: { $size: "$subTasks" } } },
+      // Delay (in whole days): completion-aware.
+      // done  → completedAt − endDate; otherwise now − endDate. Never negative.
+      {
+        $addFields: {
+          delayDays: {
+            $let: {
+              vars: {
+                ref: { $cond: [{ $eq: ["$status", "done"] }, "$completedAt", "$$NOW"] },
+              },
+              in: {
+                $cond: [
+                  { $and: [{ $ne: ["$endDate", null] }, { $ne: ["$$ref", null] }] },
+                  {
+                    $max: [
+                      0,
+                      { $ceil: { $divide: [{ $subtract: ["$$ref", "$endDate"] }, 86400000] } },
+                    ],
+                  },
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      },
+      { $project: { subTasks: 0 } },
+      {
+        $facet: {
+          data: [{ $sort: sortStage }, { $skip: skip }, { $limit: parseInt(limit) }],
+          totalCount: [{ $count: "count" }],
+        },
+      },
+    ];
 
-    // Attach subTaskCount to each task in one aggregation query
-    const taskIds = tasks.map((t) => t._id);
-    const subCounts = await Task.aggregate([
-      { $match: { parentTask: { $in: taskIds } } },
-      { $group: { _id: "$parentTask", count: { $sum: 1 } } },
-    ]);
-    const countMap = {};
-    subCounts.forEach(({ _id, count }) => { countMap[_id.toString()] = count; });
-
-    const data = tasks.map((t) => ({
-      ...t.toObject(),
-      subTaskCount: countMap[t._id.toString()] ?? 0,
-    }));
+    const [result] = await Task.aggregate(pipeline);
+    const data = result?.data ?? [];
+    const total = result?.totalCount?.[0]?.count ?? 0;
 
     res.status(200).json({
       success: true,
@@ -90,15 +168,20 @@ const getTasks = async (req, res) => {
   }
 };
 
+// Shared populate chain for single-task responses.
+const populateTask = (queryOrDoc) =>
+  queryOrDoc
+    .populate("assignedTo", "firstName lastName email")
+    .populate("responsible", "firstName lastName email")
+    .populate("createdBy", "firstName lastName")
+    .populate("department", "name")
+    .populate("category", "name");
+
 // @desc    Get single task
 // @route   GET /api/tasks/:id
 const getTaskById = async (req, res) => {
   try {
-    const task = await Task.findById(req.params.id)
-      .populate("assignedTo", "firstName lastName email")
-      .populate("responsible", "firstName lastName email")
-      .populate("createdBy", "firstName lastName")
-      .populate("department", "name");
+    const task = await populateTask(Task.findById(req.params.id));
 
     if (!task) {
       return res.status(404).json({ success: false, message: "Task not found" });
@@ -114,12 +197,13 @@ const getTaskById = async (req, res) => {
 // @route   POST /api/tasks
 const createTask = async (req, res) => {
   try {
-    const { name, description, department, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status, parentTask } = req.body;
+    const { name, description, department, category, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status, parentTask } = req.body;
 
     const task = await Task.create({
       name,
       description,
       department,
+      category,
       startDate: startDate || null,
       endDate: endDate || null,
       assignedTo: assignedTo || null,
@@ -127,15 +211,12 @@ const createTask = async (req, res) => {
       scheduledWeek: scheduledWeek ?? null,
       duration: duration ?? null,
       status: status || "pending",
+      completedAt: status === "done" ? new Date() : null,
       createdBy: req.user?._id || null,
       parentTask: parentTask || null,
     });
 
-    const populated = await Task.findById(task._id)
-      .populate("assignedTo", "firstName lastName email")
-      .populate("responsible", "firstName lastName email")
-      .populate("createdBy", "firstName lastName")
-      .populate("department", "name");
+    const populated = await populateTask(Task.findById(task._id));
 
     res.status(201).json({ success: true, message: "Task created successfully", data: populated });
   } catch (error) {
@@ -151,33 +232,38 @@ const createTask = async (req, res) => {
 // @route   PATCH /api/tasks/:id
 const updateTask = async (req, res) => {
   try {
-    const { name, description, department, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status, parentTask } = req.body;
+    const { name, description, department, category, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status, parentTask } = req.body;
+
+    const existing = await Task.findById(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Task not found" });
+    }
 
     const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
     if (department !== undefined) updateData.department = department;
+    if (category !== undefined) updateData.category = category;
     if (startDate !== undefined) updateData.startDate = startDate || null;
     if (endDate !== undefined) updateData.endDate = endDate || null;
     if (assignedTo !== undefined) updateData.assignedTo = assignedTo || null;
     if (responsible !== undefined) updateData.responsible = responsible || null;
     if (scheduledWeek !== undefined) updateData.scheduledWeek = scheduledWeek ?? null;
     if (duration !== undefined) updateData.duration = duration ?? null;
-    if (status !== undefined) updateData.status = status;
     if (parentTask !== undefined) updateData.parentTask = parentTask || null;
-
-    const updated = await Task.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
-      runValidators: true,
-    })
-      .populate("assignedTo", "firstName lastName email")
-      .populate("responsible", "firstName lastName email")
-      .populate("createdBy", "firstName lastName")
-      .populate("department", "name");
-
-    if (!updated) {
-      return res.status(404).json({ success: false, message: "Task not found" });
+    if (status !== undefined) {
+      updateData.status = status;
+      // Stamp completedAt on the first transition into "done"; clear it when leaving "done".
+      if (status === "done" && existing.status !== "done") {
+        updateData.completedAt = new Date();
+      } else if (status !== "done") {
+        updateData.completedAt = null;
+      }
     }
+
+    const updated = await populateTask(
+      Task.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true })
+    );
 
     res.status(200).json({ success: true, message: "Task updated successfully", data: updated });
   } catch (error) {

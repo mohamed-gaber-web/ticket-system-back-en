@@ -54,6 +54,12 @@ const addOneDay = (date) => {
   return d;
 };
 
+// Safety cap for day-advancing loops. With a valid config (at least one working
+// day per week) any working day is found within a handful of iterations; this
+// only trips on corrupt config (e.g. every day marked as weekend) and turns a
+// server hang into a catchable error instead.
+const MAX_DAY_ITER = 4000; // ~10 years of daily steps
+
 /**
  * Return the next day that is a working day (starts from date + 1 day)
  * @param {Date} date
@@ -62,8 +68,12 @@ const addOneDay = (date) => {
  */
 export const nextWorkingDay = (date, weekendDays, holidays) => {
   let d = addOneDay(date);
+  let guard = 0;
   while (!isWorkingDay(d, weekendDays, holidays)) {
     d = addOneDay(d);
+    if (++guard > MAX_DAY_ITER) {
+      throw new Error("nextWorkingDay: no working day found — check weekendDays/holidays config");
+    }
   }
   return d;
 };
@@ -79,10 +89,14 @@ export const nextWorkingDay = (date, weekendDays, holidays) => {
 export const addWorkingDays = (startDate, n, weekendDays, holidays) => {
   let d = new Date(startDate);
   let counted = 0;
+  let guard = 0;
   while (counted < n) {
     d = addOneDay(d);
     if (isWorkingDay(d, weekendDays, holidays)) {
       counted++;
+    }
+    if (++guard > MAX_DAY_ITER) {
+      throw new Error("addWorkingDays: exceeded max iterations — check weekendDays/holidays config");
     }
   }
   return d;
@@ -119,26 +133,21 @@ export const getEstimationStartDate = (
     candidate = setTimeOnDate(createdAt, workStartTime);
   } else {
     // After cutoff — start next working day at workStartTime
-    let nextDay = addOneDay(createdAt);
-    while (!isWorkingDay(nextDay, weekendDays, holidays)) {
-      nextDay = addOneDay(nextDay);
-    }
-    candidate = setTimeOnDate(nextDay, workStartTime);
+    candidate = setTimeOnDate(nextWorkingDay(createdAt, weekendDays, holidays), workStartTime);
   }
 
   // Ensure candidate itself is a working day (edge case: same-day but today is a holiday)
+  let guard = 0;
   while (!isWorkingDay(candidate, weekendDays, holidays)) {
-    const nextDay = addOneDay(candidate);
-    candidate = setTimeOnDate(nextDay, workStartTime);
+    candidate = setTimeOnDate(addOneDay(candidate), workStartTime);
+    if (++guard > MAX_DAY_ITER) {
+      throw new Error("getEstimationStartDate: no working day found — check weekendDays/holidays config");
+    }
   }
 
   // If the customer's previous ticket ends after our candidate, start after that
   if (lastDeliveryDate && lastDeliveryDate > candidate) {
-    let afterPrev = addOneDay(lastDeliveryDate);
-    while (!isWorkingDay(afterPrev, weekendDays, holidays)) {
-      afterPrev = addOneDay(afterPrev);
-    }
-    candidate = setTimeOnDate(afterPrev, workStartTime);
+    candidate = setTimeOnDate(nextWorkingDay(lastDeliveryDate, weekendDays, holidays), workStartTime);
   }
 
   return candidate;

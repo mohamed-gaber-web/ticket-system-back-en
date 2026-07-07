@@ -19,6 +19,9 @@ const getWorkingHours = async (req, res) => {
   }
 };
 
+// 24-hour "HH:mm" (00:00–23:59)
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 // @desc    Update working hours config
 // @route   PUT /api/working-hours
 // @access  Private (admin / senior_consultant)
@@ -36,14 +39,74 @@ const updateWorkingHours = async (req, res) => {
     } = req.body;
 
     const update = {};
-    if (workStartTime !== undefined) update.workStartTime = workStartTime;
-    if (workEndTime !== undefined) update.workEndTime = workEndTime;
-    if (lastTicketAcceptanceTime !== undefined) update.lastTicketAcceptanceTime = lastTicketAcceptanceTime;
-    if (weekendDays !== undefined) update.weekendDays = weekendDays;
-    if (estimationDays !== undefined) update.estimationDays = estimationDays;
-    if (reminderBeforeDays !== undefined) update.reminderBeforeDays = reminderBeforeDays;
-    if (autoCloseDays !== undefined) update.autoCloseDays = autoCloseDays;
-    if (pendingReminderIntervalDays !== undefined) update.pendingReminderIntervalDays = pendingReminderIntervalDays;
+    const errors = [];
+
+    // Time fields must be valid 24-hour HH:mm — bad values would make the
+    // estimation calculator produce Invalid Date delivery estimates.
+    for (const [key, val] of [
+      ["workStartTime", workStartTime],
+      ["workEndTime", workEndTime],
+      ["lastTicketAcceptanceTime", lastTicketAcceptanceTime],
+    ]) {
+      if (val === undefined) continue;
+      if (typeof val !== "string" || !TIME_RE.test(val)) {
+        errors.push(`${key} must be a valid 24-hour time in HH:mm format`);
+      } else {
+        update[key] = val;
+      }
+    }
+
+    // weekendDays must be integer day numbers 0 (Sun) – 6 (Sat) and cannot cover
+    // the whole week — otherwise the estimation loops never find a working day
+    // and ticket creation would hang.
+    if (weekendDays !== undefined) {
+      if (
+        !Array.isArray(weekendDays) ||
+        weekendDays.some((d) => !Number.isInteger(d) || d < 0 || d > 6)
+      ) {
+        errors.push("weekendDays must be an array of integers between 0 (Sun) and 6 (Sat)");
+      } else {
+        const unique = [...new Set(weekendDays)];
+        if (unique.length >= 7) {
+          errors.push("weekendDays cannot include all 7 days — at least one working day is required");
+        } else {
+          update.weekendDays = unique;
+        }
+      }
+    }
+
+    // Numeric intervals must be finite and within their minimums.
+    for (const [key, val, min] of [
+      ["estimationDays", estimationDays, 1],
+      ["reminderBeforeDays", reminderBeforeDays, 0],
+      ["autoCloseDays", autoCloseDays, 1],
+      ["pendingReminderIntervalDays", pendingReminderIntervalDays, 1],
+    ]) {
+      if (val === undefined) continue;
+      const n = Number(val);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < min) {
+        errors.push(`${key} must be a whole number >= ${min}`);
+      } else {
+        update[key] = n;
+      }
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({ success: false, message: "Validation error", errors });
+    }
+
+    // Cross-field: work start must be before work end. Validate against the
+    // effective values (existing config merged with this update).
+    const current = (await WorkingHours.findOne().lean()) ?? {};
+    const effectiveStart = update.workStartTime ?? current.workStartTime;
+    const effectiveEnd = update.workEndTime ?? current.workEndTime;
+    if (effectiveStart && effectiveEnd && effectiveStart >= effectiveEnd) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: ["workStartTime must be earlier than workEndTime"],
+      });
+    }
 
     const config = await WorkingHours.findOneAndUpdate(
       {},
