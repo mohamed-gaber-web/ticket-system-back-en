@@ -29,6 +29,10 @@ const EMAIL_REGEX = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
 const VALID_STATUSES = Lead.schema.path("status").enumValues;
 const VALID_SOURCES = Lead.schema.path("leadSource").enumValues;
 const VALID_PRIORITIES = Lead.schema.path("priority").enumValues;
+const VALID_ENTITY_TYPES = Lead.schema.path("entityType").enumValues;
+const VALID_INDUSTRY_SECTORS = Lead.schema.path("industrySector").enumValues;
+const VALID_GOVERNORATES = Lead.schema.path("governorate").enumValues;
+const PHONE_E164_EG_REGEX = Lead.schema.path("phonePrimary").options.match[0];
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
@@ -50,6 +54,8 @@ export const importLeads = async (req, res) => {
       req.user.role === "admin" && cleanStr(req.body.assignedTo) ? cleanStr(req.body.assignedTo) : undefined;
     const defaultStatus = VALID_STATUSES.includes(req.body.status) ? req.body.status : "New Lead";
     const defaultSource = VALID_SOURCES.includes(req.body.leadSource) ? req.body.leadSource : undefined;
+    // Batch-wide originating file for auditing (spec field 13: Data_Source)
+    const defaultDataSource = cleanStr(req.body.dataSource) || undefined;
     const skipDuplicates = req.body.skipDuplicates !== false; // default true
 
     const errors = [];
@@ -96,6 +102,11 @@ export const importLeads = async (req, res) => {
       const department = cleanStr(row.department);
       if (department) tags.push(department);
 
+      // Spec fields — the primary phone falls back to the first parsed phone.
+      const phonePrimary = cleanStr(row.phonePrimary) || phones[0]?.number || "";
+      const phoneSecondary = cleanStr(row.phoneSecondary) || phones[1]?.number || "";
+      const phoneOther = cleanStr(row.phoneOther) || phones.slice(2).map((p) => p.number).join(", ");
+
       const doc = {
         companyName: cleanStr(row.companyName) || contactPersonName, // company is required; fall back to contact
         contactPersonName,
@@ -109,7 +120,22 @@ export const importLeads = async (req, res) => {
         status: VALID_STATUSES.includes(row.status) ? row.status : defaultStatus,
         tags,
         createdBy: req.user._id,
+        // ── Spec fields ──────────────────────────────────────────────────────
+        entityType: VALID_ENTITY_TYPES.includes(row.entityType) ? row.entityType : undefined,
+        businessClassification: cleanStr(row.businessClassification) || undefined,
+        industrySector: VALID_INDUSTRY_SECTORS.includes(row.industrySector) ? row.industrySector : undefined,
+        country: cleanStr(row.country) || undefined, // schema default "Egypt" applies when unset
+        governorate: VALID_GOVERNORATES.includes(row.governorate) ? row.governorate : undefined,
+        cityArea: cleanStr(row.cityArea) || undefined,
+        fullAddress: cleanStr(row.fullAddress) || cleanStr(row.address) || undefined,
+        phoneSecondary: phoneSecondary || undefined,
+        phoneOther: phoneOther || undefined,
+        website: cleanStr(row.website) || undefined,
+        dataSource: cleanStr(row.dataSource) || defaultDataSource,
       };
+      // Phone_Primary only stored when it matches the Egypt E.164 format (avoids
+      // failing the whole row's insert on a malformed number from source data).
+      if (phonePrimary && PHONE_E164_EG_REGEX.test(phonePrimary)) doc.phonePrimary = phonePrimary;
       if (email && EMAIL_REGEX.test(email)) doc.email = email.toLowerCase();
       if (defaultAssignedTo) doc.assignedTo = defaultAssignedTo;
 
@@ -175,7 +201,11 @@ export const importLeads = async (req, res) => {
 // @access  Private (tele_sales) — admin: all, user: own assigned
 export const getAllLeads = async (req, res) => {
   try {
-    const { status, priority, assignedTo, tags, search, from, to, page = 1, limit = 20 } = req.query;
+    const {
+      status, priority, assignedTo, tags, search, from, to,
+      entityType, industrySector, governorate, country,
+      page = 1, limit = 20,
+    } = req.query;
 
     const filter = {};
 
@@ -188,6 +218,10 @@ export const getAllLeads = async (req, res) => {
     if (priority) filter.priority = priority;
     if (assignedTo && req.user.role === "admin") filter.assignedTo = assignedTo;
     if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
+    if (entityType) filter.entityType = entityType;
+    if (industrySector) filter.industrySector = industrySector;
+    if (governorate) filter.governorate = governorate;
+    if (country) filter.country = country;
 
     if (search) {
       filter.$or = [
@@ -307,6 +341,10 @@ export const updateLead = async (req, res) => {
       "companyName", "contactPersonName", "phones", "email", "jobTitle",
       "industry", "companySize", "address", "leadSource", "priority", "potentialValue",
       "status", "painPoints", "customerNeeds", "budget", "isDecisionMaker", "tags",
+      // Spec fields (tele-sales lead specification)
+      "entityType", "businessClassification", "industrySector", "country",
+      "governorate", "cityArea", "fullAddress", "phonePrimary", "phoneSecondary",
+      "phoneOther", "website", "dataSource",
     ];
 
     // Only admin can reassign
