@@ -9,6 +9,7 @@ import cookieParser from "cookie-parser";
 import routes from "./src/routes/index.js";
 import { startSLACron } from "./src/utils/slaCron.js";
 import { startWorkingHoursCron } from "./src/utils/workingHoursCron.js";
+import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
 import { initSocket } from "./src/socket/io.js";
 
 // Load environment variables
@@ -121,6 +122,14 @@ const startServer = async () => {
   try {
     // Connect to MongoDB and initialize GridFS first
     await connectDB();
+
+    // One-time, idempotent data migration for leads created under the old schema
+    // (moves legacy phones[] into phonePrimary/Secondary/Other). Never blocks boot.
+    try {
+      await migrateLegacyPhones();
+    } catch (migrationErr) {
+      console.error("Legacy phone migration failed (continuing startup):", migrationErr.message);
+    }
 
     // Wrap Express in an HTTP server so Socket.io can attach to it
     const server = http.createServer(app);
