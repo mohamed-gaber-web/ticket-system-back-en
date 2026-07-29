@@ -2,6 +2,7 @@ import express from "express";
 import {
   createLead,
   importLeads,
+  backfillCustomerIds,
   getAllLeads,
   getLeadStats,
   getLeadById,
@@ -26,6 +27,7 @@ router.use(protect, authorizeTeleSalesAccess);
 // Lead CRUD
 router.post("/", createLead);
 router.post("/import", importLeads);
+router.post("/backfill-customer-ids", authorizeRole("admin"), backfillCustomerIds);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
 router.get("/:id", getLeadById);

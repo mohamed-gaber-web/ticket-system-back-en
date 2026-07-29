@@ -186,6 +186,61 @@ export const importLeads = async (req, res) => {
   }
 };
 
+// @desc    Backfill customerId (CUST-YYYY-NNNNN) for existing leads that lack one.
+//          Idempotent — only touches leads still missing an ID. Grouped by the
+//          lead's creation year, continuing after any IDs already in the DB.
+// @route   POST /api/leads/backfill-customer-ids
+// @access  Private (tele_sales admin)
+export const backfillCustomerIds = async (req, res) => {
+  try {
+    const missing = await Lead.find({
+      $or: [{ customerId: { $exists: false } }, { customerId: null }, { customerId: "" }],
+    })
+      .select("_id createdAt")
+      .sort({ createdAt: 1 }) // oldest first → numbering follows creation order
+      .lean();
+
+    if (missing.length === 0) {
+      return res.status(200).json({ success: true, message: "All leads already have a customerId", updated: 0 });
+    }
+
+    // Seed per-year counters from IDs that already exist.
+    const existing = await Lead.find({ customerId: /^CUST-\d{4}-\d{5}$/ }).select("customerId").lean();
+    const used = new Set(existing.map((d) => d.customerId));
+    const maxSeqByYear = {};
+    for (const d of existing) {
+      const [, y, seq] = d.customerId.split("-");
+      const n = parseInt(seq, 10);
+      if (!maxSeqByYear[y] || n > maxSeqByYear[y]) maxSeqByYear[y] = n;
+    }
+
+    const pad = (n) => String(n).padStart(5, "0");
+    const ops = [];
+    for (const lead of missing) {
+      const year = lead.createdAt ? new Date(lead.createdAt).getFullYear() : new Date().getFullYear();
+      let seq = (maxSeqByYear[year] || 0) + 1;
+      let candidate = `CUST-${year}-${pad(seq)}`;
+      while (used.has(candidate)) {
+        seq += 1;
+        candidate = `CUST-${year}-${pad(seq)}`;
+      }
+      used.add(candidate);
+      maxSeqByYear[year] = seq;
+      ops.push({ updateOne: { filter: { _id: lead._id }, update: { $set: { customerId: candidate } } } });
+    }
+
+    const result = await Lead.bulkWrite(ops, { ordered: false });
+    res.status(200).json({
+      success: true,
+      message: `Assigned customerId to ${result.modifiedCount} lead(s)`,
+      updated: result.modifiedCount,
+      total: missing.length,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error backfilling customer IDs", error: error.message });
+  }
+};
+
 // @desc    Get all leads
 // @route   GET /api/leads
 // @access  Private (tele_sales) — admin: all, user: own assigned
