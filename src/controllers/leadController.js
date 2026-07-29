@@ -1,4 +1,4 @@
-import Lead from "../models/Lead.js";
+import Lead, { normalizeEgyptPhone } from "../models/Lead.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
 import LeadAttachment from "../models/LeadAttachment.js";
@@ -66,55 +66,42 @@ export const importLeads = async (req, res) => {
       const rowNum = i + 1;
       const contactPersonName = cleanStr(row.contactPersonName ?? row.contactName ?? row.name);
 
-      // Collect phone numbers (accept `phones` array or flat phone/phone2 fields)
-      let phoneValues = [];
-      if (Array.isArray(row.phones)) {
-        phoneValues = row.phones.map((p) => (typeof p === "string" ? { number: p } : p));
-      } else {
-        phoneValues = [
-          { number: row.phone ?? row.mobile, label: "Primary" },
-          { number: row.phone2 ?? row.mobile2, label: "Secondary" },
-        ];
-      }
-      const phones = phoneValues
-        .map((p) => ({ number: cleanStr(p?.number), label: cleanStr(p?.label) || "Primary" }))
-        .filter((p) => p.number);
+      // Structured phones (spec fields 8-10). Primary normalised to E.164;
+      // flat phone/mobile fields accepted as fallbacks for older sources.
+      const primaryNorm = normalizeEgyptPhone(cleanStr(row.phonePrimary ?? row.phone ?? row.mobile));
+      const phoneSecondary = cleanStr(row.phoneSecondary ?? row.phone2 ?? row.mobile2);
+      const phoneOther = cleanStr(row.phoneOther);
 
       if (!contactPersonName) {
         errors.push({ row: rowNum, reason: "Missing contact person name" });
         return;
       }
-      if (phones.length === 0) {
+
+      // A lead needs at least one reachable number; the primary is the identity.
+      const dedupKey = primaryNorm || normalizeEgyptPhone(phoneSecondary) || phoneOther;
+      if (!dedupKey) {
         errors.push({ row: rowNum, reason: "Missing phone number" });
         return;
       }
 
-      // Duplicate detection within the batch (by any phone number)
-      const phoneKeys = phones.map((p) => p.number);
-      if (skipDuplicates && phoneKeys.some((k) => seenInBatch.has(k))) {
+      // Duplicate detection within the batch (by primary phone identity)
+      if (skipDuplicates && seenInBatch.has(dedupKey)) {
         errors.push({ row: rowNum, reason: "Duplicate phone within file", duplicate: true });
         return;
       }
-      phoneKeys.forEach((k) => seenInBatch.add(k));
+      seenInBatch.add(dedupKey);
 
       const email = cleanStr(row.email);
       const tags = Array.isArray(row.tags) ? row.tags.map(cleanStr).filter(Boolean) : [];
       const department = cleanStr(row.department);
       if (department) tags.push(department);
 
-      // Spec fields — the primary phone falls back to the first parsed phone.
-      const phonePrimary = cleanStr(row.phonePrimary) || phones[0]?.number || "";
-      const phoneSecondary = cleanStr(row.phoneSecondary) || phones[1]?.number || "";
-      const phoneOther = cleanStr(row.phoneOther) || phones.slice(2).map((p) => p.number).join(", ");
-
       const doc = {
         companyName: cleanStr(row.companyName) || contactPersonName, // company is required; fall back to contact
         contactPersonName,
-        phones,
         jobTitle: cleanStr(row.jobTitle) || undefined,
         industry: cleanStr(row.industry) || undefined,
         companySize: cleanStr(row.companySize) || undefined,
-        address: cleanStr(row.address) || undefined,
         leadSource: VALID_SOURCES.includes(row.leadSource) ? row.leadSource : defaultSource,
         priority: VALID_PRIORITIES.includes(row.priority) ? row.priority : "Medium",
         status: VALID_STATUSES.includes(row.status) ? row.status : defaultStatus,
@@ -135,22 +122,22 @@ export const importLeads = async (req, res) => {
       };
       // Phone_Primary only stored when it matches the Egypt E.164 format (avoids
       // failing the whole row's insert on a malformed number from source data).
-      if (phonePrimary && PHONE_E164_EG_REGEX.test(phonePrimary)) doc.phonePrimary = phonePrimary;
+      if (primaryNorm && PHONE_E164_EG_REGEX.test(primaryNorm)) doc.phonePrimary = primaryNorm;
       if (email && EMAIL_REGEX.test(email)) doc.email = email.toLowerCase();
       if (defaultAssignedTo) doc.assignedTo = defaultAssignedTo;
 
-      candidates.push({ doc, phoneKeys, rowNum });
+      candidates.push({ doc, dedupKey, rowNum });
     });
 
-    // Duplicate detection against existing leads (by phone number)
+    // Duplicate detection against existing leads (by primary phone)
     let toInsert = candidates;
     let dbDuplicates = 0;
     if (skipDuplicates && candidates.length > 0) {
-      const allNumbers = [...new Set(candidates.flatMap((c) => c.phoneKeys))];
-      const existing = await Lead.find({ "phones.number": { $in: allNumbers } }).select("phones").lean();
-      const existingNumbers = new Set(existing.flatMap((l) => l.phones.map((p) => p.number)));
+      const allKeys = [...new Set(candidates.map((c) => c.dedupKey))];
+      const existing = await Lead.find({ phonePrimary: { $in: allKeys } }).select("phonePrimary").lean();
+      const existingNumbers = new Set(existing.map((l) => l.phonePrimary));
       toInsert = candidates.filter((c) => {
-        const dup = c.phoneKeys.some((k) => existingNumbers.has(k));
+        const dup = existingNumbers.has(c.dedupKey);
         if (dup) {
           dbDuplicates += 1;
           errors.push({ row: c.rowNum, reason: "Phone already exists in database", duplicate: true });
@@ -161,6 +148,9 @@ export const importLeads = async (req, res) => {
 
     let inserted = 0;
     if (toInsert.length > 0) {
+      // insertMany bypasses the pre-save hook, so reserve customer IDs up front.
+      const customerIds = await Lead.reserveCustomerIds(toInsert.length);
+      toInsert.forEach((c, i) => { c.doc.customerId = customerIds[i]; });
       try {
         const result = await Lead.insertMany(
           toInsert.map((c) => c.doc),
@@ -228,6 +218,7 @@ export const getAllLeads = async (req, res) => {
         { companyName: { $regex: search, $options: "i" } },
         { contactPersonName: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
+        { customerId: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -338,8 +329,8 @@ export const updateLead = async (req, res) => {
     }
 
     const allowedFields = [
-      "companyName", "contactPersonName", "phones", "email", "jobTitle",
-      "industry", "companySize", "address", "leadSource", "priority", "potentialValue",
+      "companyName", "contactPersonName", "email", "jobTitle",
+      "industry", "companySize", "leadSource", "priority", "potentialValue",
       "status", "painPoints", "customerNeeds", "budget", "isDecisionMaker", "tags",
       // Spec fields (tele-sales lead specification)
       "entityType", "businessClassification", "industrySector", "country",
