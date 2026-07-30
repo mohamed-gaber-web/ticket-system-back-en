@@ -66,6 +66,32 @@ export const getCallsByLead = async (req, res) => {
   }
 };
 
+// @desc    Get recent call logs across all leads (global)
+// @route   GET /api/calls/recent
+// @access  Private (tele_sales)
+export const getRecentCalls = async (req, res) => {
+  try {
+    const filter = {};
+
+    // Non-admin only sees their own calls
+    if (req.user.role !== "admin") {
+      filter.calledBy = req.user._id;
+    }
+
+    const limit = Number(req.query.limit) || 50;
+
+    const calls = await CallLog.find(filter)
+      .populate("lead", "companyName contactPersonName phonePrimary phoneSecondary status")
+      .populate("calledBy", "firstName lastName")
+      .sort({ callDate: -1 })
+      .limit(limit);
+
+    res.status(200).json({ success: true, total: calls.length, data: calls });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error fetching recent calls", error: error.message });
+  }
+};
+
 // @desc    Update a call log
 // @route   PATCH /api/leads/:leadId/calls/:callId
 // @access  Private (tele_sales)

@@ -29,6 +29,7 @@ import workingHoursRoutes from "./workingHoursRoutes.js";
 import teleSalesAgentRoutes from "./teleSalesAgentRoutes.js";
 import leadRoutes from "./leadRoutes.js";
 import followUpRoutes from "./followUpRoutes.js";
+import callRoutes from "./callRoutes.js";
 import taskRoutes from "./taskRoutes.js";
 import taskCategoryRoutes from "./taskCategoryRoutes.js";
 import taskAttachmentRoutes from "./taskAttachmentRoutes.js";
@@ -127,6 +128,8 @@ router.use("/working-hours", workingHoursRoutes);
 router.use("/tele-sales-agents", teleSalesAgentRoutes);
 router.use("/leads", leadRoutes);
 router.use("/followups", followUpRoutes);
+
+router.use("/calls", callRoutes);
 
 // Task routes
 router.use("/tasks", taskRoutes);
