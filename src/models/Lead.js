@@ -5,8 +5,10 @@ import mongoose from "mongoose";
 // Field 1: Entity_Type
 export const ENTITY_TYPES = ["Hotel", "Restaurant", "Cafe", "Factory", "Company"];
 
-// Field 3: Industry_Sector — 26 normalised sectors (Hospitality → Logistics →
-// Public Sector, plus Unclassified as the catch-all).
+// Field 3: Industry_Sector — the default seed set (Hospitality → Logistics →
+// Public Sector, plus Unclassified as the catch-all). These are only the initial
+// values: the live list is admin-managed in the IndustrySector collection, so the
+// Lead field itself is a free string validated against that lookup, not this array.
 export const INDUSTRY_SECTORS = [
   "Hospitality",
   "Food & Beverage",
@@ -150,13 +152,12 @@ const leadSchema = mongoose.Schema(
       type: String,
       trim: true,
     },
-    // Field 3: Industry_Sector
+    // Field 3: Industry_Sector — admin-managed lookup (see IndustrySector model).
+    // Stored as the sector's name; values are constrained by the setup screen and
+    // (on import) validated against the IndustrySector collection, not a hard enum,
+    // so admins can add/remove sectors without a schema change or code deploy.
     industrySector: {
       type: String,
-      enum: {
-        values: INDUSTRY_SECTORS,
-        message: "{VALUE} is not a valid industry sector",
-      },
       trim: true,
     },
 

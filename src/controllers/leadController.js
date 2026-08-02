@@ -1,4 +1,5 @@
 import Lead, { normalizeEgyptPhone } from "../models/Lead.js";
+import IndustrySector from "../models/IndustrySector.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
 import LeadAttachment from "../models/LeadAttachment.js";
@@ -30,7 +31,8 @@ const VALID_STATUSES = Lead.schema.path("status").enumValues;
 const VALID_SOURCES = Lead.schema.path("leadSource").enumValues;
 const VALID_PRIORITIES = Lead.schema.path("priority").enumValues;
 const VALID_ENTITY_TYPES = Lead.schema.path("entityType").enumValues;
-const VALID_INDUSTRY_SECTORS = Lead.schema.path("industrySector").enumValues;
+// Industry sectors are an admin-managed lookup (not a schema enum), so the valid
+// set is loaded from the IndustrySector collection at import time — see importLeads.
 const VALID_GOVERNORATES = Lead.schema.path("governorate").enumValues;
 const PHONE_E164_EG_REGEX = Lead.schema.path("phonePrimary").options.match[0];
 
@@ -57,6 +59,11 @@ export const importLeads = async (req, res) => {
     // Batch-wide originating file for auditing (spec field 13: Data_Source)
     const defaultDataSource = cleanStr(req.body.dataSource) || undefined;
     const skipDuplicates = req.body.skipDuplicates !== false; // default true
+
+    // Valid industry sectors come from the admin-managed lookup, not a schema enum.
+    // Loaded once per import; unknown sectors on a row are dropped (left undefined).
+    const industrySectorDocs = await IndustrySector.find().select("name").lean();
+    const VALID_INDUSTRY_SECTORS = new Set(industrySectorDocs.map((s) => s.name));
 
     const errors = [];
     const seenInBatch = new Set();
@@ -110,7 +117,7 @@ export const importLeads = async (req, res) => {
         // ── Spec fields ──────────────────────────────────────────────────────
         entityType: VALID_ENTITY_TYPES.includes(row.entityType) ? row.entityType : undefined,
         businessClassification: cleanStr(row.businessClassification) || undefined,
-        industrySector: VALID_INDUSTRY_SECTORS.includes(row.industrySector) ? row.industrySector : undefined,
+        industrySector: VALID_INDUSTRY_SECTORS.has(row.industrySector) ? row.industrySector : undefined,
         country: cleanStr(row.country) || undefined, // schema default "Egypt" applies when unset
         governorate: VALID_GOVERNORATES.includes(row.governorate) ? row.governorate : undefined,
         cityArea: cleanStr(row.cityArea) || undefined,
