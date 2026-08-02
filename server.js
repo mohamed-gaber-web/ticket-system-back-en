@@ -10,6 +10,7 @@ import routes from "./src/routes/index.js";
 import { startSLACron } from "./src/utils/slaCron.js";
 import { startWorkingHoursCron } from "./src/utils/workingHoursCron.js";
 import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
+import { seedIndustrySectors } from "./src/utils/seedIndustrySectors.js";
 import { initSocket } from "./src/socket/io.js";
 
 // Load environment variables
@@ -129,6 +130,16 @@ const startServer = async () => {
       await migrateLegacyPhones();
     } catch (migrationErr) {
       console.error("Legacy phone migration failed (continuing startup):", migrationErr.message);
+    }
+
+    // One-time, idempotent seed of the default Industry Sector lookup values
+    // (the list that used to be a hardcoded enum on the Lead schema). No-op once
+    // seeded. Never blocks boot.
+    try {
+      const seeded = await seedIndustrySectors();
+      if (seeded > 0) console.log(`Seeded ${seeded} default industry sector(s)`);
+    } catch (seedErr) {
+      console.error("Industry sector seed failed (continuing startup):", seedErr.message);
     }
 
     // Wrap Express in an HTTP server so Socket.io can attach to it
