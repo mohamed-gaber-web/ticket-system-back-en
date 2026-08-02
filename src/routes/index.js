@@ -23,6 +23,8 @@ import erpTypeRoutes from "./erpTypeRoutes.js";
 import versionNumberRoutes from "./versionNumberRoutes.js";
 import sourceRoutes from "./sourceRoutes.js";
 import industrySectorRoutes from "./industrySectorRoutes.js";
+import countryRoutes from "./countryRoutes.js";
+import businessClassificationRoutes from "./businessClassificationRoutes.js";
 import companyRoutes from "./companyRoutes.js";
 import companyUserRoutes from "./companyUserRoutes.js";
 import emailRoutes from "./emailRoutes.js";
@@ -115,6 +117,12 @@ router.use("/sources", sourceRoutes);
 
 // Industry Sector routes (tele-sales lead setup lookup)
 router.use("/industry-sectors", industrySectorRoutes);
+
+// Country routes (tele-sales lead setup lookup)
+router.use("/countries", countryRoutes);
+
+// Business Classification routes (tele-sales lead setup lookup)
+router.use("/business-classifications", businessClassificationRoutes);
 
 // Company routes
 router.use("/companies", companyRoutes);

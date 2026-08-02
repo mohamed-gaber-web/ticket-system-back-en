@@ -11,6 +11,7 @@ import { startSLACron } from "./src/utils/slaCron.js";
 import { startWorkingHoursCron } from "./src/utils/workingHoursCron.js";
 import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
 import { seedIndustrySectors } from "./src/utils/seedIndustrySectors.js";
+import { seedCountries } from "./src/utils/seedCountries.js";
 import { initSocket } from "./src/socket/io.js";
 
 // Load environment variables
@@ -140,6 +141,15 @@ const startServer = async () => {
       if (seeded > 0) console.log(`Seeded ${seeded} default industry sector(s)`);
     } catch (seedErr) {
       console.error("Industry sector seed failed (continuing startup):", seedErr.message);
+    }
+
+    // One-time, idempotent seed of the default Country lookup ("Egypt", the old
+    // Lead schema default). No-op once seeded. Never blocks boot.
+    try {
+      const seeded = await seedCountries();
+      if (seeded > 0) console.log(`Seeded ${seeded} default country/countries`);
+    } catch (seedErr) {
+      console.error("Country seed failed (continuing startup):", seedErr.message);
     }
 
     // Wrap Express in an HTTP server so Socket.io can attach to it
