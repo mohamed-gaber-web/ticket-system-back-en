@@ -71,8 +71,28 @@ export const GOVERNORATES = [
 
 // Field 8: Phone_Primary — E.164 Egypt format. Accepts the two documented shapes
 // (mobile "+20 1XX XXX XXXX" and landline "+20 2 XXXX XXXX") with optional spaces
-// or hyphens as separators. Lenient enough not to reject well-formed source data.
+// or hyphens as separators. Kept for the bulk-import normaliser / back-compat.
 export const PHONE_E164_EG_REGEX = /^\+20[\s-]?\d(?:[\s-]?\d){6,10}$/;
+
+// International phone format used to validate a lead's Phone_Primary on manual
+// create/update. Accepts any country (KSA, Bahrain, USA, …): an optional leading
+// "+" then 6–15 digits with spaces, hyphens, dots or parentheses as separators.
+// Deliberately lenient so well-formed foreign numbers aren't rejected.
+export const PHONE_INTL_REGEX = /^\+?[0-9][0-9\s().-]{4,}$/;
+
+/**
+ * True when `raw` is a plausible international phone number: only +, digits and
+ * common separators, with 6–15 actual digits (the E.164 maximum). Used by the
+ * Phone_Primary validator so numbers from any country are accepted.
+ */
+export const isValidPhone = (raw) => {
+  if (raw == null) return false;
+  const str = String(raw).trim();
+  if (!str) return false;
+  if (!/^\+?[0-9\s().-]+$/.test(str)) return false;
+  const digits = str.replace(/\D/g, "");
+  return digits.length >= 6 && digits.length <= 15;
+};
 
 /**
  * Normalise an Egyptian phone number to compact E.164 (+20…) when possible so
@@ -189,13 +209,17 @@ const leadSchema = mongoose.Schema(
     },
 
     // ── Structured Contact (spec fields 8-12) ────────────────────────────────
-    // Field 8: Phone_Primary — E.164 Egypt format. A setter normalises common
-    // local formats (01…, 002…, 2…) to +20 so valid numbers aren't rejected.
+    // Field 8: Phone_Primary — international. Stored exactly as entered (trimmed)
+    // and validated leniently so numbers from any country are accepted. No Egypt
+    // normalisation on manual create/update, since that would corrupt foreign
+    // local numbers (e.g. Saudi "0501234567" → "+20501234567").
     phonePrimary: {
       type: String,
       trim: true,
-      set: normalizeEgyptPhone,
-      match: [PHONE_E164_EG_REGEX, "Phone_Primary must be a valid Egypt E.164 number (e.g. +20 1XX XXX XXXX)"],
+      validate: {
+        validator: (v) => v == null || v === "" || isValidPhone(v),
+        message: "Phone_Primary must be a valid phone number (include the country code for non-Egypt numbers, e.g. +966 5X XXX XXXX)",
+      },
     },
     // Field 9: Phone_Secondary
     phoneSecondary: {

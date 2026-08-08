@@ -1,4 +1,4 @@
-import Lead, { normalizeEgyptPhone } from "../models/Lead.js";
+import Lead, { normalizeEgyptPhone, PHONE_INTL_REGEX } from "../models/Lead.js";
 import IndustrySector from "../models/IndustrySector.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
@@ -34,7 +34,6 @@ const VALID_ENTITY_TYPES = Lead.schema.path("entityType").enumValues;
 // Industry sectors are an admin-managed lookup (not a schema enum), so the valid
 // set is loaded from the IndustrySector collection at import time — see importLeads.
 const VALID_GOVERNORATES = Lead.schema.path("governorate").enumValues;
-const PHONE_E164_EG_REGEX = Lead.schema.path("phonePrimary").options.match[0];
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
@@ -127,9 +126,10 @@ export const importLeads = async (req, res) => {
         website: cleanStr(row.website) || undefined,
         dataSource: cleanStr(row.dataSource) || defaultDataSource,
       };
-      // Phone_Primary only stored when it matches the Egypt E.164 format (avoids
+      // Phone_Primary only stored when it looks like a valid phone number (avoids
       // failing the whole row's insert on a malformed number from source data).
-      if (primaryNorm && PHONE_E164_EG_REGEX.test(primaryNorm)) doc.phonePrimary = primaryNorm;
+      // Egyptian numbers were normalised to +20 above; foreign numbers pass through.
+      if (primaryNorm && PHONE_INTL_REGEX.test(primaryNorm)) doc.phonePrimary = primaryNorm;
       if (email && EMAIL_REGEX.test(email)) doc.email = email.toLowerCase();
       if (defaultAssignedTo) doc.assignedTo = defaultAssignedTo;
 
