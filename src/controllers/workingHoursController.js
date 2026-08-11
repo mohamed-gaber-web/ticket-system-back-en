@@ -36,10 +36,34 @@ const updateWorkingHours = async (req, res) => {
       reminderBeforeDays,
       autoCloseDays,
       pendingReminderIntervalDays,
+      dataEntryDate,
     } = req.body;
 
     const update = {};
     const errors = [];
+
+    // The data entry date decides which day new tickets are recorded on, so it is
+    // admin-only — senior consultants may edit the rest of this config but not this.
+    if (dataEntryDate !== undefined) {
+      if (req.userType !== "consultant" || req.user?.role !== "admin") {
+        return res.status(403).json({
+          success: false,
+          message: "Only admins can set the data entry date",
+        });
+      }
+      if (dataEntryDate === null || dataEntryDate === "") {
+        update.dataEntryDate = null; // cleared — new tickets fall back to today
+      } else {
+        const parsed = new Date(dataEntryDate);
+        if (isNaN(parsed.getTime())) {
+          errors.push("dataEntryDate must be a valid date");
+        } else {
+          // Store the calendar day only; the time-of-day is applied per ticket
+          parsed.setUTCHours(0, 0, 0, 0);
+          update.dataEntryDate = parsed;
+        }
+      }
+    }
 
     // Time fields must be valid 24-hour HH:mm — bad values would make the
     // estimation calculator produce Invalid Date delivery estimates.

@@ -40,6 +40,13 @@ const workingHoursSchema = mongoose.Schema(
       default: 2,
       min: 1,
     },
+    // Data entry date — new tickets are recorded on this date instead of "today".
+    // Admin-managed in Working Hours Setup so entry stays daily rather than
+    // retroactive; null means every ticket is stamped with the current date.
+    dataEntryDate: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

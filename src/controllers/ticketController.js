@@ -47,10 +47,31 @@ const calcEstimation = async (customerId, createdAt) => {
   return { estimationStartDate, deliveryEstimationDate, estimationDays: config.estimationDays };
 };
 
-// Only consultant admins may enter/override the ticket data entry (created) date.
-// Everyone else always gets the current date — no back-dating.
+// New tickets always take their date from setup, so the only way a ticket's data
+// entry date can move afterwards is an admin correcting it on update.
 const canSetEntryDate = (req) =>
   req.userType === "consultant" && req.user?.role === "admin";
+
+// Resolve the timestamp a new ticket is recorded with. Admins set a single
+// "data entry date" in Working Hours Setup so entry stays daily rather than
+// retroactive; when it is unset the ticket is stamped with the current moment.
+const resolveDataEntryDate = async () => {
+  const config = await WorkingHours.findOne().select("dataEntryDate").lean();
+  const now = new Date();
+
+  if (!config?.dataEntryDate) return { entryDate: now, isConfigured: false };
+
+  // Keep the configured calendar day but carry today's time-of-day, so ticket
+  // ordering and the lastTicketAcceptanceTime cutoff still behave normally.
+  const entryDate = new Date(config.dataEntryDate);
+  entryDate.setUTCHours(
+    now.getUTCHours(),
+    now.getUTCMinutes(),
+    now.getUTCSeconds(),
+    now.getUTCMilliseconds()
+  );
+  return { entryDate, isConfigured: true };
+};
 
 // Parse a submitted data entry date; returns null when it isn't a usable date
 const parseEntryDate = (value) => {
@@ -538,27 +559,11 @@ const createTicket = async (req, res) => {
       internalDeliveryDate,
       scheduledWeek,
       durationHours,
-      createdAt,
     } = req.body;
 
-    // Data entry date — admins only. Anyone else is created with the current date.
-    let explicitEntryDate = null;
-    if (createdAt !== undefined && createdAt !== null && createdAt !== "") {
-      if (!canSetEntryDate(req)) {
-        return res.status(403).json({
-          success: false,
-          message: "Only admins can set the ticket data entry date",
-        });
-      }
-      explicitEntryDate = parseEntryDate(createdAt);
-      if (!explicitEntryDate) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid data entry date",
-        });
-      }
-    }
-    const entryDate = explicitEntryDate ?? new Date();
+    // The entry date comes from Working Hours Setup, never from the request —
+    // a ticket can't be back-dated by whoever creates it.
+    const { entryDate, isConfigured } = await resolveDataEntryDate();
 
     // If user is a customer, automatically use their ID
     if (req.userType === "customer") {
@@ -619,11 +624,11 @@ const createTicket = async (req, res) => {
     });
 
     // Mongoose timestamps keep an explicit createdAt, but fall back to the driver
-    // if anything overwrote it so an admin-entered date is never silently lost
-    if (explicitEntryDate && ticket.createdAt?.getTime() !== explicitEntryDate.getTime()) {
+    // if anything overwrote it so the configured entry date is never silently lost
+    if (isConfigured && ticket.createdAt?.getTime() !== entryDate.getTime()) {
       await Ticket.collection.updateOne(
         { _id: ticket._id },
-        { $set: { createdAt: explicitEntryDate } }
+        { $set: { createdAt: entryDate } }
       );
     }
 
@@ -1586,11 +1591,14 @@ const createSubTicket = async (req, res) => {
       }
     }
 
-    // Create sub-ticket with parent ticket's customer and SLA
-    const subNow = new Date();
-    const subEstimation = await calcEstimation(parentTicket.customer, subNow);
+    // Create sub-ticket with parent ticket's customer and SLA. Sub-tickets are data
+    // entry too, so they follow the same setup-configured entry date as any ticket.
+    const { entryDate: subEntryDate, isConfigured: subDateConfigured } =
+      await resolveDataEntryDate();
+    const subEstimation = await calcEstimation(parentTicket.customer, subEntryDate);
 
     const subTicket = await Ticket.create({
+      createdAt: subEntryDate,
       customer: parentTicket.customer,
       subject,
       description,
@@ -1620,6 +1628,14 @@ const createSubTicket = async (req, res) => {
       ...(scheduledWeek !== undefined && { scheduledWeek }),
       ...(durationHours !== undefined && { durationHours }),
     });
+
+    // Same driver-level safety net as createTicket — never lose the configured date
+    if (subDateConfigured && subTicket.createdAt?.getTime() !== subEntryDate.getTime()) {
+      await Ticket.collection.updateOne(
+        { _id: subTicket._id },
+        { $set: { createdAt: subEntryDate } }
+      );
+    }
 
     const populatedSubTicket = await Ticket.findById(subTicket._id)
       .populate("customer", "companyName email contactPerson")
