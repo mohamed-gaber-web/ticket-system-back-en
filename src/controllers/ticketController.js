@@ -47,6 +47,23 @@ const calcEstimation = async (customerId, createdAt) => {
   return { estimationStartDate, deliveryEstimationDate, estimationDays: config.estimationDays };
 };
 
+// Only consultant admins may enter/override the ticket data entry (created) date.
+// Everyone else always gets the current date — no back-dating.
+const canSetEntryDate = (req) =>
+  req.userType === "consultant" && req.user?.role === "admin";
+
+// Parse a submitted data entry date; returns null when it isn't a usable date
+const parseEntryDate = (value) => {
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? null : date;
+};
+
+// Compare two dates by calendar day (UTC) — the form only ever sends YYYY-MM-DD
+const isSameEntryDay = (a, b) => {
+  if (!(a instanceof Date) || !(b instanceof Date)) return false;
+  return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
+};
+
 // Helper function to populate commentBy based on userType
 const populateCommentBy = async (comment) => {
   let commentBy = null;
@@ -521,7 +538,27 @@ const createTicket = async (req, res) => {
       internalDeliveryDate,
       scheduledWeek,
       durationHours,
+      createdAt,
     } = req.body;
+
+    // Data entry date — admins only. Anyone else is created with the current date.
+    let explicitEntryDate = null;
+    if (createdAt !== undefined && createdAt !== null && createdAt !== "") {
+      if (!canSetEntryDate(req)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only admins can set the ticket data entry date",
+        });
+      }
+      explicitEntryDate = parseEntryDate(createdAt);
+      if (!explicitEntryDate) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid data entry date",
+        });
+      }
+    }
+    const entryDate = explicitEntryDate ?? new Date();
 
     // If user is a customer, automatically use their ID
     if (req.userType === "customer") {
@@ -548,10 +585,10 @@ const createTicket = async (req, res) => {
     // Get SLA from customer if mapped
     const sla = customerExists.slaMapping || null;
 
-    const now = new Date();
-    const estimation = await calcEstimation(customer, now);
+    const estimation = await calcEstimation(customer, entryDate);
 
     const ticket = await Ticket.create({
+      createdAt: entryDate,
       customer,
       subject,
       description,
@@ -580,6 +617,15 @@ const createTicket = async (req, res) => {
       createdByType: req.userType,
       createdByConsultant: req.userType === "consultant" ? req.user._id : undefined,
     });
+
+    // Mongoose timestamps keep an explicit createdAt, but fall back to the driver
+    // if anything overwrote it so an admin-entered date is never silently lost
+    if (explicitEntryDate && ticket.createdAt?.getTime() !== explicitEntryDate.getTime()) {
+      await Ticket.collection.updateOne(
+        { _id: ticket._id },
+        { $set: { createdAt: explicitEntryDate } }
+      );
+    }
 
     const populatedTicket = await Ticket.findById(ticket._id)
       .populate("customer", "companyName email contactPerson")
@@ -680,6 +726,28 @@ const updateTicket = async (req, res) => {
       });
     }
 
+    // Data entry date — admins only. Re-submitting the ticket's existing date is a
+    // no-op (the edit form always sends it back), changing it requires an admin.
+    let entryDateUpdate = null;
+    if (createdAt !== undefined && createdAt !== null && createdAt !== "") {
+      const parsedEntryDate = parseEntryDate(createdAt);
+      if (!parsedEntryDate) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid data entry date",
+        });
+      }
+      if (!isSameEntryDay(parsedEntryDate, ticket.createdAt)) {
+        if (!canSetEntryDate(req)) {
+          return res.status(403).json({
+            success: false,
+            message: "Only admins can change the ticket data entry date",
+          });
+        }
+        entryDateUpdate = parsedEntryDate;
+      }
+    }
+
     // Track status changes for timestamps
     const updateData = {
       subject,
@@ -768,13 +836,13 @@ const updateTicket = async (req, res) => {
       .populate("source", "name");
 
     // createdAt is immutable in Mongoose timestamps — update it directly via the driver
-    if (createdAt && ticket) {
+    if (entryDateUpdate && ticket) {
       await Ticket.collection.updateOne(
         { _id: ticket._id },
-        { $set: { createdAt: new Date(createdAt) } }
+        { $set: { createdAt: entryDateUpdate } }
       );
       ticket = ticket.toObject({ virtuals: true });
-      ticket.createdAt = new Date(createdAt);
+      ticket.createdAt = entryDateUpdate;
     }
 
     // Send email on any status change
