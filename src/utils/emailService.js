@@ -6,6 +6,45 @@ import EmailLog from "../models/EmailLog.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const TEMPLATES_DIR = path.join(__dirname, "../templates/email");
+const LOGO_PATH = path.join(__dirname, "../assets/growpath-logo.png");
+
+// ---------------------------------------------------------------------------
+// Brand logo — embedded inline (CID) rather than hot-linked, so it renders
+// without the recipient having to click "show images".
+// ---------------------------------------------------------------------------
+
+export const LOGO_CID = "growpath-logo";
+
+let logoBuffer;
+let logoLoadFailed = false;
+
+const getLogoAttachment = () => {
+  if (logoLoadFailed) return null;
+  if (!logoBuffer) {
+    try {
+      logoBuffer = fs.readFileSync(LOGO_PATH);
+    } catch (error) {
+      // Never block a send over branding — the <img> alt text stands in.
+      logoLoadFailed = true;
+      console.error(`⚠️  Brand logo not found at ${LOGO_PATH}: ${error.message}`);
+      return null;
+    }
+  }
+  return {
+    name: "growpath-logo.png",
+    contentType: "image/png",
+    content: logoBuffer,
+    isInline: true,
+    contentId: LOGO_CID,
+  };
+};
+
+/** Append the inline logo when the HTML actually references it. */
+const withBrandLogo = (html, attachments = []) => {
+  if (!html.includes(`cid:${LOGO_CID}`)) return attachments;
+  const logo = getLogoAttachment();
+  return logo ? [...attachments, logo] : attachments;
+};
 
 // ---------------------------------------------------------------------------
 // Microsoft 365 / Azure AD — Graph API via Client Credentials (direct HTTP)
@@ -87,14 +126,23 @@ const sendViaMicrosoftGraph = async (from, to, subject, html, options = {}) => {
   if (replyTo.length) message.replyTo = replyTo;
 
   if (Array.isArray(options.attachments) && options.attachments.length > 0) {
-    message.attachments = options.attachments.map((att) => ({
-      "@odata.type": "#microsoft.graph.fileAttachment",
-      name: att.name,
-      contentType: att.contentType || "application/octet-stream",
-      contentBytes: Buffer.isBuffer(att.content)
-        ? att.content.toString("base64")
-        : Buffer.from(att.content).toString("base64"),
-    }));
+    message.attachments = options.attachments.map((att) => {
+      const attachment = {
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        name: att.name,
+        contentType: att.contentType || "application/octet-stream",
+        contentBytes: Buffer.isBuffer(att.content)
+          ? att.content.toString("base64")
+          : Buffer.from(att.content).toString("base64"),
+      };
+      // Inline parts are referenced from the HTML as cid:<contentId> and are
+      // hidden from the recipient's attachment list.
+      if (att.isInline) {
+        attachment.isInline = true;
+        attachment.contentId = att.contentId;
+      }
+      return attachment;
+    });
   }
 
   const response = await fetch(
@@ -163,7 +211,9 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
     const senderAddress = process.env.MS_EMAIL_FROM || process.env.EMAIL_USER;
     if (!senderAddress) throw new Error("Email sender address missing. Set MS_EMAIL_FROM in .env");
 
-    const info = await sendViaMicrosoftGraph(senderAddress, to, subject, html);
+    const info = await sendViaMicrosoftGraph(senderAddress, to, subject, html, {
+      attachments: withBrandLogo(html),
+    });
 
     const toLabel = Array.isArray(to) ? to.join(", ") : to;
     console.log(`✅ Email sent to ${toLabel} [${templateName}] - ${info.messageId}`);
@@ -209,18 +259,45 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
 // bytes by roughly a third — so the raw payload has to stay well under that.
 export const MAX_TOTAL_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
-// A deliberately plain shell: composed mail is a person writing to a lead, so
-// it must not carry the "automated message, do not reply" chrome of base.html.
+// Composed mail is a person writing to a lead, so it carries the GrowPath
+// letterhead but none of the "automated message, do not reply" chrome that
+// base.html uses for system notifications.
 const wrapCustomBody = (bodyHtml, signature) => `<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="x-apple-disable-message-reformatting">
+</head>
 <body style="margin:0;padding:0;background-color:#f4f6f9;">
-  <div style="max-width:640px;margin:0 auto;padding:24px;">
-    <div style="background-color:#ffffff;border-radius:8px;padding:28px 32px;box-shadow:0 2px 8px rgba(0,0,0,0.06);font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">
-      ${bodyHtml}
-      ${signature ? `<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0 16px;"><p style="margin:0;color:#64748b;font-size:13px;">${signature}</p>` : ""}
-    </div>
-  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f9;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <!-- Letterhead -->
+          <tr>
+            <td style="padding:22px 32px 18px;border-bottom:3px solid #003A8F;">
+              <img src="cid:${LOGO_CID}" alt="GROW PATH — Your Digital Partner" width="165" style="width:165px;max-width:100%;display:block;border:0;outline:none;text-decoration:none;height:auto;">
+            </td>
+          </tr>
+          <!-- Message -->
+          <tr>
+            <td style="padding:28px 32px;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.6;color:#333333;">
+              ${bodyHtml}
+              ${signature ? `<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0 16px;"><p style="margin:0;color:#64748b;font-size:13px;">${signature}</p>` : ""}
+            </td>
+          </tr>
+          <!-- Sign-off band -->
+          <tr>
+            <td style="padding:14px 32px 18px;border-top:1px solid #eef1f6;font-family:'Segoe UI',Arial,sans-serif;">
+              <p style="margin:0;font-size:12px;font-weight:700;color:#003A8F;letter-spacing:0.5px;">GROW PATH</p>
+              <p style="margin:2px 0 0;font-size:11px;font-weight:600;color:#D83A03;letter-spacing:0.4px;">YOUR DIGITAL PARTNER</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 
@@ -272,7 +349,7 @@ export const sendCustomEmail = async ({
       cc,
       bcc,
       replyTo,
-      attachments,
+      attachments: withBrandLogo(html, attachments),
       saveToSentItems: true,
     });
 

@@ -3,6 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>{{headerTitle}}</title>
+  <!--[if mso]>
+  <style type="text/css">
+    body, table, td, p, a { font-family: Arial, sans-serif !important; }
+  </style>
+  <![endif]-->
   <style>
     body {
       font-family: 'Segoe UI', Arial, sans-serif;
@@ -11,23 +18,49 @@
       margin: 0;
       padding: 0;
       background-color: #f4f6f9;
+      -webkit-font-smoothing: antialiased;
     }
     .email-wrapper {
       max-width: 600px;
       margin: 0 auto;
       padding: 20px;
     }
+    /* Brand band: white so the transparent navy wordmark stays legible. */
+    .email-brand {
+      background-color: #ffffff;
+      padding: 22px 30px 18px;
+      text-align: center;
+      border-radius: 8px 8px 0 0;
+      border-bottom: 3px solid #003A8F;
+    }
+    .email-brand img {
+      display: block;
+      margin: 0 auto;
+      border: 0;
+      outline: none;
+      text-decoration: none;
+      height: auto;
+    }
+    /* Shown only when the logo image cannot be rendered. */
+    .brand-fallback {
+      font-size: 20px;
+      font-weight: 700;
+      color: #003A8F;
+      letter-spacing: 0.5px;
+      margin: 0;
+    }
+    .brand-fallback span { color: #D83A03; }
     .email-header {
       background-color: #003A8F;
       color: white;
       padding: 24px 30px;
       text-align: center;
-      border-radius: 8px 8px 0 0;
     }
     .email-header h1 {
       margin: 0;
       font-size: 22px;
       font-weight: 600;
+      color: #ffffff;
     }
     .email-body {
       background-color: #ffffff;
@@ -116,25 +149,66 @@
     .email-footer p {
       margin: 4px 0;
     }
+    .email-footer .footer-brand {
+      color: #003A8F;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .email-footer .footer-tagline {
+      color: #D83A03;
+      font-weight: 600;
+      font-size: 11px;
+      letter-spacing: 0.4px;
+    }
     .divider {
       border: none;
       border-top: 1px solid #e2e8f0;
       margin: 20px 0;
     }
+    @media only screen and (max-width: 620px) {
+      .email-wrapper { padding: 12px !important; }
+      .email-body { padding: 22px 18px !important; }
+      .email-brand { padding: 18px 18px 14px !important; }
+      .email-header { padding: 20px 18px !important; }
+      .email-header h1 { font-size: 19px !important; }
+    }
   </style>
 </head>
 <body>
-  <div class="email-wrapper">
-    <div class="email-header">
-      <h1>{{headerTitle}}</h1>
-    </div>
-    <div class="email-body">
-      {{content}}
-    </div>
-    <div class="email-footer">
-      <p>This is an automated message from the Ticketing System.</p>
-      <p>Please do not reply to this email.</p>
-    </div>
-  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f9;">
+    <tr>
+      <td align="center">
+        <div class="email-wrapper">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">
+            <!-- Brand band -->
+            <tr>
+              <td class="email-brand">
+                <img src="cid:growpath-logo" alt="GROW PATH — Your Digital Partner" width="165" style="width:165px;max-width:100%;">
+              </td>
+            </tr>
+            <!-- Title band -->
+            <tr>
+              <td class="email-header">
+                <h1>{{headerTitle}}</h1>
+              </td>
+            </tr>
+            <!-- Content -->
+            <tr>
+              <td class="email-body">
+                {{content}}
+              </td>
+            </tr>
+          </table>
+
+          <div class="email-footer">
+            <p class="footer-brand">GROW PATH</p>
+            <p class="footer-tagline">YOUR DIGITAL PARTNER</p>
+            <p style="margin-top:10px;">This is an automated message from the Ticketing System.</p>
+            <p>Please do not reply to this email.</p>
+          </div>
+        </div>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
