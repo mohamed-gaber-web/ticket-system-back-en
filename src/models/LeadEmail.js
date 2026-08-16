@@ -5,10 +5,11 @@ import mongoose from "mongoose";
 // without re-fetching anything from the mail provider.
 const leadEmailSchema = mongoose.Schema(
   {
+    // Absent for standalone messages composed from the leads toolbar rather
+    // than from a specific lead's page.
     lead: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Lead",
-      required: [true, "Lead reference is required"],
     },
     to: {
       type: [String],

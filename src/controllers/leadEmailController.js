@@ -81,19 +81,10 @@ const senderIdentity = (req) => {
   };
 };
 
-// @desc    Compose and send an email to a lead's contacts
-// @route   POST /api/leads/:leadId/emails
-// @access  Private (tele_sales / sales consultant)
-export const sendLeadEmail = async (req, res) => {
+// Validates the payload, sends via Graph and records the result. `lead` is null
+// for standalone messages composed from the leads toolbar.
+const composeAndSend = async (req, res, lead) => {
   try {
-    const lead = await Lead.findById(req.params.leadId);
-    if (!lead) {
-      return res.status(404).json({ success: false, message: "Lead not found" });
-    }
-    if (!canAccessLead(req, lead)) {
-      return res.status(403).json({ success: false, message: "Not authorized to email this lead" });
-    }
-
     const to = normaliseAddresses(req.body.to);
     const cc = normaliseAddresses(req.body.cc);
     const bcc = normaliseAddresses(req.body.bcc);
@@ -153,11 +144,11 @@ export const sendLeadEmail = async (req, res) => {
       // Replies go back to the agent who wrote the message, not the shared mailbox.
       replyTo: identity.sentByEmail,
       attachments,
-      logMeta: { leadId: lead._id, userId: req.user._id, userType: req.userType },
+      logMeta: { leadId: lead?._id, userId: req.user._id, userType: req.userType },
     });
 
     const record = await LeadEmail.create({
-      lead: lead._id,
+      lead: lead?._id,
       to,
       cc,
       bcc,
@@ -183,6 +174,29 @@ export const sendLeadEmail = async (req, res) => {
     res.status(500).json({ success: false, message: "Error sending email", error: error.message });
   }
 };
+
+// @desc    Compose and send an email to a lead's contacts
+// @route   POST /api/leads/:leadId/emails
+// @access  Private (tele_sales / sales consultant)
+export const sendLeadEmail = async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.leadId);
+    if (!lead) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+    if (!canAccessLead(req, lead)) {
+      return res.status(403).json({ success: false, message: "Not authorized to email this lead" });
+    }
+    return composeAndSend(req, res, lead);
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error sending email", error: error.message });
+  }
+};
+
+// @desc    Compose and send an email that isn't tied to a specific lead
+// @route   POST /api/emails/compose
+// @access  Private (tele_sales / sales consultant)
+export const sendComposedEmail = async (req, res) => composeAndSend(req, res, null);
 
 // @desc    List emails sent to a lead
 // @route   GET /api/leads/:leadId/emails

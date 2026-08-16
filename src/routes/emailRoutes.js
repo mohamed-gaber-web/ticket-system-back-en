@@ -6,7 +6,8 @@ import {
   sendCommentEmailToExternal,
   sendTaskAssignedEmailHandler,
 } from "../controllers/emailController.js";
-import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
+import { sendComposedEmail } from "../controllers/leadEmailController.js";
+import { protect, authorize, authorizeRole, authorizeTeleSalesAccess } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -29,5 +30,9 @@ router.post("/send-comment", protect, sendCommentEmailToExternal);
 
 // POST /api/emails/send-task-assigned - Notify a consultant about a new task assignment
 router.post("/send-task-assigned", protect, sendTaskAssignedEmailHandler);
+
+// POST /api/emails/compose - Free-form message from the tele-sales compose window,
+// not tied to any single lead
+router.post("/compose", protect, authorizeTeleSalesAccess, sendComposedEmail);
 
 export default router;
