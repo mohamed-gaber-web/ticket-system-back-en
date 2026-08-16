@@ -17,6 +17,7 @@ import {
   deleteFollowUp,
 } from "../controllers/followUpController.js";
 import { addAttachment, getAttachments, deleteAttachment } from "../controllers/leadAttachmentController.js";
+import { sendLeadEmail, getLeadEmails, deleteLeadEmail } from "../controllers/leadEmailController.js";
 import { protect, authorizeTeleSalesAccess, authorizeRole } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -50,5 +51,10 @@ router.delete("/:leadId/followups/:followUpId", deleteFollowUp);
 router.post("/:leadId/attachments", addAttachment);
 router.get("/:leadId/attachments", getAttachments);
 router.delete("/:leadId/attachments/:attachmentId", deleteAttachment);
+
+// Emails
+router.post("/:leadId/emails", sendLeadEmail);
+router.get("/:leadId/emails", getLeadEmails);
+router.delete("/:leadId/emails/:emailId", deleteLeadEmail);
 
 export default router;

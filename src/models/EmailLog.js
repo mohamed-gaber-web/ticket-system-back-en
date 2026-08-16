@@ -26,12 +26,16 @@ const emailLogSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Ticket",
     },
+    relatedLead: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Lead",
+    },
     relatedUser: {
       type: mongoose.Schema.Types.ObjectId,
     },
     relatedUserType: {
       type: String,
-      enum: ["customer", "consultant", "team_member"],
+      enum: ["customer", "consultant", "team_member", "tele_sales"],
     },
     messageId: {
       type: String,
@@ -49,6 +53,7 @@ const emailLogSchema = new mongoose.Schema(
 emailLogSchema.index({ status: 1 });
 emailLogSchema.index({ templateName: 1 });
 emailLogSchema.index({ relatedTicket: 1 });
+emailLogSchema.index({ relatedLead: 1 });
 emailLogSchema.index({ createdAt: -1 });
 
 const EmailLog = mongoose.model("EmailLog", emailLogSchema);

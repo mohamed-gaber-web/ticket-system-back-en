@@ -51,12 +51,51 @@ const getAccessToken = async () => {
   return data.access_token;
 };
 
-const sendViaMicrosoftGraph = async (from, to, subject, html) => {
+const toRecipientList = (value) => {
+  if (!value) return [];
+  const addresses = Array.isArray(value) ? value : [value];
+  return addresses
+    .map((addr) => String(addr).trim())
+    .filter(Boolean)
+    .map((address) => ({ emailAddress: { address } }));
+};
+
+/**
+ * @param {object} [options]
+ * @param {string|string[]} [options.cc]
+ * @param {string|string[]} [options.bcc]
+ * @param {string} [options.replyTo]        Address recipients reply to.
+ * @param {Array<{name: string, contentType?: string, content: Buffer}>} [options.attachments]
+ * @param {boolean} [options.saveToSentItems]
+ */
+const sendViaMicrosoftGraph = async (from, to, subject, html, options = {}) => {
   const accessToken = await getAccessToken();
 
-  // `to` can be a string or an array of strings
-  const addresses = Array.isArray(to) ? to : [to];
-  const toRecipients = addresses.map((addr) => ({ emailAddress: { address: addr } }));
+  const message = {
+    subject,
+    body: { contentType: "HTML", content: html },
+    toRecipients: toRecipientList(to),
+  };
+
+  const ccRecipients = toRecipientList(options.cc);
+  if (ccRecipients.length) message.ccRecipients = ccRecipients;
+
+  const bccRecipients = toRecipientList(options.bcc);
+  if (bccRecipients.length) message.bccRecipients = bccRecipients;
+
+  const replyTo = toRecipientList(options.replyTo);
+  if (replyTo.length) message.replyTo = replyTo;
+
+  if (Array.isArray(options.attachments) && options.attachments.length > 0) {
+    message.attachments = options.attachments.map((att) => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: att.name,
+      contentType: att.contentType || "application/octet-stream",
+      contentBytes: Buffer.isBuffer(att.content)
+        ? att.content.toString("base64")
+        : Buffer.from(att.content).toString("base64"),
+    }));
+  }
 
   const response = await fetch(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/sendMail`,
@@ -67,12 +106,8 @@ const sendViaMicrosoftGraph = async (from, to, subject, html) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message: {
-          subject,
-          body: { contentType: "HTML", content: html },
-          toRecipients,
-        },
-        saveToSentItems: false,
+        message,
+        saveToSentItems: options.saveToSentItems ?? false,
       }),
     }
   );
@@ -160,6 +195,113 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
       relatedTicket: options.ticketId || undefined,
       relatedUser: options.userId || undefined,
       relatedUserType: options.userType || undefined,
+    }).catch((err) => console.error("EmailLog save error:", err.message));
+
+    return { success: false, error: error.message };
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Custom (agent-composed) email — free-form body, cc/bcc and file attachments
+// ---------------------------------------------------------------------------
+
+// Graph's simple sendMail caps the whole request at 4MB, and base64 inflates
+// bytes by roughly a third — so the raw payload has to stay well under that.
+export const MAX_TOTAL_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+
+// A deliberately plain shell: composed mail is a person writing to a lead, so
+// it must not carry the "automated message, do not reply" chrome of base.html.
+const wrapCustomBody = (bodyHtml, signature) => `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;">
+  <div style="max-width:640px;margin:0 auto;padding:24px;">
+    <div style="background-color:#ffffff;border-radius:8px;padding:28px 32px;box-shadow:0 2px 8px rgba(0,0,0,0.06);font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">
+      ${bodyHtml}
+      ${signature ? `<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0 16px;"><p style="margin:0;color:#64748b;font-size:13px;">${signature}</p>` : ""}
+    </div>
+  </div>
+</body>
+</html>`;
+
+/**
+ * Send an email whose body was written by a user rather than rendered from a
+ * template. The caller is responsible for sanitising `bodyHtml`.
+ *
+ * @param {object} params
+ * @param {string|string[]} params.to
+ * @param {string|string[]} [params.cc]
+ * @param {string|string[]} [params.bcc]
+ * @param {string} params.subject
+ * @param {string} params.bodyHtml        Sanitised HTML body.
+ * @param {string} [params.signature]     Plain sign-off appended under a rule.
+ * @param {string} [params.replyTo]       Where replies should land.
+ * @param {Array<{name: string, contentType?: string, content: Buffer}>} [params.attachments]
+ * @param {object} [params.logMeta]       { leadId, userId, userType } for EmailLog.
+ */
+export const sendCustomEmail = async ({
+  to,
+  cc,
+  bcc,
+  subject,
+  bodyHtml,
+  signature,
+  replyTo,
+  attachments = [],
+  logMeta = {},
+}) => {
+  const toLabel = Array.isArray(to) ? to.join(", ") : to;
+
+  try {
+    const senderAddress = process.env.MS_EMAIL_FROM || process.env.EMAIL_USER;
+    if (!senderAddress) throw new Error("Email sender address missing. Set MS_EMAIL_FROM in .env");
+
+    const totalBytes = attachments.reduce((sum, att) => sum + (att.content?.length || 0), 0);
+    if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
+      throw new Error(
+        `Attachments are too large (${(totalBytes / 1024 / 1024).toFixed(1)}MB). The limit is ${
+          MAX_TOTAL_ATTACHMENT_BYTES / 1024 / 1024
+        }MB in total.`
+      );
+    }
+
+    const html = wrapCustomBody(bodyHtml, signature);
+
+    // Composed mail is a real conversation — keep a copy in the sent folder.
+    const info = await sendViaMicrosoftGraph(senderAddress, to, subject, html, {
+      cc,
+      bcc,
+      replyTo,
+      attachments,
+      saveToSentItems: true,
+    });
+
+    console.log(`✅ Custom email sent to ${toLabel} - ${info.messageId}`);
+
+    EmailLog.create({
+      to: toLabel,
+      subject,
+      templateName: "custom-compose",
+      status: "sent",
+      messageId: info.messageId,
+      relatedLead: logMeta.leadId || undefined,
+      relatedUser: logMeta.userId || undefined,
+      relatedUserType: logMeta.userType || undefined,
+    }).catch((err) => console.error("EmailLog save error:", err.message));
+
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error(`❌ Custom email failed to ${toLabel}:`, error.message);
+
+    EmailLog.create({
+      to: toLabel,
+      subject,
+      templateName: "custom-compose",
+      status: "failed",
+      errorMessage: error.message,
+      relatedLead: logMeta.leadId || undefined,
+      relatedUser: logMeta.userId || undefined,
+      relatedUserType: logMeta.userType || undefined,
     }).catch((err) => console.error("EmailLog save error:", err.message));
 
     return { success: false, error: error.message };
