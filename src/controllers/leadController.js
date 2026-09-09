@@ -1,4 +1,4 @@
-import Lead, { normalizeEgyptPhone, PHONE_INTL_REGEX } from "../models/Lead.js";
+import Lead, { normalizeEgyptPhone, PHONE_INTL_REGEX, LEAD_SOURCE_DETAILS, isValidUrl } from "../models/Lead.js";
 import IndustrySector from "../models/IndustrySector.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
@@ -6,13 +6,77 @@ import LeadAttachment from "../models/LeadAttachment.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import mongoose from "mongoose";
 
+const cleanStr = (v) => (v == null ? "" : String(v).trim());
+
+// Fields the lead form requires on both add and update. Enforced here rather than
+// as schema `required` so bulk import (which reads whatever the source file has)
+// keeps working — see importLeads.
+const REQUIRED_LEAD_FIELDS = [
+  { field: "companyName", label: "Company name" },
+  { field: "contactPersonName", label: "Contact person" },
+  { field: "phonePrimary", label: "Phone (primary)" },
+  { field: "email", label: "Email" },
+  { field: "website", label: "Website" },
+  { field: "leadSource", label: "Lead source" },
+];
+
+/**
+ * Validate the mandatory lead-form fields.
+ * On create every field must be present; on update ({ partial: true }) only the
+ * fields actually sent are checked, so a PATCH of one field isn't forced to
+ * resend the rest — but any of them sent blank is still rejected.
+ */
+const validateRequiredLeadFields = (body, { partial = false } = {}) => {
+  const errors = [];
+  REQUIRED_LEAD_FIELDS.forEach(({ field, label }) => {
+    if (partial && body[field] === undefined) return;
+    if (!cleanStr(body[field])) errors.push(`${label} is required`);
+  });
+  return errors;
+};
+
+/**
+ * Validate the lead-source detail against the source it belongs to, and return
+ * the value to persist.
+ *
+ * Sources in LEAD_SOURCE_DETAILS require the detail (LinkedIn additionally
+ * requires a well-formed URL); the rest take none, so the stored value is blanked
+ * — otherwise switching Referral → Website would leave the old referrer name
+ * behind, mislabelled.
+ *
+ * `source` is the effective source after the update, so a PATCH that changes only
+ * one of the two is still checked against the other's stored value.
+ */
+const resolveLeadSourceDetail = (source, rawDetail) => {
+  const spec = LEAD_SOURCE_DETAILS[source];
+  if (!spec) return { value: "", errors: [] };
+
+  const detail = cleanStr(rawDetail);
+  if (!detail) return { value: "", errors: [`${spec.label} is required for the "${source}" lead source`] };
+  if (spec.type === "url" && !isValidUrl(detail)) {
+    return { value: detail, errors: [`${spec.label} must be a valid URL (e.g. https://linkedin.com/in/jane-doe)`] };
+  }
+  return { value: detail, errors: [] };
+};
+
 // @desc    Create a new lead
 // @route   POST /api/leads
 // @access  Private (tele_sales)
 export const createLead = async (req, res) => {
   try {
+    const requiredErrors = validateRequiredLeadFields(req.body);
+    if (requiredErrors.length > 0) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: requiredErrors });
+    }
+
+    const detail = resolveLeadSourceDetail(req.body.leadSource, req.body.leadSourceDetail);
+    if (detail.errors.length > 0) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: detail.errors });
+    }
+
     const lead = await Lead.create({
       ...req.body,
+      leadSourceDetail: detail.value,
       createdBy: req.user._id,
     });
 
@@ -31,11 +95,9 @@ const VALID_STATUSES = Lead.schema.path("status").enumValues;
 const VALID_SOURCES = Lead.schema.path("leadSource").enumValues;
 const VALID_PRIORITIES = Lead.schema.path("priority").enumValues;
 const VALID_ENTITY_TYPES = Lead.schema.path("entityType").enumValues;
+const VALID_SALES_TYPES = Lead.schema.path("salesType").enumValues;
 // Industry sectors are an admin-managed lookup (not a schema enum), so the valid
 // set is loaded from the IndustrySector collection at import time — see importLeads.
-const VALID_GOVERNORATES = Lead.schema.path("governorate").enumValues;
-
-const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
 // @desc    Bulk import leads (from Excel / CSV / markdown parsed on the client)
 // @route   POST /api/leads/import
@@ -107,24 +169,23 @@ export const importLeads = async (req, res) => {
         contactPersonName,
         jobTitle: cleanStr(row.jobTitle) || undefined,
         industry: cleanStr(row.industry) || undefined,
-        companySize: cleanStr(row.companySize) || undefined,
         leadSource: VALID_SOURCES.includes(row.leadSource) ? row.leadSource : defaultSource,
         priority: VALID_PRIORITIES.includes(row.priority) ? row.priority : "Medium",
         status: VALID_STATUSES.includes(row.status) ? row.status : defaultStatus,
         tags,
         createdBy: req.user._id,
         // ── Spec fields ──────────────────────────────────────────────────────
+        salesType: VALID_SALES_TYPES.includes(row.salesType) ? row.salesType : undefined,
         entityType: VALID_ENTITY_TYPES.includes(row.entityType) ? row.entityType : undefined,
         businessClassification: cleanStr(row.businessClassification) || undefined,
         industrySector: VALID_INDUSTRY_SECTORS.has(row.industrySector) ? row.industrySector : undefined,
         country: cleanStr(row.country) || undefined, // schema default "Egypt" applies when unset
-        governorate: VALID_GOVERNORATES.includes(row.governorate) ? row.governorate : undefined,
-        cityArea: cleanStr(row.cityArea) || undefined,
         fullAddress: cleanStr(row.fullAddress) || cleanStr(row.address) || undefined,
         phoneSecondary: phoneSecondary || undefined,
         phoneOther: phoneOther || undefined,
         website: cleanStr(row.website) || undefined,
         dataSource: cleanStr(row.dataSource) || defaultDataSource,
+        leadSourceDetail: cleanStr(row.leadSourceDetail) || undefined,
       };
       // Phone_Primary only stored when it looks like a valid phone number (avoids
       // failing the whole row's insert on a malformed number from source data).
@@ -255,7 +316,7 @@ export const getAllLeads = async (req, res) => {
   try {
     const {
       status, priority, assignedTo, tags, search, from, to,
-      entityType, industrySector, governorate, country,
+      salesType, entityType, industrySector, country,
       page = 1, limit = 20,
     } = req.query;
 
@@ -270,9 +331,9 @@ export const getAllLeads = async (req, res) => {
     if (priority) filter.priority = priority;
     if (assignedTo && req.user.role === "admin") filter.assignedTo = assignedTo;
     if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
+    if (salesType) filter.salesType = salesType;
     if (entityType) filter.entityType = entityType;
     if (industrySector) filter.industrySector = industrySector;
-    if (governorate) filter.governorate = governorate;
     if (country) filter.country = country;
 
     if (search) {
@@ -390,13 +451,18 @@ export const updateLead = async (req, res) => {
       return res.status(403).json({ success: false, message: "Not authorized to update this lead" });
     }
 
+    const requiredErrors = validateRequiredLeadFields(req.body, { partial: true });
+    if (requiredErrors.length > 0) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: requiredErrors });
+    }
+
     const allowedFields = [
       "companyName", "contactPersonName", "email", "jobTitle",
-      "industry", "companySize", "leadSource", "priority", "potentialValue",
+      "industry", "leadSource", "priority", "potentialValue",
       "status", "painPoints", "customerNeeds", "budget", "isDecisionMaker", "tags",
       // Spec fields (tele-sales lead specification)
-      "entityType", "businessClassification", "industrySector", "country",
-      "governorate", "cityArea", "fullAddress", "phonePrimary", "phoneSecondary",
+      "salesType", "entityType", "businessClassification", "industrySector", "country",
+      "fullAddress", "phonePrimary", "phoneSecondary",
       "phoneOther", "website", "dataSource",
     ];
 
@@ -409,6 +475,17 @@ export const updateLead = async (req, res) => {
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) updateData[field] = req.body[field];
     });
+
+    // Only re-check the source detail when either half is actually being changed.
+    if (req.body.leadSource !== undefined || req.body.leadSourceDetail !== undefined) {
+      const source = req.body.leadSource !== undefined ? req.body.leadSource : lead.leadSource;
+      const raw = req.body.leadSourceDetail !== undefined ? req.body.leadSourceDetail : lead.leadSourceDetail;
+      const detail = resolveLeadSourceDetail(source, raw);
+      if (detail.errors.length > 0) {
+        return res.status(400).json({ success: false, message: "Validation error", errors: detail.errors });
+      }
+      updateData.leadSourceDetail = detail.value;
+    }
 
     const updated = await Lead.findByIdAndUpdate(req.params.id, updateData, {
       new: true,

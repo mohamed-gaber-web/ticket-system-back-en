@@ -2,6 +2,10 @@ import mongoose from "mongoose";
 
 // ── Spec enum value lists (see tele-sales lead field specification) ────────────
 
+// Sales_Type — where the record sits in the pipeline: an unqualified Lead, or a
+// qualified Opportunity.
+export const SALES_TYPES = ["Lead", "Opportunity"];
+
 // Field 1: Entity_Type
 export const ENTITY_TYPES = ["Hotel", "Restaurant", "Cafe", "Factory", "Company"];
 
@@ -36,37 +40,6 @@ export const INDUSTRY_SECTORS = [
   "Non-Profit & NGO",
   "Chemicals",
   "Unclassified",
-];
-
-// Field 5: Governorate — 27 Egyptian governorates, normalised English names.
-export const GOVERNORATES = [
-  "Cairo",
-  "Giza",
-  "Alexandria",
-  "Qalyubia",
-  "Port Said",
-  "Suez",
-  "Dakahlia",
-  "Sharqia",
-  "Gharbia",
-  "Monufia",
-  "Beheira",
-  "Kafr El Sheikh",
-  "Damietta",
-  "Ismailia",
-  "Fayoum",
-  "Beni Suef",
-  "Minya",
-  "Asyut",
-  "Sohag",
-  "Qena",
-  "Luxor",
-  "Aswan",
-  "Red Sea",
-  "New Valley",
-  "Matrouh",
-  "North Sinai",
-  "South Sinai",
 ];
 
 // Field 8: Phone_Primary — E.164 Egypt format. Accepts the two documented shapes
@@ -114,6 +87,33 @@ export const normalizeEgyptPhone = (raw) => {
   return `+20${digits}`;
 };
 
+export const LEAD_SOURCES = [
+  "LinkedIn",
+  "Website",
+  "Referral",
+  "Cold Call",
+  "Exhibition",
+  "Partner",
+  "Other",
+];
+
+// Lead sources that ask for one follow-up detail, and what that detail is called.
+// Sources absent from this map ("Website", "Other") take no detail at all — the
+// field is cleared on save so a stale value can't survive a source change.
+export const LEAD_SOURCE_DETAILS = {
+  Referral: { label: "Referrer name", type: "text" },
+  LinkedIn: { label: "LinkedIn URL", type: "url" },
+  "Cold Call": { label: "Data source", type: "text" },
+  Exhibition: { label: "Exhibition name", type: "text" },
+  Partner: { label: "Partner name", type: "text" },
+};
+
+// Lenient http(s) URL check for the LinkedIn detail: scheme optional, host must
+// have a dot and a 2+ char TLD, any path/query allowed.
+export const URL_REGEX = /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(\/[^\s]*)?$/i;
+
+export const isValidUrl = (v) => URL_REGEX.test(String(v ?? "").trim());
+
 const leadSchema = mongoose.Schema(
   {
     // Auto-generated unique reference (CUST-YYYY-NNNNN). Assigned on create/import;
@@ -151,8 +151,16 @@ const leadSchema = mongoose.Schema(
       type: String,
       trim: true,
     },
-    companySize: {
+
+    // Sales_Type — pipeline stage of the record. Defaults to "Lead" so existing
+    // rows and bulk imports without the column read as leads.
+    salesType: {
       type: String,
+      enum: {
+        values: SALES_TYPES,
+        message: "{VALUE} is not a valid sales type",
+      },
+      default: "Lead",
       trim: true,
     },
 
@@ -181,26 +189,12 @@ const leadSchema = mongoose.Schema(
       trim: true,
     },
 
-    // ── Location (spec fields 4-7) ───────────────────────────────────────────
+    // ── Location (spec fields 4 & 7) ─────────────────────────────────────────
     // Field 4: Country — default/primary Egypt, other countries allowed.
     country: {
       type: String,
       trim: true,
       default: "Egypt",
-    },
-    // Field 5: Governorate
-    governorate: {
-      type: String,
-      enum: {
-        values: GOVERNORATES,
-        message: "{VALUE} is not a valid governorate",
-      },
-      trim: true,
-    },
-    // Field 6: City_Area — district, resort zone, or town. Open-ended free text.
-    cityArea: {
-      type: String,
-      trim: true,
     },
     // Field 7: Full_Address — cleaned street address.
     fullAddress: {
@@ -248,7 +242,14 @@ const leadSchema = mongoose.Schema(
     // Lead Details
     leadSource: {
       type: String,
-      enum: ["LinkedIn", "Website", "Referral", "Cold Call", "Exhibition", "Partner", "Other"],
+      enum: LEAD_SOURCES,
+    },
+    // The one extra detail the selected leadSource asks for — referrer name,
+    // LinkedIn URL, cold-call data source, exhibition name or partner name.
+    // Which of those it holds is determined by leadSource; see LEAD_SOURCE_DETAILS.
+    leadSourceDetail: {
+      type: String,
+      trim: true,
     },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
@@ -418,9 +419,9 @@ leadSchema.index({ status: 1 });
 leadSchema.index({ assignedTo: 1 });
 leadSchema.index({ priority: 1 });
 leadSchema.index({ createdBy: 1 });
+leadSchema.index({ salesType: 1 });
 leadSchema.index({ entityType: 1 });
 leadSchema.index({ industrySector: 1 });
-leadSchema.index({ governorate: 1 });
 // Unique, but sparse so legacy leads without a customerId don't collide on null.
 leadSchema.index({ customerId: 1 }, { unique: true, sparse: true });
 leadSchema.index({ companyName: "text", contactPersonName: "text" });
