@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { LEAD_STATUSES } from "../config/leadStatusWorkflow.js";
 
 // ── Spec enum value lists (see tele-sales lead field specification) ────────────
 
@@ -265,25 +266,11 @@ const leadSchema = mongoose.Schema(
       min: 0,
     },
 
-    // Status Pipeline
+    // Status Pipeline — see src/config/leadStatusWorkflow.js for the full
+    // per-status field/transition rules this enum is validated against.
     status: {
       type: String,
-      enum: [
-        "New Lead",
-        "No Answer",
-        "Not Available",
-        "Call Back Later",
-        "Interested",
-        "Not Interested",
-        "Wrong Number",
-        "Invalid Lead",
-        "Follow-up",
-        "Meeting Scheduled",
-        "Proposal Sent",
-        "Negotiation",
-        "Closed Won",
-        "Closed Lost",
-      ],
+      enum: LEAD_STATUSES,
       default: "New Lead",
     },
 
@@ -298,6 +285,17 @@ const leadSchema = mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    // Number of "Meeting Scheduled" rounds logged on this lead — drives the
+    // "Meeting #N" auto field and the extra-meeting conditional fields.
+    meetingsCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // First-contact SLA deadline, set when the lead enters/re-enters "New Lead".
+    firstContactDeadline: {
+      type: Date,
     },
 
     // Notes & Insights

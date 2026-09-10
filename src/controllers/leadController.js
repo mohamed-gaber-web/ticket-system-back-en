@@ -456,10 +456,13 @@ export const updateLead = async (req, res) => {
       return res.status(400).json({ success: false, message: "Validation error", errors: requiredErrors });
     }
 
+    // "status" is intentionally excluded — status changes go exclusively through
+    // POST /api/leads/:id/status (see leadStatusController.js), which enforces
+    // transition rules and per-status mandatory fields.
     const allowedFields = [
       "companyName", "contactPersonName", "email", "jobTitle",
       "industry", "leadSource", "priority", "potentialValue",
-      "status", "painPoints", "customerNeeds", "budget", "isDecisionMaker", "tags",
+      "painPoints", "customerNeeds", "budget", "isDecisionMaker", "tags",
       // Spec fields (tele-sales lead specification)
       "salesType", "entityType", "businessClassification", "industrySector", "country",
       "fullAddress", "phonePrimary", "phoneSecondary",
