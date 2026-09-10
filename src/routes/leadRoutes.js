@@ -9,6 +9,7 @@ import {
   updateLead,
   deleteLead,
 } from "../controllers/leadController.js";
+import { changeLeadStatus, getLeadStatusHistory } from "../controllers/leadStatusController.js";
 import { addCall, getCallsByLead, updateCall, deleteCall } from "../controllers/callLogController.js";
 import {
   addFollowUp,
@@ -34,6 +35,10 @@ router.get("/stats", getLeadStats);
 router.get("/:id", getLeadById);
 router.patch("/:id", updateLead);
 router.delete("/:id", authorizeRole("admin"), deleteLead);
+
+// Status workflow (transition rules + dynamic mandatory fields)
+router.post("/:id/status", changeLeadStatus);
+router.get("/:id/status-history", getLeadStatusHistory);
 
 // Call logs
 router.post("/:leadId/calls", addCall);

@@ -1,8 +1,9 @@
 import FollowUp from "../models/FollowUp.js";
 import Lead from "../models/Lead.js";
 
-// Helper: recalculate nextFollowUpDate on a lead
-const syncNextFollowUpDate = async (leadId) => {
+// Recalculate nextFollowUpDate on a lead. Exported so leadStatusController can
+// reuse it after auto-creating a FollowUp from a status change.
+export const syncNextFollowUpDate = async (leadId) => {
   const next = await FollowUp.findOne({ lead: leadId, status: "Pending" }).sort({ reminderDate: 1 });
   await Lead.findByIdAndUpdate(leadId, {
     nextFollowUpDate: next ? next.reminderDate : null,
