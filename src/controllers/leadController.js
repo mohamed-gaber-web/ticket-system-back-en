@@ -386,7 +386,7 @@ export const getLeadStats = async (req, res) => {
 
     const stats = await Lead.aggregate([
       { $match: matchStage },
-      { $group: { _id: "$status", count: { $sum: 1 } } },
+      { $group: { _id: "$status", count: { $sum: 1 }, value: { $sum: "$potentialValue" } } },
       { $sort: { _id: 1 } },
     ]);
 
