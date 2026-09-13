@@ -252,6 +252,20 @@ const leadSchema = mongoose.Schema(
       type: String,
       trim: true,
     },
+    // The tele-sales team that owns this lead (Egypt / UAE / KSA) — the tenant
+    // boundary. Set from the creating agent's own team on create and import; only
+    // a super admin can move a lead to a different team. Distinct from `country`
+    // above, which describes where the *customer* is: the Egypt team may perfectly
+    // well own a Saudi prospect.
+    //
+    // Nullable so the pre-team backlog stays readable until the backfill runs
+    // (backfill-telesales-teams.js); a lead without a team is visible to super
+    // admins only — see src/utils/teleSalesScope.js.
+    team: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TeleSalesTeam",
+      default: null,
+    },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "TeleSalesAgent",
@@ -415,6 +429,13 @@ leadSchema.pre("save", async function () {
 
 leadSchema.index({ status: 1 });
 leadSchema.index({ assignedTo: 1 });
+// Every lead query in the module is team-scoped first, so `team` leads each of
+// these compounds — the list view, the pipeline board and the stats aggregate.
+leadSchema.index({ team: 1, createdAt: -1 });
+leadSchema.index({ team: 1, status: 1 });
+leadSchema.index({ team: 1, assignedTo: 1 });
+// Import de-duplicates by primary phone within the owning team.
+leadSchema.index({ team: 1, phonePrimary: 1 });
 leadSchema.index({ priority: 1 });
 leadSchema.index({ createdBy: 1 });
 leadSchema.index({ salesType: 1 });

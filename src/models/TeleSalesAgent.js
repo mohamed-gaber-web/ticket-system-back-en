@@ -37,10 +37,26 @@ const teleSalesAgentSchema = mongoose.Schema(
       minlength: [8, "Password must be at least 8 characters"],
       select: false,
     },
+    // user    → agent:       sees their whole team, works their own + unassigned leads
+    // manager → team head:   sees and works the whole team, manages its agents
+    // admin   → super admin: works across every team
+    // See src/utils/teleSalesScope.js, which is where these are interpreted.
     role: {
       type: String,
-      enum: ["user", "admin"],
+      enum: ["user", "manager", "admin"],
       default: "user",
+    },
+    // The tele-sales team this agent belongs to (Egypt / UAE / KSA) — the tenant
+    // boundary for everything they can see.
+    //
+    // Deliberately not `required` in the schema: super admins work across every
+    // team and legitimately have none, and update validators can't see the role
+    // being set in the same call. teleSalesAgentController enforces it on
+    // create/update instead, where the full picture is available.
+    team: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TeleSalesTeam",
+      default: null,
     },
     status: {
       type: String,
@@ -80,6 +96,7 @@ teleSalesAgentSchema.virtual("fullName").get(function () {
 
 teleSalesAgentSchema.index({ status: 1 });
 teleSalesAgentSchema.index({ role: 1 });
+teleSalesAgentSchema.index({ team: 1, status: 1 });
 
 teleSalesAgentSchema.pre("save", async function () {
   if (!this.isModified("password") || !this.password) return;

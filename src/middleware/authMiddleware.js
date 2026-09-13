@@ -34,13 +34,21 @@ export const protect = async (req, res, next) => {
     if (decoded.userType === "customer") {
       user = await Customer.findById(decoded.id).select("-password");
     } else if (decoded.userType === "consultant") {
-      user = await Consultant.findById(decoded.id).select("-password").populate("department", "name");
+      user = await Consultant.findById(decoded.id)
+        .select("-password")
+        .populate("department", "name")
+        // Sales-department consultants are scoped to one tele-sales team; the
+        // scope helper reads it off req.user.
+        .populate("teleSalesTeam", "name code isActive");
     } else if (decoded.userType === "team_member") {
       user = await TeamMember.findById(decoded.id)
         .select("-password")
         .populate("team", "teamName department");
     } else if (decoded.userType === "tele_sales") {
-      user = await TeleSalesAgent.findById(decoded.id).select("-password -refreshToken");
+      user = await TeleSalesAgent.findById(decoded.id)
+        .select("-password -refreshToken")
+        // Every tele-sales query is scoped by this team — see teleSalesScope.js.
+        .populate("team", "name code isActive");
     }
 
     if (!user) {
@@ -116,7 +124,8 @@ export const authorizeTeleSalesAccess = (req, res, next) => {
   });
 };
 
-// Allow tele_sales admin OR consultant admin (for agent management)
+// Allow tele_sales admin OR consultant admin. Reserved for genuinely cross-team
+// actions — managing the teams themselves, backfills, deleting leads.
 export const authorizeTeleSalesAdmin = (req, res, next) => {
   const { userType, user } = req;
   if ((userType === "tele_sales" || userType === "consultant") && user.role === "admin") {
@@ -125,6 +134,24 @@ export const authorizeTeleSalesAdmin = (req, res, next) => {
   return res.status(403).json({
     success: false,
     message: "Admin access required for this route",
+  });
+};
+
+// Allow a tele-sales team manager OR a super admin. Gates the agent-management
+// routes: a manager passes here, and teleSalesAgentController then confines every
+// query and write to their own team, so "manage agents" never means "manage all
+// agents". Super admins pass unscoped.
+export const authorizeTeleSalesManager = (req, res, next) => {
+  const { userType, user } = req;
+  if (
+    (userType === "tele_sales" || userType === "consultant") &&
+    (user.role === "admin" || user.role === "manager")
+  ) {
+    return next();
+  }
+  return res.status(403).json({
+    success: false,
+    message: "Team manager or admin access required for this route",
   });
 };
 
