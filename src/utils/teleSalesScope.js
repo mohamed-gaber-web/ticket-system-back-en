@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import TeleSalesAgent from "../models/TeleSalesAgent.js";
 
 /**
  * The single authority for "what may this caller see and touch in tele-sales?".
@@ -155,6 +156,23 @@ export const canManageLead = (req, lead) => {
 export const canChangeLeadTeam = (req) => isSuperAdmin(req);
 
 /**
+ * May the caller edit or delete this call log / follow-up? The agent who recorded
+ * it, their team manager, or a super admin — and never anyone outside the team
+ * the activity belongs to.
+ *
+ * `ownerField` is the column naming the acting agent: "calledBy" on CallLog,
+ * "createdBy" on FollowUp.
+ */
+export const canManageActivity = (req, doc, ownerField) => {
+  if (isSuperAdmin(req)) return true;
+  const team = callerTeamId(req);
+  if (!team || documentTeamId(doc) !== team) return false;
+  if (isTeamManager(req)) return true;
+  const owner = doc?.[ownerField]?._id ?? doc?.[ownerField];
+  return String(owner) === String(req.user._id);
+};
+
+/**
  * May the caller act on this agent record (edit, deactivate, delete)? Managers
  * within their own team; super admins anywhere. Nobody may act on a super admin
  * except another super admin — a team manager must not be able to deactivate the
@@ -196,4 +214,33 @@ export const resolveCreateTeam = (req, bodyTeam) => {
 
   const own = toObjectId(callerTeamId(req));
   return own ? { team: own, error: null } : { team: null, error: NO_TEAM_MESSAGE };
+};
+
+/**
+ * Check that an agent may actually hold a lead belonging to `teamId`.
+ *
+ * Assigning across the boundary is not a data leak — the assignee's own team
+ * filter would hide the lead from them anyway — but it silently strands the
+ * record: nobody on the owning team is working it, and the person named on it
+ * cannot open it. Rejecting it up front keeps the two fields honest.
+ *
+ * Super admins are exempt only in that they may hold leads from any team, which
+ * is what makes them useful for triage. Returns an error string, or null when the
+ * pairing is fine.
+ */
+export const assigneeTeamError = async (teamId, agentId) => {
+  if (!agentId) return null; // unassigned is always valid
+  if (!mongoose.Types.ObjectId.isValid(String(agentId))) {
+    return "The selected agent is not valid.";
+  }
+
+  const agent = await TeleSalesAgent.findById(agentId).select("firstName lastName role team").lean();
+  if (!agent) return "The selected agent no longer exists.";
+  if (agent.role === "admin") return null; // super admins can hold anything
+
+  const agentTeam = agent.team ? String(agent.team) : null;
+  if (agentTeam && String(teamId) === agentTeam) return null;
+
+  const who = [agent.firstName, agent.lastName].filter(Boolean).join(" ") || "That agent";
+  return `${who} is not on the team that owns this lead, so they cannot be assigned to it.`;
 };

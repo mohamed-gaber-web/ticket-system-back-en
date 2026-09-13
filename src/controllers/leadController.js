@@ -5,6 +5,17 @@ import FollowUp from "../models/FollowUp.js";
 import LeadAttachment from "../models/LeadAttachment.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import mongoose from "mongoose";
+import {
+  teamScopeFilter,
+  canViewLead,
+  canEditLead,
+  canManageLead,
+  canChangeLeadTeam,
+  resolveCreateTeam,
+  assigneeTeamError,
+  isSuperAdmin,
+  isTeamManager,
+} from "../utils/teleSalesScope.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
@@ -74,8 +85,21 @@ export const createLead = async (req, res) => {
       return res.status(400).json({ success: false, message: "Validation error", errors: detail.errors });
     }
 
+    // The owning team comes from the caller, not the payload — an agent cannot
+    // create a lead inside another team. Only a super admin picks one explicitly.
+    const { team, error: teamError } = resolveCreateTeam(req, req.body.team);
+    if (teamError) {
+      return res.status(400).json({ success: false, message: teamError });
+    }
+
+    const assigneeError = await assigneeTeamError(team, req.body.assignedTo);
+    if (assigneeError) {
+      return res.status(400).json({ success: false, message: assigneeError });
+    }
+
     const lead = await Lead.create({
       ...req.body,
+      team,
       leadSourceDetail: detail.value,
       createdBy: req.user._id,
     });
@@ -112,9 +136,24 @@ export const importLeads = async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot import more than 5000 leads at once" });
     }
 
+    // Imported leads land in the caller's own team; only a super admin may import
+    // into a team they don't belong to, and must name it.
+    const { team, error: teamError } = resolveCreateTeam(req, req.body.team);
+    if (teamError) {
+      return res.status(400).json({ success: false, message: teamError });
+    }
+
     // Optional batch-wide defaults
+    const canBulkAssign = isSuperAdmin(req) || isTeamManager(req);
     const defaultAssignedTo =
-      req.user.role === "admin" && cleanStr(req.body.assignedTo) ? cleanStr(req.body.assignedTo) : undefined;
+      canBulkAssign && cleanStr(req.body.assignedTo) ? cleanStr(req.body.assignedTo) : undefined;
+
+    if (defaultAssignedTo) {
+      const assigneeError = await assigneeTeamError(team, defaultAssignedTo);
+      if (assigneeError) {
+        return res.status(400).json({ success: false, message: assigneeError });
+      }
+    }
     const defaultStatus = VALID_STATUSES.includes(req.body.status) ? req.body.status : "New Lead";
     const defaultSource = VALID_SOURCES.includes(req.body.leadSource) ? req.body.leadSource : undefined;
     // Batch-wide originating file for auditing (spec field 13: Data_Source)
@@ -173,6 +212,7 @@ export const importLeads = async (req, res) => {
         priority: VALID_PRIORITIES.includes(row.priority) ? row.priority : "Medium",
         status: VALID_STATUSES.includes(row.status) ? row.status : defaultStatus,
         tags,
+        team,
         createdBy: req.user._id,
         // ── Spec fields ──────────────────────────────────────────────────────
         salesType: VALID_SALES_TYPES.includes(row.salesType) ? row.salesType : undefined,
@@ -197,18 +237,27 @@ export const importLeads = async (req, res) => {
       candidates.push({ doc, dedupKey, rowNum });
     });
 
-    // Duplicate detection against existing leads (by primary phone)
+    // Duplicate detection against existing leads (by primary phone), scoped to the
+    // team the batch is landing in.
+    //
+    // A global check would be wrong twice over: it tells the Egypt team that a
+    // number already exists when the record belongs to KSA — leaking both the
+    // existence of another team's lead and, by omission, who owns it — and it
+    // silently drops a lead Egypt is entitled to work. Each team keeps its own
+    // pipeline, so the same company may legitimately appear once per team.
     let toInsert = candidates;
     let dbDuplicates = 0;
     if (skipDuplicates && candidates.length > 0) {
       const allKeys = [...new Set(candidates.map((c) => c.dedupKey))];
-      const existing = await Lead.find({ phonePrimary: { $in: allKeys } }).select("phonePrimary").lean();
+      const existing = await Lead.find({ team, phonePrimary: { $in: allKeys } })
+        .select("phonePrimary")
+        .lean();
       const existingNumbers = new Set(existing.map((l) => l.phonePrimary));
       toInsert = candidates.filter((c) => {
         const dup = existingNumbers.has(c.dedupKey);
         if (dup) {
           dbDuplicates += 1;
-          errors.push({ row: c.rowNum, reason: "Phone already exists in database", duplicate: true });
+          errors.push({ row: c.rowNum, reason: "Phone already exists in this team", duplicate: true });
         }
         return !dup;
       });
@@ -311,25 +360,28 @@ export const backfillCustomerIds = async (req, res) => {
 
 // @desc    Get all leads
 // @route   GET /api/leads
-// @access  Private (tele_sales) — admin: all, user: own assigned
+// @access  Private (tele_sales) — super admin: all teams, everyone else: own team
 export const getAllLeads = async (req, res) => {
   try {
     const {
       status, priority, assignedTo, tags, search, from, to,
-      salesType, entityType, industrySector, country,
+      salesType, entityType, industrySector, country, team,
       page = 1, limit = 20,
     } = req.query;
 
-    const filter = {};
+    // The team boundary goes on first and is never overwritten below — a lead
+    // outside the caller's team cannot be reached through any combination of
+    // query parameters.
+    const filter = { ...teamScopeFilter(req) };
 
-    // Non-admin users only see their assigned leads
-    if (req.user.role !== "admin") {
-      filter.assignedTo = req.user._id;
-    }
+    // Only a super admin sees more than one team, so only they can narrow to one.
+    if (team && isSuperAdmin(req)) filter.team = team;
 
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
-    if (assignedTo && req.user.role === "admin") filter.assignedTo = assignedTo;
+    // Anyone on the team may filter the shared pipeline by owner; "unassigned"
+    // surfaces the pool nobody has claimed yet.
+    if (assignedTo) filter.assignedTo = assignedTo === "unassigned" ? null : assignedTo;
     if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
     if (salesType) filter.salesType = salesType;
     if (entityType) filter.entityType = entityType;
@@ -356,6 +408,7 @@ export const getAllLeads = async (req, res) => {
       Lead.find(filter)
         .populate("assignedTo", "firstName lastName email")
         .populate("createdBy", "firstName lastName")
+        .populate("team", "name code")
         .skip(skip)
         .limit(parseInt(limit))
         .sort({ createdAt: -1 }),
@@ -379,10 +432,9 @@ export const getAllLeads = async (req, res) => {
 // @access  Private (tele_sales)
 export const getLeadStats = async (req, res) => {
   try {
-    const matchStage = {};
-    if (req.user.role !== "admin") {
-      matchStage.assignedTo = req.user._id;
-    }
+    // aggregate() does not cast its $match the way find() does, which is why
+    // teamScopeFilter hands back a real ObjectId rather than a string.
+    const matchStage = { ...teamScopeFilter(req) };
 
     const stats = await Lead.aggregate([
       { $match: matchStage },
@@ -409,6 +461,7 @@ export const getLeadById = async (req, res) => {
     const lead = await Lead.findById(req.params.id)
       .populate("assignedTo", "firstName lastName email phone")
       .populate("createdBy", "firstName lastName")
+      .populate("team", "name code")
       .populate({
         path: "callLogs",
         populate: { path: "calledBy", select: "firstName lastName" },
@@ -425,9 +478,11 @@ export const getLeadById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    // Non-admin can only view their own assigned leads
-    if (req.user.role !== "admin" && String(lead.assignedTo?._id) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to view this lead" });
+    // A lead belonging to another team answers exactly as a lead that does not
+    // exist. A 403 here would confirm the record is real, letting anyone walk the
+    // id space to learn how big a rival team's pipeline is.
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
     res.status(200).json({ success: true, data: lead });
@@ -446,9 +501,17 @@ export const updateLead = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    // Non-admin can only update their own assigned leads
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to update this lead" });
+    // Out of team → indistinguishable from a lead that isn't there.
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+    // Visible but owned by a colleague: say so plainly, since hiding it here would
+    // only confuse someone looking at a lead they can see on their own screen.
+    if (!canEditLead(req, lead)) {
+      return res.status(403).json({
+        success: false,
+        message: "This lead is assigned to another agent on your team. Ask your manager to reassign it first.",
+      });
     }
 
     const requiredErrors = validateRequiredLeadFields(req.body, { partial: true });
@@ -469,15 +532,43 @@ export const updateLead = async (req, res) => {
       "phoneOther", "website", "dataSource",
     ];
 
-    // Only admin can reassign
-    if (req.user.role === "admin") {
+    // Reassigning between agents is a manager's call (or a super admin's).
+    if (canManageLead(req, lead)) {
       allowedFields.push("assignedTo");
+    }
+    // Moving a lead to a DIFFERENT team is super-admin only: it is the one edit
+    // that removes the record from its current team's view entirely.
+    if (canChangeLeadTeam(req)) {
+      allowedFields.push("team");
     }
 
     const updateData = {};
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) updateData[field] = req.body[field];
     });
+
+    // Keep `team` and `assignedTo` consistent with each other, whichever of the
+    // two this request is changing.
+    const effectiveTeam = updateData.team !== undefined ? updateData.team : lead.team;
+    let assignmentCleared = false;
+
+    if (updateData.assignedTo !== undefined) {
+      // An explicit choice: reject a bad one rather than quietly dropping it.
+      const assigneeError = await assigneeTeamError(effectiveTeam, updateData.assignedTo);
+      if (assigneeError) {
+        return res.status(400).json({ success: false, message: assigneeError });
+      }
+    } else if (updateData.team !== undefined && lead.assignedTo) {
+      // The team moved and the sitting assignee came along for the ride, but they
+      // work for the old team. Release the lead into the new team's pool instead
+      // of refusing the move — leaving it assigned to someone who can no longer
+      // open it is worse than leaving it unassigned.
+      const strandedError = await assigneeTeamError(effectiveTeam, lead.assignedTo);
+      if (strandedError) {
+        updateData.assignedTo = null;
+        assignmentCleared = true;
+      }
+    }
 
     // Only re-check the source detail when either half is actually being changed.
     if (req.body.leadSource !== undefined || req.body.leadSourceDetail !== undefined) {
@@ -493,9 +584,17 @@ export const updateLead = async (req, res) => {
     const updated = await Lead.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
-    }).populate("assignedTo", "firstName lastName email");
+    })
+      .populate("assignedTo", "firstName lastName email")
+      .populate("team", "name code");
 
-    res.status(200).json({ success: true, message: "Lead updated successfully", data: updated });
+    res.status(200).json({
+      success: true,
+      message: assignmentCleared
+        ? "Lead moved to the new team. Its previous owner was on the old team, so it is now unassigned."
+        : "Lead updated successfully",
+      data: updated,
+    });
   } catch (error) {
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((e) => e.message);
@@ -507,11 +606,17 @@ export const updateLead = async (req, res) => {
 
 // @desc    Delete lead (and all related data)
 // @route   DELETE /api/leads/:id
-// @access  Private (tele_sales admin)
+// @access  Private (team manager within their team, or super admin)
 export const deleteLead = async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id);
     if (!lead) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+
+    // A manager may clear out their own team's leads, nobody else's. Out-of-team
+    // answers 404 so deletion probes can't be used to enumerate other teams.
+    if (!canManageLead(req, lead)) {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 

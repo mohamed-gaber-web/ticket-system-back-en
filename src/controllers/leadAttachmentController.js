@@ -2,6 +2,7 @@ import LeadAttachment from "../models/LeadAttachment.js";
 import Lead from "../models/Lead.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import mongoose from "mongoose";
+import { canViewLead, canEditLead, isSuperAdmin, isTeamManager } from "../utils/teleSalesScope.js";
 
 // @desc    Link an uploaded file to a lead
 // @route   POST /api/leads/:leadId/attachments
@@ -13,8 +14,14 @@ export const addAttachment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to add attachments to this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+    if (!canEditLead(req, lead)) {
+      return res.status(403).json({
+        success: false,
+        message: "This lead is assigned to another agent on your team, so you cannot add attachments to it.",
+      });
     }
 
     const { fileId, fileName, fileType, fileSize } = req.body;
@@ -47,8 +54,8 @@ export const getAttachments = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to view this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
     const attachments = await LeadAttachment.find({ lead: req.params.leadId })
@@ -75,7 +82,16 @@ export const deleteAttachment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Attachment not found" });
     }
 
-    if (req.user.role !== "admin" && String(attachment.uploadedBy) !== String(req.user._id)) {
+    // LeadAttachment carries no team of its own — unlike CallLog and FollowUp it
+    // is only ever reached through its lead, so the lead is the boundary to check.
+    const lead = await Lead.findById(req.params.leadId).select("team assignedTo");
+    if (!lead || !canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Attachment not found" });
+    }
+
+    // The uploader, their team manager, or a super admin.
+    const isOwner = String(attachment.uploadedBy) === String(req.user._id);
+    if (!isOwner && !isTeamManager(req) && !isSuperAdmin(req)) {
       return res.status(403).json({ success: false, message: "Not authorized to delete this attachment" });
     }
 

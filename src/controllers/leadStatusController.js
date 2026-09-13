@@ -10,6 +10,12 @@ import {
   buildFieldValueMap,
   resolveFollowUpType,
 } from "../config/leadStatusWorkflow.js";
+import {
+  canViewLead,
+  canEditLead,
+  canManageLead,
+  assigneeTeamError,
+} from "../utils/teleSalesScope.js";
 
 // @desc    Change a lead's status through the validated workflow (transition
 //          rules + per-status mandatory fields). The generic PATCH /api/leads/:id
@@ -23,8 +29,14 @@ export const changeLeadStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to change status on this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+    if (!canEditLead(req, lead)) {
+      return res.status(403).json({
+        success: false,
+        message: "This lead is assigned to another agent on your team, so you cannot change its status.",
+      });
     }
 
     const { newStatus, values = {} } = req.body;
@@ -62,10 +74,22 @@ export const changeLeadStatus = async (req, res) => {
     const fieldValues = buildFieldValueMap(newStatus, values, lead);
 
     const setUpdate = { status: newStatus };
-    // "New Lead" carries owner/SLA straight onto the lead — admin only, mirroring
-    // updateLead's "only admin can reassign" rule.
-    if (newStatus === "New Lead" && req.user.role === "admin") {
-      if (values.owner) setUpdate.assignedTo = values.owner;
+    // "New Lead" carries owner/SLA straight onto the lead. Reassignment is a
+    // manager's call, mirroring updateLead — and the new owner has to be on the
+    // team that owns the lead, or the record would be stranded with someone who
+    // cannot open it.
+    if (newStatus === "New Lead" && canManageLead(req, lead)) {
+      if (values.owner) {
+        const ownerError = await assigneeTeamError(lead.team, values.owner);
+        if (ownerError) {
+          return res.status(400).json({
+            success: false,
+            message: "Validation error",
+            errors: [{ field: "owner", label: "Lead Owner / Assigned To", message: ownerError }],
+          });
+        }
+        setUpdate.assignedTo = values.owner;
+      }
       if (values.sla) setUpdate.firstContactDeadline = values.sla;
     }
 
@@ -97,6 +121,8 @@ export const changeLeadStatus = async (req, res) => {
           followUpType: resolveFollowUpType(newStatus, t.kind, fieldValues),
           notes: t.title,
           createdBy: req.user._id,
+          // Same team as the lead, so this reminder appears in the right feed.
+          team: lead.team,
         });
         await syncNextFollowUpDate(lead._id);
       }
@@ -130,8 +156,8 @@ export const getLeadStatusHistory = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to view this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
     const history = await LeadStatusHistory.getLeadHistory(req.params.id).populate(
