@@ -51,6 +51,16 @@ const consultantSchema = mongoose.Schema(
       ref: "Department",
       default: null,
     },
+    // Which tele-sales team this consultant works inside, for the sales-department
+    // consultants who reach that module through authorizeTeleSalesAccess. Consultant
+    // admins ignore it — they are super admins across every team. A sales consultant
+    // with none set sees no leads at all, which is the intended fail-closed default:
+    // access is granted by assigning a team, never by omission.
+    teleSalesTeam: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TeleSalesTeam",
+      default: null,
+    },
     status: {
       type: String,
       enum: ["active", "inactive", "on_leave"],

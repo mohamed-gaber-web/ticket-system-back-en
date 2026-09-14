@@ -4,15 +4,11 @@ import LeadEmail from "../models/LeadEmail.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import { sendCustomEmail, MAX_TOTAL_ATTACHMENT_BYTES } from "../utils/emailService.js";
 import { sanitizeEmailHtml } from "../utils/htmlSanitizer.js";
+import { canViewLead, canEditLead, canManageLeadChild } from "../utils/teleSalesScope.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_RECIPIENTS = 25;
 const MAX_SUBJECT_LENGTH = 250;
-
-// Same rule the rest of the lead sub-resources use: admins see everything,
-// everyone else only the leads assigned to them.
-const canAccessLead = (req, lead) =>
-  req.user.role === "admin" || String(lead.assignedTo) === String(req.user._id);
 
 // Normalise a to/cc/bcc field: accepts an array or a comma/semicolon separated
 // string, trims, lowercases and de-duplicates.
@@ -184,8 +180,16 @@ export const sendLeadEmail = async (req, res) => {
     if (!lead) {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
-    if (!canAccessLead(req, lead)) {
-      return res.status(403).json({ success: false, message: "Not authorized to email this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+    // Emailing a contact speaks to the customer on the company's behalf, so it
+    // follows the same rule as editing: your own leads, or unclaimed ones.
+    if (!canEditLead(req, lead)) {
+      return res.status(403).json({
+        success: false,
+        message: "This lead is assigned to another agent on your team, so you cannot email its contacts.",
+      });
     }
     return composeAndSend(req, res, lead);
   } catch (error) {
@@ -207,8 +211,8 @@ export const getLeadEmails = async (req, res) => {
     if (!lead) {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
-    if (!canAccessLead(req, lead)) {
-      return res.status(403).json({ success: false, message: "Not authorized to view this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
     const emails = await LeadEmail.find({ lead: req.params.leadId })
@@ -231,7 +235,14 @@ export const deleteLeadEmail = async (req, res) => {
       return res.status(404).json({ success: false, message: "Email not found" });
     }
 
-    if (req.user.role !== "admin" && String(email.sentBy) !== String(req.user._id)) {
+    // Like attachments, an email record is only reachable through its lead, so the
+    // lead carries the team boundary.
+    const lead = await Lead.findById(req.params.leadId).select("team assignedTo");
+    if (!lead || !canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Email not found" });
+    }
+
+    if (!canManageLeadChild(req, lead, email, "sentBy")) {
       return res.status(403).json({ success: false, message: "Not authorized to delete this email" });
     }
 

@@ -1,5 +1,11 @@
 import FollowUp from "../models/FollowUp.js";
 import Lead from "../models/Lead.js";
+import {
+  canViewLead,
+  canEditLead,
+  canManageActivity,
+  activityScopeFilter,
+} from "../utils/teleSalesScope.js";
 
 // Recalculate nextFollowUpDate on a lead. Exported so leadStatusController can
 // reuse it after auto-creating a FollowUp from a status change.
@@ -20,8 +26,14 @@ export const addFollowUp = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to add follow-ups to this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+    if (!canEditLead(req, lead)) {
+      return res.status(403).json({
+        success: false,
+        message: "This lead is assigned to another agent on your team, so you cannot add follow-ups to it.",
+      });
     }
 
     const followUp = await FollowUp.create({
@@ -31,6 +43,9 @@ export const addFollowUp = async (req, res) => {
       status: req.body.status || "Pending",
       notes: req.body.notes,
       createdBy: req.user._id,
+      // Copied from the lead so the upcoming-reminders feed can filter by team
+      // without joining back to Lead.
+      team: lead.team,
     });
 
     await syncNextFollowUpDate(lead._id);
@@ -57,8 +72,8 @@ export const getFollowUpsByLead = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to view this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
     const followUps = await FollowUp.find({ lead: req.params.leadId })
@@ -73,7 +88,7 @@ export const getFollowUpsByLead = async (req, res) => {
 
 // @desc    Update a follow-up
 // @route   PATCH /api/leads/:leadId/followups/:followUpId
-// @access  Private (tele_sales)
+// @access  Private (its author, their manager, or a super admin)
 export const updateFollowUp = async (req, res) => {
   try {
     const followUp = await FollowUp.findOne({ _id: req.params.followUpId, lead: req.params.leadId });
@@ -81,7 +96,7 @@ export const updateFollowUp = async (req, res) => {
       return res.status(404).json({ success: false, message: "Follow-up not found" });
     }
 
-    if (req.user.role !== "admin" && String(followUp.createdBy) !== String(req.user._id)) {
+    if (!canManageActivity(req, followUp, "createdBy")) {
       return res.status(403).json({ success: false, message: "Not authorized to edit this follow-up" });
     }
 
@@ -111,7 +126,7 @@ export const updateFollowUp = async (req, res) => {
 
 // @desc    Delete a follow-up
 // @route   DELETE /api/leads/:leadId/followups/:followUpId
-// @access  Private (tele_sales)
+// @access  Private (its author, their manager, or a super admin)
 export const deleteFollowUp = async (req, res) => {
   try {
     const followUp = await FollowUp.findOne({ _id: req.params.followUpId, lead: req.params.leadId });
@@ -119,7 +134,7 @@ export const deleteFollowUp = async (req, res) => {
       return res.status(404).json({ success: false, message: "Follow-up not found" });
     }
 
-    if (req.user.role !== "admin" && String(followUp.createdBy) !== String(req.user._id)) {
+    if (!canManageActivity(req, followUp, "createdBy")) {
       return res.status(403).json({ success: false, message: "Not authorized to delete this follow-up" });
     }
 
@@ -135,19 +150,21 @@ export const deleteFollowUp = async (req, res) => {
 // @desc    Get upcoming pending follow-ups (next 7 days) for current user
 // @route   GET /api/followups/upcoming
 // @access  Private (tele_sales)
+//
+// The second feed that reads its collection directly rather than through a lead,
+// hence the denormalised `team` on FollowUp. Stays personal for an agent — a
+// team-wide reminder list would bury their own — while a manager sees the team's
+// and a super admin sees everyone's.
 export const getUpcomingFollowUps = async (req, res) => {
   try {
     const now = new Date();
     const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     const filter = {
+      ...activityScopeFilter(req, "createdBy"),
       status: "Pending",
       reminderDate: { $gte: now, $lte: in7Days },
     };
-
-    if (req.user.role !== "admin") {
-      filter.createdBy = req.user._id;
-    }
 
     const followUps = await FollowUp.find(filter)
       .populate("lead", "companyName contactPersonName status assignedTo")

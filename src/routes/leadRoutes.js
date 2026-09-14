@@ -19,7 +19,12 @@ import {
 } from "../controllers/followUpController.js";
 import { addAttachment, getAttachments, deleteAttachment } from "../controllers/leadAttachmentController.js";
 import { sendLeadEmail, getLeadEmails, deleteLeadEmail } from "../controllers/leadEmailController.js";
-import { protect, authorizeTeleSalesAccess, authorizeRole } from "../middleware/authMiddleware.js";
+import {
+  protect,
+  authorizeTeleSalesAccess,
+  authorizeRole,
+  authorizeTeleSalesManager,
+} from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -34,7 +39,9 @@ router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
 router.get("/:id", getLeadById);
 router.patch("/:id", updateLead);
-router.delete("/:id", authorizeRole("admin"), deleteLead);
+// A team manager may delete inside their own team; the controller enforces that
+// boundary, this only keeps plain agents out.
+router.delete("/:id", authorizeTeleSalesManager, deleteLead);
 
 // Status workflow (transition rules + dynamic mandatory fields)
 router.post("/:id/status", changeLeadStatus);

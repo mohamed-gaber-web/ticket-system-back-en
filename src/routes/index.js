@@ -30,6 +30,7 @@ import companyUserRoutes from "./companyUserRoutes.js";
 import emailRoutes from "./emailRoutes.js";
 import workingHoursRoutes from "./workingHoursRoutes.js";
 import teleSalesAgentRoutes from "./teleSalesAgentRoutes.js";
+import teleSalesTeamRoutes from "./teleSalesTeamRoutes.js";
 import leadRoutes from "./leadRoutes.js";
 import followUpRoutes from "./followUpRoutes.js";
 import callRoutes from "./callRoutes.js";
@@ -137,6 +138,7 @@ router.use("/emails", emailRoutes);
 router.use("/working-hours", workingHoursRoutes);
 
 // TeleSales routes
+router.use("/tele-sales-teams", teleSalesTeamRoutes);
 router.use("/tele-sales-agents", teleSalesAgentRoutes);
 router.use("/leads", leadRoutes);
 router.use("/followups", followUpRoutes);

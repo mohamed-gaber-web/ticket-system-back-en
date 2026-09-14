@@ -1,5 +1,11 @@
 import CallLog from "../models/CallLog.js";
 import Lead from "../models/Lead.js";
+import {
+  canViewLead,
+  canEditLead,
+  canManageActivity,
+  activityScopeFilter,
+} from "../utils/teleSalesScope.js";
 
 // @desc    Add a call log to a lead
 // @route   POST /api/leads/:leadId/calls
@@ -11,14 +17,25 @@ export const addCall = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    // Non-admin can only log calls on their own assigned leads
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to log calls on this lead" });
+    // Another team's lead answers as if it doesn't exist.
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+    // Visible but owned by a colleague — logging a call against their lead would
+    // corrupt their call history and the lead's attempt count.
+    if (!canEditLead(req, lead)) {
+      return res.status(403).json({
+        success: false,
+        message: "This lead is assigned to another agent on your team, so you cannot log calls on it.",
+      });
     }
 
     const callLog = await CallLog.create({
       lead: lead._id,
       calledBy: req.user._id,
+      // Copied from the lead so the recent-calls feed can filter by team without
+      // joining back to Lead.
+      team: lead.team,
       callDate: req.body.callDate || new Date(),
       duration: req.body.duration,
       notes: req.body.notes,
@@ -52,8 +69,8 @@ export const getCallsByLead = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    if (req.user.role !== "admin" && String(lead.assignedTo) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to view this lead" });
+    if (!canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
     const calls = await CallLog.find({ lead: req.params.leadId })
@@ -69,14 +86,14 @@ export const getCallsByLead = async (req, res) => {
 // @desc    Get recent call logs across all leads (global)
 // @route   GET /api/calls/recent
 // @access  Private (tele_sales)
+//
+// One of the two feeds that read their collection directly rather than through a
+// lead, which is why CallLog carries a denormalised `team`: without it this query
+// would have no team boundary to filter on. An agent sees their own calls, a
+// manager their team's, a super admin everyone's.
 export const getRecentCalls = async (req, res) => {
   try {
-    const filter = {};
-
-    // Non-admin only sees their own calls
-    if (req.user.role !== "admin") {
-      filter.calledBy = req.user._id;
-    }
+    const filter = activityScopeFilter(req, "calledBy");
 
     const limit = Number(req.query.limit) || 50;
 
@@ -94,7 +111,7 @@ export const getRecentCalls = async (req, res) => {
 
 // @desc    Update a call log
 // @route   PATCH /api/leads/:leadId/calls/:callId
-// @access  Private (tele_sales)
+// @access  Private (the agent who logged it, their manager, or a super admin)
 export const updateCall = async (req, res) => {
   try {
     const callLog = await CallLog.findOne({ _id: req.params.callId, lead: req.params.leadId });
@@ -102,8 +119,7 @@ export const updateCall = async (req, res) => {
       return res.status(404).json({ success: false, message: "Call log not found" });
     }
 
-    // Only the caller or admin can edit
-    if (req.user.role !== "admin" && String(callLog.calledBy) !== String(req.user._id)) {
+    if (!canManageActivity(req, callLog, "calledBy")) {
       return res.status(403).json({ success: false, message: "Not authorized to edit this call log" });
     }
 
@@ -126,7 +142,7 @@ export const updateCall = async (req, res) => {
 
 // @desc    Delete a call log
 // @route   DELETE /api/leads/:leadId/calls/:callId
-// @access  Private (tele_sales)
+// @access  Private (the agent who logged it, their manager, or a super admin)
 export const deleteCall = async (req, res) => {
   try {
     const callLog = await CallLog.findOne({ _id: req.params.callId, lead: req.params.leadId });
@@ -134,7 +150,7 @@ export const deleteCall = async (req, res) => {
       return res.status(404).json({ success: false, message: "Call log not found" });
     }
 
-    if (req.user.role !== "admin" && String(callLog.calledBy) !== String(req.user._id)) {
+    if (!canManageActivity(req, callLog, "calledBy")) {
       return res.status(403).json({ success: false, message: "Not authorized to delete this call log" });
     }
 
