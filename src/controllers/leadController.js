@@ -3,6 +3,8 @@ import IndustrySector from "../models/IndustrySector.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
 import LeadAttachment from "../models/LeadAttachment.js";
+import LeadEmail from "../models/LeadEmail.js";
+import LeadStatusHistory from "../models/LeadStatusHistory.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import mongoose from "mongoose";
 import {
@@ -10,12 +12,16 @@ import {
   canViewLead,
   canEditLead,
   canManageLead,
+  canClaimLead,
   canChangeLeadTeam,
+  isSelf,
   resolveCreateTeam,
+  resolveExistingTeam,
   assigneeTeamError,
   isSuperAdmin,
   isTeamManager,
 } from "../utils/teleSalesScope.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
@@ -87,7 +93,13 @@ export const createLead = async (req, res) => {
 
     // The owning team comes from the caller, not the payload — an agent cannot
     // create a lead inside another team. Only a super admin picks one explicitly.
-    const { team, error: teamError } = resolveCreateTeam(req, req.body.team);
+    const resolved = resolveCreateTeam(req, req.body.team);
+    if (resolved.error) {
+      return res.status(400).json({ success: false, message: resolved.error });
+    }
+    // The team has to exist: a well-formed but dangling id would create a lead no
+    // team filter can ever match, invisible to every agent in the system.
+    const { team, error: teamError } = await resolveExistingTeam(resolved.team);
     if (teamError) {
       return res.status(400).json({ success: false, message: teamError });
     }
@@ -138,7 +150,13 @@ export const importLeads = async (req, res) => {
 
     // Imported leads land in the caller's own team; only a super admin may import
     // into a team they don't belong to, and must name it.
-    const { team, error: teamError } = resolveCreateTeam(req, req.body.team);
+    const resolved = resolveCreateTeam(req, req.body.team);
+    if (resolved.error) {
+      return res.status(400).json({ success: false, message: resolved.error });
+    }
+    // Verified before the rows are parsed: a dangling team would bury an entire
+    // batch — up to 5000 leads — where no agent could ever see it.
+    const { team, error: teamError } = await resolveExistingTeam(resolved.team);
     if (teamError) {
       return res.status(400).json({ success: false, message: teamError });
     }
@@ -389,11 +407,15 @@ export const getAllLeads = async (req, res) => {
     if (country) filter.country = country;
 
     if (search) {
+      // Escaped so a company name containing "(" — or a half-typed one — is
+      // matched literally instead of reaching Mongo as an invalid pattern and
+      // failing the whole request with a 500.
+      const safe = escapeRegex(search);
       filter.$or = [
-        { companyName: { $regex: search, $options: "i" } },
-        { contactPersonName: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { customerId: { $regex: search, $options: "i" } },
+        { companyName: { $regex: safe, $options: "i" } },
+        { contactPersonName: { $regex: safe, $options: "i" } },
+        { email: { $regex: safe, $options: "i" } },
+        { customerId: { $regex: safe, $options: "i" } },
       ];
     }
 
@@ -532,8 +554,12 @@ export const updateLead = async (req, res) => {
       "phoneOther", "website", "dataSource",
     ];
 
-    // Reassigning between agents is a manager's call (or a super admin's).
-    if (canManageLead(req, lead)) {
+    // Reassigning between agents is a manager's call (or a super admin's). An
+    // agent gets one narrower path: claiming an unassigned lead for themselves,
+    // which is how the shared team pool is meant to empty.
+    const claimingForSelf =
+      canClaimLead(req, lead) && isSelf(req, req.body.assignedTo);
+    if (canManageLead(req, lead) || claimingForSelf) {
       allowedFields.push("assignedTo");
     }
     // Moving a lead to a DIFFERENT team is super-admin only: it is the one edit
@@ -547,8 +573,24 @@ export const updateLead = async (req, res) => {
       if (req.body[field] !== undefined) updateData[field] = req.body[field];
     });
 
+    // A team move must land somewhere real, or the lead disappears from everyone.
+    if (updateData.team !== undefined) {
+      const destination = await resolveExistingTeam(updateData.team);
+      if (destination.error) {
+        return res.status(400).json({ success: false, message: destination.error });
+      }
+      updateData.team = destination.team;
+    }
+
     // Keep `team` and `assignedTo` consistent with each other, whichever of the
     // two this request is changing.
+    //
+    // Note this tests whether the team actually CHANGED, not merely whether the
+    // field was sent: the lead form re-sends the current team on every super-admin
+    // save, so keying off presence alone would treat an ordinary edit as a team
+    // move and silently unassign the lead.
+    const teamChanged =
+      updateData.team !== undefined && String(updateData.team) !== String(lead.team ?? "");
     const effectiveTeam = updateData.team !== undefined ? updateData.team : lead.team;
     let assignmentCleared = false;
 
@@ -558,7 +600,7 @@ export const updateLead = async (req, res) => {
       if (assigneeError) {
         return res.status(400).json({ success: false, message: assigneeError });
       }
-    } else if (updateData.team !== undefined && lead.assignedTo) {
+    } else if (teamChanged && lead.assignedTo) {
       // The team moved and the sitting assignee came along for the ride, but they
       // work for the old team. Release the lead into the new team's pool instead
       // of refusing the move — leaving it assigned to someone who can no longer
@@ -587,6 +629,19 @@ export const updateLead = async (req, res) => {
     })
       .populate("assignedTo", "firstName lastName email")
       .populate("team", "name code");
+
+    // A lead's call logs and reminders carry their own copy of the team so the
+    // activity feeds can filter without joining back to Lead. When the lead moves,
+    // that copy has to move with it — otherwise the old team keeps reading the
+    // lead's details through /calls/recent (which populates companyName and phone
+    // numbers) and keeps write access to its history via canManageActivity, while
+    // the new owners see a lead with no past at all.
+    if (teamChanged) {
+      await Promise.all([
+        CallLog.updateMany({ lead: lead._id }, { $set: { team: updateData.team } }),
+        FollowUp.updateMany({ lead: lead._id }, { $set: { team: updateData.team } }),
+      ]);
+    }
 
     res.status(200).json({
       success: true,
@@ -629,11 +684,18 @@ export const deleteLead = async (req, res) => {
       );
     }
 
-    // Delete all related records
+    // Delete all related records.
+    //
+    // LeadEmail and LeadStatusHistory are included because every sub-resource is
+    // reached through its lead: once the lead is gone the API answers 404 for them,
+    // so anything left behind can never be listed or removed again — and the email
+    // rows still hold the contact's address and the message body.
     await Promise.all([
       CallLog.deleteMany({ lead: lead._id }),
       FollowUp.deleteMany({ lead: lead._id }),
       LeadAttachment.deleteMany({ lead: lead._id }),
+      LeadEmail.deleteMany({ lead: lead._id }),
+      LeadStatusHistory.deleteMany({ lead: lead._id }),
       lead.deleteOne(),
     ]);
 

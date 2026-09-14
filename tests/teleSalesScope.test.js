@@ -22,13 +22,17 @@ import {
   canViewLead,
   canEditLead,
   canManageLead,
+  canClaimLead,
   canChangeLeadTeam,
   canManageAgent,
   canManageActivity,
+  canManageLeadChild,
+  isSelf,
   resolveCreateTeam,
   NO_TEAM_MESSAGE,
   TEAM_REQUIRED_MESSAGE,
 } from "../src/utils/teleSalesScope.js";
+import { escapeRegex } from "../src/utils/escapeRegex.js";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -377,5 +381,97 @@ describe("resolveCreateTeam", () => {
   it("ignores a malformed team id rather than trusting it", () => {
     const { team } = resolveCreateTeam(req({ role: "admin", team: UAE }), "not-an-object-id");
     assert.equal(String(team), String(UAE));
+  });
+});
+
+// ── Claiming from the shared pool ─────────────────────────────────────────────
+
+describe("canClaimLead", () => {
+  it("lets an agent take an unassigned lead on their team", () => {
+    assert.equal(canClaimLead(req({ role: "user", team: EGYPT }), lead({ team: EGYPT, assignedTo: null })), true);
+  });
+
+  it("refuses a lead a colleague already holds — that is a reassignment", () => {
+    assert.equal(canClaimLead(req({ role: "user", team: EGYPT }), lead({ team: EGYPT, assignedTo: oid() })), false);
+  });
+
+  it("REFUSES an unassigned lead belonging to another team", () => {
+    assert.equal(canClaimLead(req({ role: "user", team: EGYPT }), lead({ team: KSA, assignedTo: null })), false);
+  });
+});
+
+describe("isSelf", () => {
+  it("distinguishes a self-claim from assigning work to someone else", () => {
+    const me = oid();
+    const r = req({ role: "user", team: EGYPT, id: me });
+    assert.equal(isSelf(r, me), true);
+    assert.equal(isSelf(r, String(me)), true);
+    assert.equal(isSelf(r, oid()), false);
+  });
+
+  it("treats a missing candidate as not-self rather than a match", () => {
+    // Guards the claim path: `isSelf(req, undefined)` must not pass when the
+    // request simply omitted assignedTo.
+    const r = req({ role: "user", team: EGYPT });
+    assert.equal(isSelf(r, undefined), false);
+    assert.equal(isSelf(r, null), false);
+    assert.equal(isSelf(r, ""), false);
+  });
+});
+
+// ── Attachments and emails, whose team comes from the lead ────────────────────
+
+describe("canManageLeadChild", () => {
+  const child = (owner) => ({ uploadedBy: owner });
+
+  it("lets the uploader delete their own attachment", () => {
+    const me = oid();
+    const r = req({ role: "user", team: EGYPT, id: me });
+    assert.equal(canManageLeadChild(r, lead({ team: EGYPT }), child(me), "uploadedBy"), true);
+  });
+
+  it("stops an agent deleting a colleague's attachment", () => {
+    const r = req({ role: "user", team: EGYPT });
+    assert.equal(canManageLeadChild(r, lead({ team: EGYPT }), child(oid()), "uploadedBy"), false);
+  });
+
+  it("lets a manager delete anything on their team's leads", () => {
+    const r = req({ role: "manager", team: EGYPT });
+    assert.equal(canManageLeadChild(r, lead({ team: EGYPT }), child(oid()), "uploadedBy"), true);
+  });
+
+  it("REFUSES a manager on another team's lead", () => {
+    const r = req({ role: "manager", team: EGYPT });
+    assert.equal(canManageLeadChild(r, lead({ team: KSA }), child(oid()), "uploadedBy"), false);
+  });
+
+  it("REFUSES the uploader once the lead has moved to another team", () => {
+    // The team check comes from the lead, so a record the caller can no longer
+    // open is closed to them even though their name is still on the child row.
+    const me = oid();
+    const r = req({ role: "user", team: EGYPT, id: me });
+    assert.equal(canManageLeadChild(r, lead({ team: KSA }), child(me), "uploadedBy"), false);
+  });
+});
+
+// ── Search-term escaping ──────────────────────────────────────────────────────
+
+describe("escapeRegex", () => {
+  it("escapes the metacharacters that make Mongo reject a $regex", () => {
+    // An unbalanced "(" typed mid-word used to surface as a 500 and an empty table.
+    assert.equal(escapeRegex("("), "\\(");
+    assert.equal(escapeRegex("Acme (Egypt)"), "Acme \\(Egypt\\)");
+    assert.equal(escapeRegex("a+b*c"), "a\\+b\\*c");
+    assert.equal(escapeRegex("[test]"), "\\[test\\]");
+  });
+
+  it("leaves ordinary search terms untouched", () => {
+    assert.equal(escapeRegex("Egypt"), "Egypt");
+    assert.equal(escapeRegex("  Egypt  "), "Egypt");
+  });
+
+  it("handles null and undefined without throwing", () => {
+    assert.equal(escapeRegex(null), "");
+    assert.equal(escapeRegex(undefined), "");
   });
 });

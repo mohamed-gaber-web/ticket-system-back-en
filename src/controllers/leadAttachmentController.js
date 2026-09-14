@@ -2,7 +2,7 @@ import LeadAttachment from "../models/LeadAttachment.js";
 import Lead from "../models/Lead.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import mongoose from "mongoose";
-import { canViewLead, canEditLead, isSuperAdmin, isTeamManager } from "../utils/teleSalesScope.js";
+import { canViewLead, canEditLead, canManageLeadChild } from "../utils/teleSalesScope.js";
 
 // @desc    Link an uploaded file to a lead
 // @route   POST /api/leads/:leadId/attachments
@@ -90,8 +90,7 @@ export const deleteAttachment = async (req, res) => {
     }
 
     // The uploader, their team manager, or a super admin.
-    const isOwner = String(attachment.uploadedBy) === String(req.user._id);
-    if (!isOwner && !isTeamManager(req) && !isSuperAdmin(req)) {
+    if (!canManageLeadChild(req, lead, attachment, "uploadedBy")) {
       return res.status(403).json({ success: false, message: "Not authorized to delete this attachment" });
     }
 

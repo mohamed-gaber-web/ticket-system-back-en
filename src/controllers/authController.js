@@ -133,6 +133,16 @@ export const signin = async (req, res) => {
       await user.populate("department", "name isActive");
     }
 
+    // Populate the tele-sales team so the client can name the team whose pipeline
+    // it is showing. Without this the token payload carries a bare ObjectId and
+    // every team label in the UI falls back to a placeholder.
+    if (userType === "tele_sales" && user.team) {
+      await user.populate("team", "name code isActive");
+    }
+    if (userType === "consultant" && user.teleSalesTeam) {
+      await user.populate("teleSalesTeam", "name code isActive");
+    }
+
     // Send token response
     return sendTokenResponse(user, 200, res, userType);
   } catch (error) {
@@ -194,7 +204,14 @@ export const getProfile = async (req, res) => {
         "name responseTime resolutionTime"
       );
     } else if (req.userType === "consultant") {
-      user = await Model.findById(req.user._id).populate("department", "name isActive");
+      user = await Model.findById(req.user._id)
+        .populate("department", "name isActive")
+        // Sales-department consultants are scoped to one tele-sales team.
+        .populate("teleSalesTeam", "name code isActive");
+    } else if (req.userType === "tele_sales") {
+      // The team has to arrive populated, or the UI cannot name the pipeline it
+      // is showing — it would only have a bare id to work with.
+      user = await Model.findById(req.user._id).populate("team", "name code isActive");
     } else {
       user = await Model.findById(req.user._id);
     }
@@ -494,6 +511,17 @@ export const refreshToken = async (req, res) => {
         success: false,
         message: "Invalid refresh token",
       });
+    }
+
+    // A refresh replaces the stored user in the client, so the tele-sales team has
+    // to come back populated here too — otherwise every team label in the UI
+    // degrades to a placeholder the moment a session is refreshed.
+    if (userType === "tele_sales" && user.team) {
+      await user.populate("team", "name code isActive");
+    }
+    if (userType === "consultant") {
+      if (user.department) await user.populate("department", "name isActive");
+      if (user.teleSalesTeam) await user.populate("teleSalesTeam", "name code isActive");
     }
 
     // Send new token response

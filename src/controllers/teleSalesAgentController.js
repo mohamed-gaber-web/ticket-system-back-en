@@ -1,12 +1,13 @@
 import TeleSalesAgent from "../models/TeleSalesAgent.js";
-import TeleSalesTeam from "../models/TeleSalesTeam.js";
 import {
   teamScopeFilter,
   canManageAgent,
   isSuperAdmin,
   resolveCreateTeam,
+  resolveExistingTeam,
   callerTeamId,
 } from "../utils/teleSalesScope.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 // Roles a team manager is allowed to hand out. Promoting someone to super admin is
 // a super admin's decision alone — otherwise a manager could mint an account that
@@ -44,16 +45,21 @@ export const createAgent = async (req, res) => {
       if (resolved.error) {
         return res.status(400).json({ success: false, message: resolved.error });
       }
-      team = resolved.team;
-
-      const teamExists = await TeleSalesTeam.exists({ _id: team });
-      if (!teamExists) {
-        return res.status(400).json({ success: false, message: "The selected team does not exist." });
+      const existing = await resolveExistingTeam(resolved.team);
+      if (existing.error) {
+        return res.status(400).json({ success: false, message: existing.error });
       }
+      team = existing.team;
     } else if (req.body.team) {
       // Super admins work across every team; an optional home team is still useful
-      // as the default when they create leads.
-      team = req.body.team;
+      // as the default when they create leads. It still has to be a real team —
+      // a malformed id would surface as a 500 CastError, and a well-formed but
+      // dangling one would quietly become the default owner of their new leads.
+      const resolved = await resolveExistingTeam(req.body.team);
+      if (resolved.error) {
+        return res.status(400).json({ success: false, message: resolved.error });
+      }
+      team = resolved.team;
     }
 
     const existing = await TeleSalesAgent.findOne({ email });
@@ -113,10 +119,13 @@ export const getAllAgents = async (req, res) => {
     if (status) filter.status = status;
     if (role) filter.role = role;
     if (search) {
+      // Escaped so a stray bracket mid-typing is a literal, not an invalid pattern
+      // that Mongo rejects and the catch block reports as a 500.
+      const safe = escapeRegex(search);
       filter.$or = [
-        { firstName: { $regex: search, $options: "i" } },
-        { lastName: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
+        { firstName: { $regex: safe, $options: "i" } },
+        { lastName: { $regex: safe, $options: "i" } },
+        { email: { $regex: safe, $options: "i" } },
       ];
     }
 
@@ -210,10 +219,11 @@ export const updateAgent = async (req, res) => {
     }
 
     if (updateData.team) {
-      const teamExists = await TeleSalesTeam.exists({ _id: updateData.team });
-      if (!teamExists) {
-        return res.status(400).json({ success: false, message: "The selected team does not exist." });
+      const existing = await resolveExistingTeam(updateData.team);
+      if (existing.error) {
+        return res.status(400).json({ success: false, message: existing.error });
       }
+      updateData.team = existing.team;
     }
 
     const updated = await TeleSalesAgent.findByIdAndUpdate(req.params.id, updateData, {

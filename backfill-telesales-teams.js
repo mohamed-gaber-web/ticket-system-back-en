@@ -76,19 +76,29 @@ console.log(`\nHome team for existing records: ${home ? `${home.name} (${HOME_CO
 // Matches documents that have no team stored at all.
 const NO_TEAM = { $or: [{ team: { $exists: false } }, { team: null }] };
 
+// Super admins are deliberately left team-less: they work across every team, and
+// giving one a home team silently makes it the default owner of every lead and
+// agent they create — so the "which team owns this?" prompt they are shown would
+// stop being enforced for exactly the role that needs to answer it.
+const NO_TEAM_NON_ADMIN = { ...NO_TEAM, role: { $ne: "admin" } };
+
 // ── 2. Agents and leads → home team ───────────────────────────────────────────
 
-const [agentCount, leadCount] = await Promise.all([
-  TeleSalesAgent.countDocuments(NO_TEAM),
+const [agentCount, adminCount, leadCount] = await Promise.all([
+  TeleSalesAgent.countDocuments(NO_TEAM_NON_ADMIN),
+  TeleSalesAgent.countDocuments({ ...NO_TEAM, role: "admin" }),
   Lead.countDocuments(NO_TEAM),
 ]);
 
 console.log(`\nWithout a team:`);
 console.log(`  agents: ${agentCount}`);
 console.log(`  leads:  ${leadCount}`);
+if (adminCount > 0) {
+  console.log(`  (${adminCount} super admin(s) left team-less by design — they span every team)`);
+}
 
 if (!DRY_RUN && agentCount > 0) {
-  const res = await TeleSalesAgent.updateMany(NO_TEAM, { $set: { team: home._id } });
+  const res = await TeleSalesAgent.updateMany(NO_TEAM_NON_ADMIN, { $set: { team: home._id } });
   console.log(`\n✓ Assigned ${res.modifiedCount} agent(s) to ${home.name}.`);
 }
 if (!DRY_RUN && leadCount > 0) {

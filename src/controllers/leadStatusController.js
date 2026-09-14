@@ -14,6 +14,8 @@ import {
   canViewLead,
   canEditLead,
   canManageLead,
+  canClaimLead,
+  isSelf,
   assigneeTeamError,
 } from "../utils/teleSalesScope.js";
 
@@ -78,7 +80,13 @@ export const changeLeadStatus = async (req, res) => {
     // manager's call, mirroring updateLead — and the new owner has to be on the
     // team that owns the lead, or the record would be stranded with someone who
     // cannot open it.
-    if (newStatus === "New Lead" && canManageLead(req, lead)) {
+    //
+    // An agent gets the same self-claim path updateLead grants, because `owner` is
+    // a mandatory field for this status: without it they would pass validation,
+    // get a 200, and find the lead still sitting unassigned with no SLA.
+    const maySetOwner =
+      canManageLead(req, lead) || (canClaimLead(req, lead) && isSelf(req, values.owner));
+    if (newStatus === "New Lead" && maySetOwner) {
       if (values.owner) {
         const ownerError = await assigneeTeamError(lead.team, values.owner);
         if (ownerError) {

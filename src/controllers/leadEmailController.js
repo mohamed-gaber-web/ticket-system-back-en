@@ -4,7 +4,7 @@ import LeadEmail from "../models/LeadEmail.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import { sendCustomEmail, MAX_TOTAL_ATTACHMENT_BYTES } from "../utils/emailService.js";
 import { sanitizeEmailHtml } from "../utils/htmlSanitizer.js";
-import { canViewLead, canEditLead, isSuperAdmin, isTeamManager } from "../utils/teleSalesScope.js";
+import { canViewLead, canEditLead, canManageLeadChild } from "../utils/teleSalesScope.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_RECIPIENTS = 25;
@@ -242,8 +242,7 @@ export const deleteLeadEmail = async (req, res) => {
       return res.status(404).json({ success: false, message: "Email not found" });
     }
 
-    const isSender = String(email.sentBy) === String(req.user._id);
-    if (!isSender && !isTeamManager(req) && !isSuperAdmin(req)) {
+    if (!canManageLeadChild(req, lead, email, "sentBy")) {
       return res.status(403).json({ success: false, message: "Not authorized to delete this email" });
     }
 

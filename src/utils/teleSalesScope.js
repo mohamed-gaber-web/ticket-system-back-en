@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import TeleSalesAgent from "../models/TeleSalesAgent.js";
+import TeleSalesTeam from "../models/TeleSalesTeam.js";
 
 /**
  * The single authority for "what may this caller see and touch in tele-sales?".
@@ -139,6 +140,28 @@ export const canEditLead = (req, lead) => {
 };
 
 /**
+ * May the caller take this lead for THEMSELVES?
+ *
+ * The shared-pool model only works if an agent can actually pick a lead out of
+ * the pool: `canEditLead` lets them work an unassigned lead, but without this they
+ * could never put their name on it, and the pool could only ever be emptied by a
+ * manager. Limited to leads nobody holds — taking a colleague's lead is a
+ * reassignment, which stays a manager's decision.
+ */
+export const canClaimLead = (req, lead) => {
+  if (!canViewLead(req, lead)) return false;
+  const assignee = lead?.assignedTo?._id ?? lead?.assignedTo;
+  return !assignee;
+};
+
+/**
+ * Is `candidate` the caller themselves? Used to tell a self-claim apart from an
+ * agent trying to assign work to someone else.
+ */
+export const isSelf = (req, candidate) =>
+  Boolean(candidate) && String(candidate) === String(req?.user?._id);
+
+/**
  * May the caller REASSIGN this lead to a different agent, or delete it? Managers
  * inside their own team, super admins anywhere.
  */
@@ -170,6 +193,23 @@ export const canManageActivity = (req, doc, ownerField) => {
   if (isTeamManager(req)) return true;
   const owner = doc?.[ownerField]?._id ?? doc?.[ownerField];
   return String(owner) === String(req.user._id);
+};
+
+/**
+ * May the caller edit or delete a record that hangs off a lead but carries no team
+ * of its own — a LeadAttachment or a LeadEmail?
+ *
+ * Same rule as canManageActivity, except the team comes from the lead: those two
+ * collections are only ever reachable through it, so there is nothing to
+ * denormalise onto them. Kept here rather than inlined at the two call sites so
+ * the rule has one definition to change.
+ */
+export const canManageLeadChild = (req, lead, doc, ownerField) => {
+  if (isSuperAdmin(req)) return true;
+  if (!canViewLead(req, lead)) return false;
+  if (isTeamManager(req)) return true;
+  const owner = doc?.[ownerField]?._id ?? doc?.[ownerField];
+  return Boolean(owner) && String(owner) === String(req.user._id);
 };
 
 /**
@@ -214,6 +254,26 @@ export const resolveCreateTeam = (req, bodyTeam) => {
 
   const own = toObjectId(callerTeamId(req));
   return own ? { team: own, error: null } : { team: null, error: NO_TEAM_MESSAGE };
+};
+
+export const TEAM_NOT_FOUND_MESSAGE = "The selected team does not exist.";
+
+/**
+ * Resolve a caller-supplied team id to a real, existing team.
+ *
+ * Casting alone is not enough: a well-formed ObjectId that matches no team is
+ * accepted by Mongoose and silently creates records no `teamScopeFilter` can ever
+ * match — invisible to every agent, and not even listed on the Teams screen. A
+ * malformed id is worse still, surfacing as a 500 CastError from deep inside the
+ * driver instead of a 400 the user can act on.
+ *
+ * Returns `{ team, error }` — check `error` first.
+ */
+export const resolveExistingTeam = async (rawTeam) => {
+  const team = toObjectId(rawTeam);
+  if (!team) return { team: null, error: TEAM_NOT_FOUND_MESSAGE };
+  const exists = await TeleSalesTeam.exists({ _id: team });
+  return exists ? { team, error: null } : { team: null, error: TEAM_NOT_FOUND_MESSAGE };
 };
 
 /**

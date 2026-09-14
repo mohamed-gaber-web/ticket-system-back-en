@@ -1,7 +1,11 @@
 import TeleSalesTeam from "../models/TeleSalesTeam.js";
 import TeleSalesAgent from "../models/TeleSalesAgent.js";
+import Consultant from "../models/Consltant.js";
 import Lead from "../models/Lead.js";
+import CallLog from "../models/CallLog.js";
+import FollowUp from "../models/FollowUp.js";
 import { isSuperAdmin, callerTeamId } from "../utils/teleSalesScope.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
@@ -61,9 +65,10 @@ export const getAllTeams = async (req, res) => {
 
     if (isActive !== undefined) filter.isActive = isActive === "true";
     if (search) {
+      const safe = escapeRegex(search);
       filter.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { code: { $regex: search, $options: "i" } },
+        { name: { $regex: safe, $options: "i" } },
+        { code: { $regex: safe, $options: "i" } },
       ];
     }
 
@@ -85,8 +90,12 @@ export const getTeamById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Team not found" });
     }
 
+    // 404 rather than 403, matching every other endpoint in the module: a 403 here
+    // would confirm the id belongs to a real team, and the pair of responses would
+    // let any tele-sales user enumerate exactly how the business is structured —
+    // which is what scoping getAllTeams was meant to prevent.
     if (!isSuperAdmin(req) && callerTeamId(req) !== String(team._id)) {
-      return res.status(403).json({ success: false, message: "Not authorized to view this team" });
+      return res.status(404).json({ success: false, message: "Team not found" });
     }
 
     const [agentCount, leadCount] = await Promise.all([
@@ -159,19 +168,41 @@ export const deleteTeam = async (req, res) => {
       return res.status(404).json({ success: false, message: "Team not found" });
     }
 
-    const [agentCount, leadCount] = await Promise.all([
+    // Everything that can point at a team has to be counted, not just agents and
+    // leads. A consultant left with a dangling teleSalesTeam is locked out of the
+    // module silently — their scope filter matches nothing and the Teams screen
+    // cannot show an administrator why. Call logs and follow-ups can outlive their
+    // lead too, so they are checked on their own.
+    const [agentCount, leadCount, consultantCount, callCount, followUpCount] = await Promise.all([
       TeleSalesAgent.countDocuments({ team: team._id }),
       Lead.countDocuments({ team: team._id }),
+      Consultant.countDocuments({ teleSalesTeam: team._id }),
+      CallLog.countDocuments({ team: team._id }),
+      FollowUp.countDocuments({ team: team._id }),
     ]);
 
-    if (agentCount > 0 || leadCount > 0) {
+    const blockers = [
+      [agentCount, "agent"],
+      [leadCount, "lead"],
+      [consultantCount, "consultant"],
+      [callCount, "call log"],
+      [followUpCount, "follow-up"],
+    ].filter(([count]) => count > 0);
+
+    if (blockers.length > 0) {
+      const detail = blockers
+        .map(([count, label]) => `${count} ${label}${count === 1 ? "" : "s"}`)
+        .join(", ");
       return res.status(409).json({
         success: false,
         message:
-          `"${team.name}" still has ${agentCount} agent(s) and ${leadCount} lead(s). ` +
-          "Move them to another team first, or deactivate this team instead of deleting it.",
+          `"${team.name}" still has ${detail}. Move them to another team first, ` +
+          "or deactivate this team instead of deleting it.",
         agentCount,
         leadCount,
+        consultantCount,
+        callCount,
+        followUpCount,
       });
     }
 
