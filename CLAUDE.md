@@ -36,8 +36,10 @@ Two kinds of people log in, and the JWT carries `userType: "employee" | "custome
 | `sales_manager` | `telesales` | cross-team; manages the `sales` people |
 | `marketing` | `telesales` (read-only), `tasks` | |
 | `marketing_manager` | same | manages the `marketing` people |
+| `developer` | `development` | works the boards they created or were added to |
+| `developer_manager` | `development` | every board; manages the `developer` people |
 
-Modules are `tickets`, `telesales`, `tasks`, `admin` (config/lookup writes). An admin may override the list per employee via `modules[]` (empty = role defaults). **All authorisation is a function of the role — never of a Department name.** `department` is kept on the employee only for the modules that group by it (tasks, requests) and is auto-synced from the role for sales/marketing.
+Modules are `tickets`, `telesales`, `tasks`, `admin` (config/lookup writes), `development` (kanban boards). An admin may override the list per employee via `modules[]` (empty = role defaults). **All authorisation is a function of the role — never of a Department name.** `department` is kept on the employee only for the modules that group by it (tasks, requests) and is auto-synced from the role for sales/marketing.
 
 **`src/utils/access.js` is the single authority** (vocabulary in `src/utils/roles.js`): `roleFamily`, `isAdmin`, `isManager`, `effectiveModules`, `hasModule`, `canManageEmployee`, `emailTakenElsewhere`, and the middlewares `requireEmployee`, `requireCustomer`, `requireAdmin`, `requireManagerOrAdmin`, `requireModule(...)`. Route files import them from `authMiddleware.js` alongside `protect`. Never hand-roll a `role === "admin"` check in a controller. Tests: `tests/access.test.js`.
 
@@ -66,6 +68,12 @@ The tele-sales module is multi-tenant. **`TeleSalesTeam` (Egypt / UAE / KSA) is 
 Roles (`Employee.role`): `sales` sees their whole team and works their own + unassigned leads; `sales_manager` sees and writes **every** team and manages the sales roster; `marketing` / `marketing_manager` read every team but write nothing (`requireTeleSalesWrite` refuses them); `admin` does everything and alone manages the teams. Cross-team readers legitimately have no team.
 
 Security tests: `tests/teleSalesScope.test.js`.
+
+### Development Boards (kanban)
+
+The `development` module is `DevBoard` → `DevList` (columns) → `DevCard` (+ `DevCardComment`), all under `src/controllers/development/` and one router `developmentRoutes.js` (`/api/development`). Ordering is an integer `position` per list, renumbered server-side with `bulkWrite` on every move/reorder (`PATCH /cards/:id/move { listId, position }` answers the resulting order of both lists so the client only reconciles).
+
+**`src/utils/developmentScope.js` decides who sees what** — never inline it. Admins and `developer_manager` see every board; everyone else only boards they created or are a member of (`boardScopeFilter`, `canViewBoard`). Every member may work the board (lists, cards, checklist, comments); only the creator / manager / admin may shape it (`canAdminBoard`: rename, archive, delete, members, labels, delete lists). Out-of-scope ids answer **404**, an in-scope non-admin gets **403**. Labels live on the board (`board.labels` subdocs) and cards reference them by id; assignees and members must be active employees who can open the module (`validDevelopers`). Tests: `tests/developmentScope.test.js`.
 
 ### Code Organization
 

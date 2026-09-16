@@ -22,9 +22,11 @@ export const ROLES = Object.freeze([
   "sales_manager",
   "marketing",
   "marketing_manager",
+  "developer",
+  "developer_manager",
 ]);
 
-export const MODULES = Object.freeze(["tickets", "telesales", "tasks", "admin"]);
+export const MODULES = Object.freeze(["tickets", "telesales", "tasks", "admin", "development"]);
 
 /** What each role opens when the admin has not overridden `modules`. */
 export const ROLE_DEFAULT_MODULES = Object.freeze({
@@ -34,6 +36,8 @@ export const ROLE_DEFAULT_MODULES = Object.freeze({
   sales_manager: ["telesales"],
   marketing: ["telesales", "tasks"],
   marketing_manager: ["telesales", "tasks"],
+  developer: ["development"],
+  developer_manager: ["development"],
 });
 
 /** Human labels, shared with e-mails and logs. */
@@ -44,6 +48,8 @@ export const ROLE_LABELS = Object.freeze({
   sales_manager: "Sales Manager",
   marketing: "Marketing",
   marketing_manager: "Marketing Manager",
+  developer: "Developer",
+  developer_manager: "Development Manager",
 });
 
 /** `sales_manager` → "sales"; `consultant` → "consultant"; unknown → null. */

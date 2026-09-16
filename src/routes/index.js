@@ -36,6 +36,7 @@ import taskRoutes from "./taskRoutes.js";
 import taskCategoryRoutes from "./taskCategoryRoutes.js";
 import taskAttachmentRoutes from "./taskAttachmentRoutes.js";
 import taskCommentRoutes from "./taskCommentRoutes.js";
+import developmentRoutes from "./developmentRoutes.js";
 import employeeRequestRoutes from "./employeeRequestRoutes.js";
 import employeeBalanceRoutes from "./employeeBalanceRoutes.js";
 import aiRoutes from "./aiRoutes.js";
@@ -142,6 +143,9 @@ router.use("/tasks", taskRoutes);
 router.use("/task-categories", taskCategoryRoutes);
 router.use("/task-attachments", taskAttachmentRoutes);
 router.use("/task-comments", taskCommentRoutes);
+
+// Development module (kanban boards)
+router.use("/development", developmentRoutes);
 
 // Employee Request routes (vacation / excuse / approvals / balances)
 router.use("/employee-requests", employeeRequestRoutes);

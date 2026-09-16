@@ -47,7 +47,9 @@ describe("roleFamily", () => {
   it("strips the manager suffix and leaves plain roles alone", () => {
     assert.equal(roleFamily("sales_manager"), "sales");
     assert.equal(roleFamily("marketing_manager"), "marketing");
+    assert.equal(roleFamily("developer_manager"), "developer");
     assert.equal(roleFamily("sales"), "sales");
+    assert.equal(roleFamily("developer"), "developer");
     assert.equal(roleFamily("consultant"), "consultant");
     assert.equal(roleFamily("admin"), "admin");
   });
@@ -61,6 +63,7 @@ describe("roleFamily", () => {
 
   it("lists every role of a family", () => {
     assert.deepEqual(familyRoles("sales"), ["sales", "sales_manager"]);
+    assert.deepEqual(familyRoles("developer"), ["developer", "developer_manager"]);
     assert.deepEqual(familyRoles("admin"), ["admin"]);
     assert.deepEqual(familyRoles("nope"), []);
   });
@@ -104,6 +107,8 @@ describe("effectiveModules", () => {
     assert.deepEqual(effectiveModules(user("sales_manager")), ["telesales"]);
     assert.deepEqual(effectiveModules(user("marketing")), ["telesales", "tasks"]);
     assert.deepEqual(effectiveModules(user("marketing_manager")), ["telesales", "tasks"]);
+    assert.deepEqual(effectiveModules(user("developer")), ["development"]);
+    assert.deepEqual(effectiveModules(user("developer_manager")), ["development"]);
   });
 
   it("gives an admin everything, whatever is stored", () => {
@@ -138,6 +143,12 @@ describe("canManageEmployee", () => {
     assert.equal(canManageEmployee(sm, user("sales")), true);
     assert.equal(canManageEmployee(sm, user("marketing")), false);
     assert.equal(canManageEmployee(sm, user("consultant")), false);
+    assert.equal(canManageEmployee(sm, user("developer")), false);
+
+    const dm = user("developer_manager");
+    assert.equal(canManageEmployee(dm, user("developer")), true);
+    assert.equal(canManageEmployee(dm, user("sales")), false);
+    assert.equal(canManageEmployee(dm, user("developer_manager")), false);
   });
 
   it("never lets a manager touch an admin or another manager", () => {
@@ -156,6 +167,7 @@ describe("canManageEmployee", () => {
   it("limits the roles a manager may hand out to their own plain role", () => {
     assert.deepEqual(assignableRoles(user("sales_manager")), ["sales"]);
     assert.deepEqual(assignableRoles(user("marketing_manager")), ["marketing"]);
+    assert.deepEqual(assignableRoles(user("developer_manager")), ["developer"]);
     assert.deepEqual(assignableRoles(user("admin")), [...ROLES]);
     assert.deepEqual(assignableRoles(user("sales")), []);
   });
@@ -170,10 +182,16 @@ describe("middlewares", () => {
     assert.equal(run(requireModule("tickets", "tasks"), employee("marketing")).passed, true);
     assert.equal(run(requireModule("tasks"), employee("sales")).status, 403);
     assert.equal(run(requireModule("tickets"), employee("sales")).status, 403);
+    assert.equal(run(requireModule("development"), employee("developer")).passed, true);
+    assert.equal(run(requireModule("development"), employee("developer_manager")).passed, true);
+    assert.equal(run(requireModule("development"), employee("admin")).passed, true);
+    assert.equal(run(requireModule("development"), employee("consultant")).status, 403);
+    assert.equal(run(requireModule("tickets"), employee("developer")).status, 403);
   });
 
   it("requireModule respects an admin override on the employee", () => {
     assert.equal(run(requireModule("tasks"), employee("consultant", { modules: ["tickets", "tasks"] })).passed, true);
+    assert.equal(run(requireModule("development"), employee("consultant", { modules: ["development"] })).passed, true);
   });
 
   it("requireModule never passes a customer, even for a module named 'tickets'", () => {
