@@ -11,7 +11,12 @@ import {
   getCommentsByUserType,
 } from "../controllers/ticketCommentController.js";
 
+import { protect } from "../middleware/authMiddleware.js";
 const router = express.Router();
+
+// Every route needs a signed-in user; the controllers branch on req.userType.
+router.use(protect);
+
 
 // Get comments by user type (must be before /:id route)
 router.get("/user-type/:userType", getCommentsByUserType);

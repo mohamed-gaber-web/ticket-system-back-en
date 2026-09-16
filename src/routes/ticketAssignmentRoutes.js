@@ -18,7 +18,12 @@ import {
   getWeeklySummary,
 } from "../controllers/ticketAssignmentController.js";
 
+import { protect } from "../middleware/authMiddleware.js";
 const router = express.Router();
+
+// Every route needs a signed-in user; the controllers branch on req.userType.
+router.use(protect);
+
 
 // Statistics route (must be before /:id route)
 router.get("/stats", getTicketAssignmentStats);

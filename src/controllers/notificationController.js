@@ -69,9 +69,14 @@ const getAllNotifications = async (req, res) => {
   }
 };
 
+// A notification belongs to exactly one inbox; only its owner or an admin may
+// open, read or delete it. Answers 404 rather than 403 so ids cannot be probed.
+const ownsNotification = (req, notification) =>
+  req.user?.role === "admin" || String(notification.userId) === String(req.user?._id);
+
 // @desc    Get notification by ID
 // @route   GET /api/notifications/:id
-// @access  Public
+// @access  Private (owner or admin)
 const getNotificationById = async (req, res) => {
   try {
     const notification = await Notification.findById(req.params.id).populate(
@@ -79,7 +84,7 @@ const getNotificationById = async (req, res) => {
       "ticketNumber subject priority status"
     );
 
-    if (!notification) {
+    if (!notification || !ownsNotification(req, notification)) {
       return res.status(404).json({
         success: false,
         message: "Notification not found",
@@ -291,7 +296,7 @@ const markAsRead = async (req, res) => {
   try {
     const notification = await Notification.findById(req.params.id);
 
-    if (!notification) {
+    if (!notification || !ownsNotification(req, notification)) {
       return res.status(404).json({
         success: false,
         message: "Notification not found",
@@ -353,7 +358,7 @@ const deleteNotification = async (req, res) => {
   try {
     const notification = await Notification.findById(req.params.id);
 
-    if (!notification) {
+    if (!notification || !ownsNotification(req, notification)) {
       return res.status(404).json({
         success: false,
         message: "Notification not found",

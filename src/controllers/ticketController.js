@@ -7,7 +7,7 @@ import WorkingHours from "../models/WorkingHours.js";
 import Holiday from "../models/Holiday.js";
 import { getEstimationStartDate, addWorkingDays } from "../utils/estimationUtils.js";
 
-import { USER_TYPES, isEmployee, isAdmin } from "../utils/access.js";
+import { USER_TYPES, isEmployee, isAdmin, isCustomer } from "../utils/access.js";
 // Load working-hours config + holidays, auto-create defaults if missing
 const loadEstimationConfig = async () => {
   let config = await WorkingHours.findOne().lean();
@@ -50,6 +50,26 @@ const calcEstimation = async (customerId, createdAt) => {
 // New tickets always take their date from setup, so the only way a ticket's data
 // entry date can move afterwards is an admin correcting it on update.
 const canSetEntryDate = (req) => isEmployee(req) && isAdmin(req.user);
+
+/**
+ * A customer only ever sees their own company's tickets, whatever the query
+ * string says — the client used to pass `companyName` and that was the only
+ * fence. Returns the customer ids of the caller's company, or null for staff.
+ */
+const customerScopeIds = async (req) => {
+  if (!isCustomer(req)) return null;
+  const company = req.user.company;
+  if (!company) return [req.user._id];
+  return Customer.find({ company }).distinct("_id");
+};
+
+/** May this caller open this ticket? Staff always; a customer only within their company. */
+const canSeeTicket = async (req, ticket) => {
+  const ids = await customerScopeIds(req);
+  if (!ids) return true;
+  const owner = ticket?.customer?._id ?? ticket?.customer;
+  return ids.some((id) => String(id) === String(owner));
+};
 
 // Resolve the timestamp a new ticket is recorded with. Admins set a single
 // "data entry date" in Working Hours Setup so entry stays daily rather than
@@ -179,6 +199,10 @@ const getAllTickets = async (req, res) => {
       const ids = matchingCustomers.map((c) => c._id);
       query.customer = { $in: ids };
     }
+
+    // A customer's fence goes on last and overrides whatever they asked for.
+    const ownCustomerIds = await customerScopeIds(req);
+    if (ownCustomerIds) query.customer = { $in: ownCustomerIds };
 
     if (assignedTeam) {
       query.assignedTeam = assignedTeam;
@@ -448,7 +472,7 @@ const getTicketById = async (req, res) => {
       .populate("statusHistory")
       .populate("assignments");
 
-    if (!ticket) {
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -508,7 +532,7 @@ const getTicketByNumber = async (req, res) => {
       .populate("attachments")
       .populate("statusHistory");
 
-    if (!ticket) {
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -720,7 +744,7 @@ const updateTicket = async (req, res) => {
 
     let ticket = await Ticket.findById(req.params.id);
 
-    if (!ticket) {
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -958,7 +982,7 @@ const updateTicketStatus = async (req, res) => {
 
     let ticket = await Ticket.findById(req.params.id);
 
-    if (!ticket) {
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -1240,7 +1264,7 @@ const addCustomerFeedback = async (req, res) => {
 
     let ticket = await Ticket.findById(req.params.id);
 
-    if (!ticket) {
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -1401,7 +1425,7 @@ const getTicketSLAStatus = async (req, res) => {
   try {
     const ticket = await Ticket.findById(req.params.id).populate("sla");
 
-    if (!ticket) {
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -1559,9 +1583,9 @@ const createSubTicket = async (req, res) => {
       durationHours,
     } = req.body;
 
-    // Verify parent ticket exists
+    // Verify parent ticket exists (and is the caller's to see)
     const parentTicket = await Ticket.findById(parentTicketId);
-    if (!parentTicket) {
+    if (!parentTicket || !(await canSeeTicket(req, parentTicket))) {
       return res.status(404).json({
         success: false,
         message: "Parent ticket not found",
@@ -1705,7 +1729,7 @@ const getSubTickets = async (req, res) => {
 
     // Verify parent ticket exists
     const parentTicket = await Ticket.findById(parentTicketId);
-    if (!parentTicket) {
+    if (!parentTicket || !(await canSeeTicket(req, parentTicket))) {
       return res.status(404).json({
         success: false,
         message: "Parent ticket not found",

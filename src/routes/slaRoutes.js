@@ -9,7 +9,14 @@ import {
   getSLAsByPriority,
 } from "../controllers/slaController.js";
 
+import { protect, requireAdmin } from "../middleware/authMiddleware.js";
 const router = express.Router();
+
+// Reading is open to any signed-in user — every form needs these lists.
+// Changing them is an administrator's job.
+router.use(protect);
+router.use((req, res, next) => (req.method === "GET" ? next() : requireAdmin(req, res, next)));
+
 
 // Statistics route (must be before /:id route)
 router.get("/stats", getSLAStats);
