@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { USER_TYPES, LEGACY_EMPLOYEE_TYPES } from "../utils/roles.js";
 const notificationSchema = new mongoose.Schema(
   {
     ticket: {
@@ -58,6 +59,12 @@ notificationSchema.index({ isRead: 1 });
 notificationSchema.index({ createdAt: -1 });
 notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
 
+// An employee's inbox spans rows written under the old staff type names.
+const typeFilter = (userType) =>
+  LEGACY_EMPLOYEE_TYPES.includes(userType) || userType === USER_TYPES.EMPLOYEE
+    ? { $in: [USER_TYPES.EMPLOYEE, ...LEGACY_EMPLOYEE_TYPES] }
+    : userType;
+
 // Method to mark as read
 notificationSchema.methods.markAsRead = function () {
   this.isRead = true;
@@ -69,7 +76,7 @@ notificationSchema.methods.markAsRead = function () {
 notificationSchema.statics.getUnreadForUser = function (userId, userType) {
   return this.find({
     userId,
-    userType,
+    userType: typeFilter(userType),
     isRead: false,
   })
     .populate("ticket", "ticketNumber subject priority status")
@@ -82,7 +89,7 @@ notificationSchema.statics.getForUser = function (
   userType,
   limit = 50
 ) {
-  return this.find({ userId, userType })
+  return this.find({ userId, userType: typeFilter(userType) })
     .populate("ticket", "ticketNumber subject priority status")
     .sort({ createdAt: -1 })
     .limit(limit);
@@ -94,7 +101,7 @@ notificationSchema.statics.markAllAsReadForUser = async function (
   userType
 ) {
   return await this.updateMany(
-    { userId, userType, isRead: false },
+    { userId, userType: typeFilter(userType), isRead: false },
     { isRead: true, readAt: new Date() }
   );
 };
@@ -114,7 +121,7 @@ notificationSchema.statics.createNotification = async function (data) {
 notificationSchema.statics.getUnreadCount = async function (userId, userType) {
   return await this.countDocuments({
     userId,
-    userType,
+    userType: typeFilter(userType),
     isRead: false,
   });
 };
