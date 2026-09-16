@@ -35,6 +35,9 @@ const REQUIRED_LEAD_FIELDS = [
   { field: "email", label: "Email" },
   { field: "website", label: "Website" },
   { field: "leadSource", label: "Lead source" },
+  { field: "entityType", label: "Entity type" },
+  { field: "industrySector", label: "Industry sector" },
+  { field: "businessClassification", label: "Business classification" },
 ];
 
 /**
@@ -104,7 +107,19 @@ export const createLead = async (req, res) => {
       return res.status(400).json({ success: false, message: teamError });
     }
 
-    const assigneeError = await assigneeTeamError(team, req.body.assignedTo);
+    // Assign_To is mandatory, but only a manager/admin picks it explicitly — a
+    // plain agent doesn't see the control (see LeadFormModal), so a blank value
+    // from them means "assign it to me", not "leave it unassigned".
+    const managerOrAdmin = isSuperAdmin(req) || isTeamManager(req);
+    let assignedTo = cleanStr(req.body.assignedTo);
+    if (!assignedTo) {
+      if (managerOrAdmin) {
+        return res.status(400).json({ success: false, message: "Validation error", errors: ["Assign to is required"] });
+      }
+      assignedTo = String(req.user._id);
+    }
+
+    const assigneeError = await assigneeTeamError(team, assignedTo);
     if (assigneeError) {
       return res.status(400).json({ success: false, message: assigneeError });
     }
@@ -112,6 +127,7 @@ export const createLead = async (req, res) => {
     const lead = await Lead.create({
       ...req.body,
       team,
+      assignedTo,
       leadSourceDetail: detail.value,
       createdBy: req.user._id,
     });
@@ -566,6 +582,14 @@ export const updateLead = async (req, res) => {
     // that removes the record from its current team's view entirely.
     if (canChangeLeadTeam(req)) {
       allowedFields.push("team");
+    }
+
+    // Assign_To is mandatory once the caller is actually the one setting it —
+    // clearing it back to "unassigned" is no longer allowed. A plain agent who
+    // can't touch the field at all is unaffected: it's simply left out of
+    // updateData below, so their edit doesn't disturb whatever it already held.
+    if (allowedFields.includes("assignedTo") && req.body.assignedTo !== undefined && !cleanStr(req.body.assignedTo)) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: ["Assign to is required"] });
     }
 
     const updateData = {};
