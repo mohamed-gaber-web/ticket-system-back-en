@@ -27,7 +27,7 @@ const followUpSchema = mongoose.Schema(
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "TeleSalesAgent",
+      ref: "Consultant",
       required: true,
     },
     // Owning team, copied from the lead when the reminder is created. Denormalised

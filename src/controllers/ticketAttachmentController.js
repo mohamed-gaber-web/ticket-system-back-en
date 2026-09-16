@@ -3,6 +3,7 @@ import Ticket from "../models/Ticket.js";
 import mongoose from "mongoose";
 import { getGridFSBucket } from "../config/gridfs.js";
 
+import { isValidUserType, normalizeUserType } from "../utils/access.js";
 // @desc    Get all attachments
 // @route   GET /api/ticket-attachments
 // @access  Public
@@ -395,11 +396,10 @@ const getAttachmentsByUserType = async (req, res) => {
     const { userType } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const validUserTypes = ["customer", "consultant", "team_member"];
-    if (!validUserTypes.includes(userType)) {
+    if (!isValidUserType(normalizeUserType(userType))) {
       return res.status(400).json({
         success: false,
-        message: "Invalid user type. Must be: customer, consultant, or team_member",
+        message: "Invalid user type. Must be: customer or employee",
       });
     }
 

@@ -4,6 +4,7 @@ import Consultant from "../models/Consltant.js";
 import { sendSlaAlertEmail, sendSlaBreachEmail } from "./emailService.js";
 import { notifyAndEmail } from "./emailHelper.js";
 
+import { USER_TYPES } from "./access.js";
 // Track tickets that have already been alerted to avoid duplicate emails
 const alertedTickets = new Set();
 const breachedTickets = new Set();
@@ -67,8 +68,8 @@ const checkSLAStatus = async () => {
 
         // In-app notification
         const recipients = [];
-        if (assignee) recipients.push({ userId: assignee._id, userType: "consultant" });
-        admins.forEach((a) => recipients.push({ userId: a._id, userType: "consultant" }));
+        if (assignee) recipients.push({ userId: assignee._id, userType: USER_TYPES.EMPLOYEE });
+        admins.forEach((a) => recipients.push({ userId: a._id, userType: USER_TYPES.EMPLOYEE }));
 
         notifyAndEmail("sla_breach", {
           ticket,
@@ -97,7 +98,7 @@ const checkSLAStatus = async () => {
         }
 
         const recipients = [];
-        if (assignee) recipients.push({ userId: assignee._id, userType: "consultant" });
+        if (assignee) recipients.push({ userId: assignee._id, userType: USER_TYPES.EMPLOYEE });
 
         notifyAndEmail("sla_alert", {
           ticket,

@@ -2,10 +2,10 @@ import TicketAssignment from "../models/TicketAssignment.js";
 import Ticket from "../models/Ticket.js";
 import Team from "../models/Team.js";
 import Consultant from "../models/Consltant.js";
-import TeamMember from "../models/TeamMember.js";
 import { notifyAndEmail } from "../utils/emailHelper.js";
 import { sendTicketReassignedEmail } from "../utils/emailService.js";
 
+import { USER_TYPES } from "../utils/access.js";
 // @desc    Get all ticket assignments
 // @route   GET /api/ticket-assignments
 // @access  Public
@@ -358,84 +358,6 @@ const updateTicketAssignment = async (req, res) => {
   }
 };
 
-// @desc    Accept ticket assignment
-// @route   PATCH /api/ticket-assignments/:id/accept
-// @access  Public
-const acceptTicketAssignment = async (req, res) => {
-  try {
-    const { teamMemberId } = req.body;
-
-    if (!teamMemberId) {
-      return res.status(400).json({
-        success: false,
-        message: "Team member ID is required",
-      });
-    }
-
-    let assignment = await TicketAssignment.findById(req.params.id);
-
-    if (!assignment) {
-      return res.status(404).json({
-        success: false,
-        message: "Ticket assignment not found",
-      });
-    }
-
-    // Verify team member exists
-    const teamMember = await TeamMember.findById(teamMemberId);
-    if (!teamMember) {
-      return res.status(404).json({
-        success: false,
-        message: "Team member not found",
-      });
-    }
-
-    // Verify team member belongs to the assigned team
-    if (teamMember.team.toString() !== assignment.assignedToTeam.toString()) {
-      return res.status(400).json({
-        success: false,
-        message: "Team member does not belong to the assigned team",
-      });
-    }
-
-    // Check if already accepted
-    if (assignment.acceptedBy) {
-      return res.status(400).json({
-        success: false,
-        message: "Assignment already accepted",
-      });
-    }
-
-    // Accept the assignment using model method
-    await assignment.acceptAssignment(teamMemberId);
-
-    const populatedAssignment = await TicketAssignment.findById(assignment._id)
-      .populate("ticket", "ticketNumber subject status priority")
-      .populate("assignedToTeam", "teamName department")
-      .populate("assignedByConsultant", "firstName lastName email")
-      .populate("acceptedBy", "firstName lastName email");
-
-    res.status(200).json({
-      success: true,
-      message: "Ticket assignment accepted successfully",
-      data: populatedAssignment,
-    });
-  } catch (error) {
-    if (error.kind === "ObjectId") {
-      return res.status(404).json({
-        success: false,
-        message: "Ticket assignment not found",
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Error accepting ticket assignment",
-      error: error.message,
-    });
-  }
-};
-
 // @desc    Reassign ticket
 // @route   POST /api/ticket-assignments/:id/reassign
 // @access  Public
@@ -510,7 +432,7 @@ const reassignTicket = async (req, res) => {
         newTeamName: populatedAssignment.assignedToTeam?.teamName || "N/A",
         reassignedBy: `${consultantExists.firstName} ${consultantExists.lastName}`,
         recipients: [
-          { userId: populatedAssignment.assignedByConsultant._id, userType: "consultant" },
+          { userId: populatedAssignment.assignedByConsultant._id, userType: USER_TYPES.EMPLOYEE },
         ],
       }).catch((err) => console.error("Email notification error:", err.message));
     }
@@ -734,69 +656,6 @@ const getAssignmentsByTeam = async (req, res) => {
   }
 };
 
-// @desc    Get assignments by team member
-// @route   GET /api/ticket-assignments/team-member/:memberId
-// @access  Public
-const getAssignmentsByTeamMember = async (req, res) => {
-  try {
-    const { memberId } = req.params;
-    const { isCurrent, page = 1, limit = 10 } = req.query;
-
-    // Verify team member exists
-    const member = await TeamMember.findById(memberId);
-    if (!member) {
-      return res.status(404).json({
-        success: false,
-        message: "Team member not found",
-      });
-    }
-
-    const query = { acceptedBy: memberId };
-
-    if (isCurrent !== undefined) {
-      query.isCurrent = isCurrent === "true";
-    }
-
-    const skip = (page - 1) * limit;
-
-    const assignments = await TicketAssignment.find(query)
-      .populate("ticket", "ticketNumber subject status priority")
-      .populate("assignedToTeam", "teamName")
-      .populate("assignedByConsultant", "firstName lastName")
-      .sort({ acceptedAt: -1 })
-      .limit(parseInt(limit))
-      .skip(skip);
-
-    const total = await TicketAssignment.countDocuments(query);
-
-    res.status(200).json({
-      success: true,
-      count: assignments.length,
-      total,
-      page: parseInt(page),
-      pages: Math.ceil(total / limit),
-      teamMember: {
-        id: member._id,
-        name: member.fullName,
-      },
-      data: assignments,
-    });
-  } catch (error) {
-    if (error.kind === "ObjectId") {
-      return res.status(404).json({
-        success: false,
-        message: "Team member not found",
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Error fetching team member assignments",
-      error: error.message,
-    });
-  }
-};
-
 // @desc    Assign ticket to multiple consultants
 // @route   POST /api/ticket-assignments/:id/assign-consultants
 // @access  Public
@@ -874,7 +733,7 @@ const assignToMultipleConsultants = async (req, res) => {
           ticketNumber: populatedAssignment.ticket.ticketNumber,
           subject: populatedAssignment.ticket.subject,
           assignee: consultantDoc,
-          recipients: [{ userId: consultantDoc._id, userType: "consultant" }],
+          recipients: [{ userId: consultantDoc._id, userType: USER_TYPES.EMPLOYEE }],
         }).catch((err) => console.error("Consultant assignment email error:", err.message));
       }
     }
@@ -1377,12 +1236,10 @@ export {
   getAssignmentHistoryForTicket,
   createTicketAssignment,
   updateTicketAssignment,
-  acceptTicketAssignment,
   reassignTicket,
   deleteTicketAssignment,
   getTicketAssignmentStats,
   getAssignmentsByTeam,
-  getAssignmentsByTeamMember,
   assignToMultipleConsultants,
   reassignConsultants,
   updateConsultantAssignmentStatus,

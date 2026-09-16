@@ -7,7 +7,7 @@ import {
   addHolidaysBulk,
   deleteHoliday,
 } from "../controllers/workingHoursController.js";
-import { protect, authorizeRole } from "../middleware/authMiddleware.js";
+import { protect, requireAdmin, requireModule } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -15,26 +15,16 @@ const router = express.Router();
 router
   .route("/")
   .get(protect, getWorkingHours)
-  .put(protect, authorizeRole("admin", "senior_consultant"), updateWorkingHours);
+  .put(protect, requireAdmin, updateWorkingHours);
 
 // Holidays — bulk must come before /:id
-router.post(
-  "/holidays/bulk",
-  protect,
-  authorizeRole("admin", "senior_consultant", "consultant"),
-  addHolidaysBulk
-);
+router.post("/holidays/bulk", protect, requireModule("tickets"), addHolidaysBulk);
 
 router
   .route("/holidays")
   .get(protect, getHolidays)
-  .post(protect, authorizeRole("admin", "senior_consultant", "consultant"), addHoliday);
+  .post(protect, requireModule("tickets"), addHoliday);
 
-router.delete(
-  "/holidays/:id",
-  protect,
-  authorizeRole("admin", "senior_consultant", "consultant"),
-  deleteHoliday
-);
+router.delete("/holidays/:id", protect, requireModule("tickets"), deleteHoliday);
 
 export default router;

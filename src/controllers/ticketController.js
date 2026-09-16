@@ -1,13 +1,13 @@
 import Ticket from "../models/Ticket.js";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
-import TeamMember from "../models/TeamMember.js";
 import TicketComment from "../models/TicketComment.js";
 import { notifyAndEmail } from "../utils/emailHelper.js";
 import WorkingHours from "../models/WorkingHours.js";
 import Holiday from "../models/Holiday.js";
 import { getEstimationStartDate, addWorkingDays } from "../utils/estimationUtils.js";
 
+import { USER_TYPES, isEmployee, isAdmin } from "../utils/access.js";
 // Load working-hours config + holidays, auto-create defaults if missing
 const loadEstimationConfig = async () => {
   let config = await WorkingHours.findOne().lean();
@@ -49,8 +49,7 @@ const calcEstimation = async (customerId, createdAt) => {
 
 // New tickets always take their date from setup, so the only way a ticket's data
 // entry date can move afterwards is an admin correcting it on update.
-const canSetEntryDate = (req) =>
-  req.userType === "consultant" && req.user?.role === "admin";
+const canSetEntryDate = (req) => isEmployee(req) && isAdmin(req.user);
 
 // Resolve the timestamp a new ticket is recorded with. Admins set a single
 // "data entry date" in Working Hours Setup so entry stays daily rather than
@@ -93,12 +92,9 @@ const populateCommentBy = async (comment) => {
     commentBy = await Customer.findById(comment.commentByUserId).select(
       "companyName email contactPerson"
     );
-  } else if (comment.commentByUserType === "consultant") {
+  } else if (comment.commentByUserType) {
+    // Every non-customer author is an employee (old rows still say "consultant")
     commentBy = await Consultant.findById(comment.commentByUserId).select(
-      "firstName lastName email"
-    );
-  } else if (comment.commentByUserType === "team_member") {
-    commentBy = await TeamMember.findById(comment.commentByUserId).select(
       "firstName lastName email"
     );
   }
@@ -613,14 +609,14 @@ const createTicket = async (req, res) => {
       scope: Array.isArray(scope) ? scope : scope ? [scope] : [],
       source,
       notifyEmails: Array.isArray(notifyEmails) ? notifyEmails : [],
-      internalDeliveryDate: req.userType === "consultant" ? internalDeliveryDate : undefined,
-      scheduledWeek: req.userType === "consultant" ? scheduledWeek : undefined,
-      durationHours: req.userType === "consultant" ? durationHours : undefined,
+      internalDeliveryDate: isEmployee(req) ? internalDeliveryDate : undefined,
+      scheduledWeek: isEmployee(req) ? scheduledWeek : undefined,
+      durationHours: isEmployee(req) ? durationHours : undefined,
       estimationStartDate: estimation.estimationStartDate,
       deliveryEstimationDate: estimation.deliveryEstimationDate,
       estimationDays: estimation.estimationDays,
       createdByType: req.userType,
-      createdByConsultant: req.userType === "consultant" ? req.user._id : undefined,
+      createdByConsultant: isEmployee(req) ? req.user._id : undefined,
     });
 
     // Mongoose timestamps keep an explicit createdAt, but fall back to the driver
@@ -785,7 +781,7 @@ const updateTicket = async (req, res) => {
     }
 
     // Track who performed this update / resolution / closure (consultants only)
-    const actingConsultantId = req.userType === "consultant" ? req.user._id : null;
+    const actingConsultantId = isEmployee(req) ? req.user._id : null;
     if (actingConsultantId) {
       updateData.updatedBy = actingConsultantId;
     }
@@ -857,13 +853,13 @@ const updateTicket = async (req, res) => {
         recipients.push({ userId: ticket.customer._id, userType: "customer" });
       }
       if (ticket.assignedBy?._id) {
-        recipients.push({ userId: ticket.assignedBy._id, userType: "consultant" });
+        recipients.push({ userId: ticket.assignedBy._id, userType: USER_TYPES.EMPLOYEE });
       }
       if (
         ticket.acceptedBy?._id &&
         ticket.acceptedBy._id.toString() !== ticket.assignedBy?._id?.toString()
       ) {
-        recipients.push({ userId: ticket.acceptedBy._id, userType: "consultant" });
+        recipients.push({ userId: ticket.acceptedBy._id, userType: USER_TYPES.EMPLOYEE });
       }
 
       const assignee = ticket.acceptedBy || ticket.assignedBy || null;
@@ -982,7 +978,7 @@ const updateTicketStatus = async (req, res) => {
     const updateData = { status };
 
     // Track who performed this status change / resolution / closure (consultants only)
-    const actingConsultantId = req.userType === "consultant" ? req.user._id : null;
+    const actingConsultantId = isEmployee(req) ? req.user._id : null;
     if (actingConsultantId) {
       updateData.updatedBy = actingConsultantId;
     }
@@ -1025,13 +1021,13 @@ const updateTicketStatus = async (req, res) => {
       recipients.push({ userId: ticket.customer._id, userType: "customer" });
     }
     if (ticket.assignedBy?._id) {
-      recipients.push({ userId: ticket.assignedBy._id, userType: "consultant" });
+      recipients.push({ userId: ticket.assignedBy._id, userType: USER_TYPES.EMPLOYEE });
     }
     if (
       ticket.acceptedBy?._id &&
       ticket.acceptedBy._id.toString() !== ticket.assignedBy?._id?.toString()
     ) {
-      recipients.push({ userId: ticket.acceptedBy._id, userType: "consultant" });
+      recipients.push({ userId: ticket.acceptedBy._id, userType: USER_TYPES.EMPLOYEE });
     }
 
     const assignee = ticket.acceptedBy || ticket.assignedBy || null;
@@ -1143,7 +1139,7 @@ const assignTicket = async (req, res) => {
         subject: ticket.subject,
         assignee: ticket.assignedBy,
         recipients: [
-          { userId: ticket.assignedBy._id, userType: "consultant" },
+          { userId: ticket.assignedBy._id, userType: USER_TYPES.EMPLOYEE },
         ],
       }).catch((err) => console.error("Email notification error:", err.message));
     }
@@ -1671,7 +1667,7 @@ const createSubTicket = async (req, res) => {
         subject: populatedSubTicket.subject,
         assignee: populatedSubTicket.assignedBy,
         recipients: [
-          { userId: populatedSubTicket.assignedBy._id, userType: "consultant" },
+          { userId: populatedSubTicket.assignedBy._id, userType: USER_TYPES.EMPLOYEE },
         ],
       }).catch((err) => console.error("Sub-ticket assignment email error:", err.message));
     }

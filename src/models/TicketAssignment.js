@@ -56,7 +56,7 @@ const ticketAssignmentSchema = mongoose.Schema(
     },
     acceptedBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "TeamMember",
+      ref: "Consultant",
     },
     isCurrent: {
       type: Boolean,

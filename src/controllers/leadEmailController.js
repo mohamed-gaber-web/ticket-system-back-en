@@ -71,7 +71,7 @@ const senderIdentity = (req) => {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email;
   return {
     sentBy: user._id,
-    sentByType: userType === "consultant" ? "Consultant" : "TeleSalesAgent",
+    sentByType: "Consultant",
     sentByName: name,
     sentByEmail: user.email,
   };

@@ -1,13 +1,38 @@
 import Consultant from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
 import { sendConsultantWelcomeEmail } from "../utils/emailService.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
+import {
+  ROLES,
+  MODULES,
+  ROLE_DEFAULT_MODULES,
+  isAdmin,
+  roleFamily,
+  familyRoles,
+  canManageEmployee,
+  assignableRoles,
+  emailTakenElsewhere,
+  EMAIL_TAKEN_MESSAGE,
+} from "../utils/access.js";
+
+const EMPLOYEE_SELECT = "-password -refreshToken -resetPasswordToken -resetPasswordExpire";
+
+const populateEmployee = (q) =>
+  q.populate("department", "name").populate("teleSalesTeam", "name code isActive");
+
+// Out-of-scope employees answer 404, never 403 — a manager must not be able to
+// confirm which ids belong to people outside their family.
+const notFound = (res) => res.status(404).json({ success: false, message: "Employee not found" });
+
+const validModules = (modules) =>
+  Array.isArray(modules) ? modules.filter((m) => MODULES.includes(m)) : [];
 
 // @desc    Get all consultants
 // @route   GET /api/consultants
 // @access  Public
 const getAllConsultants = async (req, res) => {
   try {
-    const { status, role, page = 1, limit = 10, search } = req.query;
+    const { status, role, family, module, teleSalesTeam, page = 1, limit = 10, search } = req.query;
 
     const query = {};
 
@@ -15,23 +40,47 @@ const getAllConsultants = async (req, res) => {
       query.status = status;
     }
 
+    // `role` narrows to one role, `family` to a whole family (sales + sales_manager)
     if (role) {
       query.role = role;
+    } else if (family) {
+      query.role = { $in: familyRoles(family) };
+    }
+
+    // Employees who can open a module — either by override or by role default
+    if (module && MODULES.includes(module)) {
+      const byDefault = ROLES.filter((r) =>
+        r === "admin" ? true : (ROLE_DEFAULT_MODULES[r] ?? []).includes(module)
+      );
+      query.$and = [
+        {
+          $or: [
+            { modules: module },
+            { modules: { $size: 0 }, role: { $in: byDefault } },
+            { modules: { $exists: false }, role: { $in: byDefault } },
+            { role: "admin" },
+          ],
+        },
+      ];
+    }
+
+    if (teleSalesTeam) {
+      query.teleSalesTeam = teleSalesTeam;
     }
 
     if (search) {
+      const safe = escapeRegex(search);
       query.$or = [
-        { firstName: { $regex: search, $options: "i" } },
-        { lastName: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
+        { firstName: { $regex: safe, $options: "i" } },
+        { lastName: { $regex: safe, $options: "i" } },
+        { email: { $regex: safe, $options: "i" } },
       ];
     }
 
     const skip = (page - 1) * limit;
 
-    const consultants = await Consultant.find(query)
-      .select("-password -refreshToken")
-      .populate("department", "name")
+    const consultants = await populateEmployee(Consultant.find(query))
+      .select(EMPLOYEE_SELECT)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -60,9 +109,8 @@ const getAllConsultants = async (req, res) => {
 // @access  Public
 const getConsultantById = async (req, res) => {
   try {
-    const consultant = await Consultant.findById(req.params.id)
-      .select("-password -refreshToken")
-      .populate("department", "name")
+    const consultant = await populateEmployee(Consultant.findById(req.params.id))
+      .select(EMPLOYEE_SELECT)
       .populate({
         path: "assignments",
         select: "title status priority createdAt",
@@ -94,9 +142,9 @@ const getConsultantById = async (req, res) => {
   }
 };
 
-// @desc    Create new consultant
+// @desc    Create new employee
 // @route   POST /api/consultants
-// @access  Public
+// @access  Private (admin: any role; manager: plain employees of their own family)
 const createConsultant = async (req, res) => {
   try {
     const {
@@ -106,19 +154,29 @@ const createConsultant = async (req, res) => {
       phone,
       position,
       password,
-      role,
       status,
       monthlyTargetHours,
       department,
       profilePicture,
+      teleSalesTeam,
+      modules,
     } = req.body;
 
-    const consultantExists = await Consultant.findOne({ email });
+    // A manager may only mint the plain role of their own family; an admin any role.
+    const allowed = assignableRoles(req.user);
+    const role = req.body.role || (isAdmin(req.user) ? "consultant" : allowed[0]);
+    if (!allowed.includes(role)) {
+      return res.status(403).json({
+        success: false,
+        message: `You may only create employees with role: ${allowed.join(", ")}`,
+      });
+    }
 
-    if (consultantExists) {
+    const consultantExists = await Consultant.findOne({ email });
+    if (consultantExists || (await emailTakenElsewhere(email, Consultant))) {
       return res.status(400).json({
         success: false,
-        message: "Consultant with this email already exists",
+        message: EMAIL_TAKEN_MESSAGE,
       });
     }
 
@@ -132,13 +190,17 @@ const createConsultant = async (req, res) => {
       role,
       status,
       monthlyTargetHours: monthlyTargetHours ?? null,
+      // Sales and marketing departments are derived from the role in the model;
+      // an explicit department only applies to consultants and admins.
       ...(department && { department }),
       ...(profilePicture !== undefined && { profilePicture }),
+      ...(roleFamily(role) === "sales" && teleSalesTeam !== undefined && { teleSalesTeam: teleSalesTeam || null }),
+      // Module overrides are the admin's alone
+      ...(isAdmin(req.user) && modules !== undefined && { modules: validModules(modules) }),
     });
 
-    const consultantResponse = await Consultant.findById(consultant._id)
-      .select("-password -refreshToken")
-      .populate("department", "name");
+    const consultantResponse = await populateEmployee(Consultant.findById(consultant._id))
+      .select(EMPLOYEE_SELECT);
 
     sendConsultantWelcomeEmail(consultant).catch((err) =>
       console.error("Consultant welcome email error:", err.message)
@@ -167,9 +229,9 @@ const createConsultant = async (req, res) => {
   }
 };
 
-// @desc    Update consultant
+// @desc    Update employee
 // @route   PUT /api/consultants/:id
-// @access  Public
+// @access  Private (admin: anyone; manager: plain employees of their own family)
 const updateConsultant = async (req, res) => {
   try {
     const {
@@ -183,51 +245,63 @@ const updateConsultant = async (req, res) => {
       monthlyTargetHours,
       department,
       profilePicture,
+      teleSalesTeam,
+      modules,
     } = req.body;
 
-    let consultant = await Consultant.findById(req.params.id);
+    const consultant = await Consultant.findById(req.params.id);
 
-    if (!consultant) {
-      return res.status(404).json({
+    if (!consultant || !canManageEmployee(req.user, consultant)) {
+      return notFound(res);
+    }
+
+    if (role !== undefined && role !== consultant.role && !assignableRoles(req.user).includes(role)) {
+      return res.status(403).json({
         success: false,
-        message: "Consultant not found",
+        message: `You may only assign role: ${assignableRoles(req.user).join(", ")}`,
       });
     }
 
     if (email && email !== consultant.email) {
       const emailExists = await Consultant.findOne({ email });
-      if (emailExists) {
+      if (emailExists || (await emailTakenElsewhere(email, Consultant))) {
         return res.status(400).json({
           success: false,
-          message: "Email already in use by another consultant",
+          message: EMAIL_TAKEN_MESSAGE,
         });
       }
     }
 
-    consultant = await Consultant.findByIdAndUpdate(
-      req.params.id,
-      {
-        firstName,
-        lastName,
-        email,
-        phone,
-        position,
-        role,
-        status,
-        ...(monthlyTargetHours !== undefined && { monthlyTargetHours: monthlyTargetHours ?? null }),
-        ...(department !== undefined && { department: department || null }),
-        ...(profilePicture !== undefined && { profilePicture: profilePicture || null }),
-      },
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).select("-password -refreshToken").populate("department", "name");
+    const nextRole = role ?? consultant.role;
+    const updates = {
+      firstName,
+      lastName,
+      email,
+      phone,
+      position,
+      role,
+      status,
+      ...(monthlyTargetHours !== undefined && { monthlyTargetHours: monthlyTargetHours ?? null }),
+      ...(department !== undefined && { department: department || null }),
+      ...(profilePicture !== undefined && { profilePicture: profilePicture || null }),
+      // The team only means something for the sales family; anyone else is cleared
+      ...(roleFamily(nextRole) === "sales"
+        ? teleSalesTeam !== undefined && { teleSalesTeam: teleSalesTeam || null }
+        : { teleSalesTeam: null }),
+      ...(isAdmin(req.user) && modules !== undefined && { modules: validModules(modules) }),
+    };
+    Object.keys(updates).forEach((k) => updates[k] === undefined && delete updates[k]);
+
+    // save() rather than findByIdAndUpdate so the role→department sync hook runs
+    consultant.set(updates);
+    await consultant.save();
+
+    const updated = await populateEmployee(Consultant.findById(consultant._id)).select(EMPLOYEE_SELECT);
 
     res.status(200).json({
       success: true,
-      message: "Consultant updated successfully",
-      data: consultant,
+      message: "Employee updated successfully",
+      data: updated,
     });
   } catch (error) {
     if (error.kind === "ObjectId") {
@@ -356,11 +430,8 @@ const updateConsultantPassword = async (req, res) => {
 
     const consultant = await Consultant.findById(req.params.id);
 
-    if (!consultant) {
-      return res.status(404).json({
-        success: false,
-        message: "Consultant not found",
-      });
+    if (!consultant || !canManageEmployee(req.user, consultant)) {
+      return notFound(res);
     }
 
     consultant.password = newPassword;

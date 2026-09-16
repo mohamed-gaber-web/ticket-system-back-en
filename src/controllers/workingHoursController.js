@@ -1,6 +1,7 @@
 import WorkingHours from "../models/WorkingHours.js";
 import Holiday from "../models/Holiday.js";
 
+import { isEmployee, isAdmin } from "../utils/access.js";
 // ─── Working Hours Config ────────────────────────────────────────────────────
 
 // @desc    Get working hours config
@@ -24,7 +25,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // @desc    Update working hours config
 // @route   PUT /api/working-hours
-// @access  Private (admin / senior_consultant)
+// @access  Private (admin / ticketing employees)
 const updateWorkingHours = async (req, res) => {
   try {
     const {
@@ -45,7 +46,7 @@ const updateWorkingHours = async (req, res) => {
     // The data entry date decides which day new tickets are recorded on, so it is
     // admin-only — senior consultants may edit the rest of this config but not this.
     if (dataEntryDate !== undefined) {
-      if (req.userType !== "consultant" || req.user?.role !== "admin") {
+      if (!isEmployee(req) || !isAdmin(req.user)) {
         return res.status(403).json({
           success: false,
           message: "Only admins can set the data entry date",
@@ -164,7 +165,7 @@ const getHolidays = async (req, res) => {
 
 // @desc    Add a single holiday
 // @route   POST /api/working-hours/holidays
-// @access  Private (admin / senior_consultant)
+// @access  Private (admin / ticketing employees)
 const addHoliday = async (req, res) => {
   try {
     const { date, description } = req.body;
@@ -195,7 +196,7 @@ const addHoliday = async (req, res) => {
 
 // @desc    Bulk add holidays
 // @route   POST /api/working-hours/holidays/bulk
-// @access  Private (admin / senior_consultant)
+// @access  Private (admin / ticketing employees)
 const addHolidaysBulk = async (req, res) => {
   try {
     const { holidays } = req.body;
@@ -232,7 +233,7 @@ const addHolidaysBulk = async (req, res) => {
 
 // @desc    Delete a holiday
 // @route   DELETE /api/working-hours/holidays/:id
-// @access  Private (admin / senior_consultant)
+// @access  Private (admin / ticketing employees)
 const deleteHoliday = async (req, res) => {
   try {
     const holiday = await Holiday.findByIdAndDelete(req.params.id);

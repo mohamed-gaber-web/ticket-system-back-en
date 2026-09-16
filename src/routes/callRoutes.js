@@ -1,9 +1,9 @@
 import express from "express";
 import { getRecentCalls } from "../controllers/callLogController.js";
-import { protect, authorizeTeleSalesAccess } from "../middleware/authMiddleware.js";
+import { protect, requireModule } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.get("/recent", protect, authorizeTeleSalesAccess, getRecentCalls);
+router.get("/recent", protect, requireModule("telesales"), getRecentCalls);
 
 export default router;

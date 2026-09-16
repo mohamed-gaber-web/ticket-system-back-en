@@ -4,12 +4,12 @@ import {
   getKpiSettings,
   updateKpiSettings,
 } from "../controllers/kpiController.js";
-import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
+import { protect, requireEmployee, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-const consultantAuth = [protect, authorize("consultant")];
-const adminAuth = [protect, authorize("consultant"), authorizeRole("admin")];
+const consultantAuth = [protect, requireEmployee];
+const adminAuth = [protect, requireAdmin];
 
 router.get("/consultant/:id", ...consultantAuth, getConsultantKpi);
 router.get("/settings", ...consultantAuth, getKpiSettings);

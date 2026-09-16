@@ -1,25 +1,57 @@
 import crypto from "crypto";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
-import TeamMember from "../models/TeamMember.js";
-import TeleSalesAgent from "../models/TeleSalesAgent.js";
 import { sendTokenResponse, generateResetToken } from "../utils/jwtUtils.js";
 import { sendPasswordResetEmail } from "../utils/emailService.js";
+import {
+  USER_TYPES,
+  normalizeUserType,
+  isValidUserType,
+  modelForUserType,
+  effectiveModules,
+  emailTakenElsewhere,
+  EMAIL_TAKEN_MESSAGE,
+} from "../utils/access.js";
 
-// Helper function to get user model based on userType
-const getUserModel = (userType) => {
-  switch (userType) {
-    case "customer":
-      return Customer;
-    case "consultant":
-      return Consultant;
-    case "team_member":
-      return TeamMember;
-    case "tele_sales":
-      return TeleSalesAgent;
-    default:
-      return null;
+const getUserModel = modelForUserType;
+
+const INVALID_USER_TYPE = "Invalid user type. Must be: employee or customer";
+
+/**
+ * Login is by e-mail alone: employees are looked up first, then customers. A
+ * client may still name a userType (older builds do), in which case only that
+ * collection is searched. Returns `{ user, userType }` or nulls.
+ */
+const findAccountByEmail = async (email, requestedType, select = "") => {
+  const order = requestedType
+    ? [normalizeUserType(requestedType)]
+    : [USER_TYPES.EMPLOYEE, USER_TYPES.CUSTOMER];
+  for (const userType of order) {
+    const Model = getUserModel(userType);
+    if (!Model) continue;
+    const user = await Model.findOne({ email }).select(select);
+    if (user) return { user, userType };
   }
+  return { user: null, userType: null };
+};
+
+// What the client needs alongside the bare document to render the session.
+const populateForSession = async (user, userType) => {
+  if (userType === USER_TYPES.EMPLOYEE) {
+    if (user.department) await user.populate("department", "name isActive");
+    // The tele-sales team has to arrive populated, or the UI cannot name the
+    // pipeline it is showing — it would only have a bare id to work with.
+    if (user.teleSalesTeam) await user.populate("teleSalesTeam", "name code isActive");
+  }
+  return user;
+};
+
+// Employees also get their resolved module list, so no client ever has to
+// re-derive the role defaults.
+const withModules = (user, userType) => {
+  const plain = user.toObject ? user.toObject() : { ...user };
+  if (userType === USER_TYPES.EMPLOYEE) plain.modules = effectiveModules(user);
+  return plain;
 };
 
 // @desc    Sign up / Register new user
@@ -39,12 +71,12 @@ export const signup = async (req, res) => {
 
     const Model = getUserModel(userType);
 
-    // Check if user already exists
+    // Check if user already exists — in either collection, since login is by e-mail
     const existingUser = await Model.findOne({ email: userData.email });
-    if (existingUser) {
+    if (existingUser || (await emailTakenElsewhere(userData.email, Model))) {
       return res.status(400).json({
         success: false,
-        message: "User with this email already exists",
+        message: EMAIL_TAKEN_MESSAGE,
       });
     }
 
@@ -76,29 +108,25 @@ export const signup = async (req, res) => {
 // @access  Public
 export const signin = async (req, res) => {
   try {
-    const { email, password, userType } = req.body;
+    const { email, password, userType: requestedType } = req.body;
 
-    // Validate input
-    if (!email || !password || !userType) {
+    // Validate input — userType is optional, the e-mail decides
+    if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: "Please provide email, password, and user type",
+        message: "Please provide email and password",
       });
     }
 
-    // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
-    if (!validUserTypes.includes(userType)) {
+    if (requestedType && !isValidUserType(normalizeUserType(requestedType))) {
       return res.status(400).json({
         success: false,
-        message: "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
+        message: INVALID_USER_TYPE,
       });
     }
-
-    const Model = getUserModel(userType);
 
     // Find user and include password
-    const user = await Model.findOne({ email }).select("+password");
+    const { user, userType } = await findAccountByEmail(email, requestedType, "+password");
 
     if (!user || !user.password) {
       return res.status(401).json({
@@ -128,23 +156,10 @@ export const signin = async (req, res) => {
     // Update last login
     await user.updateLastLogin();
 
-    // Populate department for consultants
-    if (userType === "consultant" && user.department) {
-      await user.populate("department", "name isActive");
-    }
-
-    // Populate the tele-sales team so the client can name the team whose pipeline
-    // it is showing. Without this the token payload carries a bare ObjectId and
-    // every team label in the UI falls back to a placeholder.
-    if (userType === "tele_sales" && user.team) {
-      await user.populate("team", "name code isActive");
-    }
-    if (userType === "consultant" && user.teleSalesTeam) {
-      await user.populate("teleSalesTeam", "name code isActive");
-    }
+    await populateForSession(user, userType);
 
     // Send token response
-    return sendTokenResponse(user, 200, res, userType);
+    return sendTokenResponse(user, 200, res, userType, withModules(user, userType));
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -193,33 +208,22 @@ export const getProfile = async (req, res) => {
     const Model = getUserModel(req.userType);
 
     let user;
-    if (req.userType === "team_member") {
-      user = await Model.findById(req.user._id).populate(
-        "team",
-        "teamName department specialization"
-      );
-    } else if (req.userType === "customer") {
+    if (req.userType === USER_TYPES.CUSTOMER) {
       user = await Model.findById(req.user._id).populate(
         "slaMapping",
         "name responseTime resolutionTime"
       );
-    } else if (req.userType === "consultant") {
+    } else {
       user = await Model.findById(req.user._id)
         .populate("department", "name isActive")
-        // Sales-department consultants are scoped to one tele-sales team.
+        // Sales employees are scoped to one tele-sales team.
         .populate("teleSalesTeam", "name code isActive");
-    } else if (req.userType === "tele_sales") {
-      // The team has to arrive populated, or the UI cannot name the pipeline it
-      // is showing — it would only have a bare id to work with.
-      user = await Model.findById(req.user._id).populate("team", "name code isActive");
-    } else {
-      user = await Model.findById(req.user._id);
     }
 
     res.status(200).json({
       success: true,
       userType: req.userType,
-      data: user,
+      data: withModules(user, req.userType),
     });
   } catch (error) {
     res.status(500).json({
@@ -238,7 +242,18 @@ export const updateProfile = async (req, res) => {
     const Model = getUserModel(req.userType);
 
     // Fields that cannot be updated via this route
-    const restrictedFields = ["password", "email", "role", "status", "refreshToken"];
+    // role/modules/department/team are the admin's to set, never the owner's
+    const restrictedFields = [
+      "password",
+      "email",
+      "role",
+      "status",
+      "refreshToken",
+      "modules",
+      "department",
+      "teleSalesTeam",
+      "company",
+    ];
     const updateData = { ...req.body };
 
     // Remove restricted fields
@@ -338,28 +353,23 @@ export const changePassword = async (req, res) => {
 // @access  Public
 export const forgotPassword = async (req, res) => {
   try {
-    const { email, userType } = req.body;
+    const { email, userType: requestedType } = req.body;
 
-    if (!email || !userType) {
+    if (!email) {
       return res.status(400).json({
         success: false,
-        message: "Please provide email and user type",
+        message: "Please provide an email",
       });
     }
 
-    // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
-    if (!validUserTypes.includes(userType)) {
+    if (requestedType && !isValidUserType(normalizeUserType(requestedType))) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
+        message: INVALID_USER_TYPE,
       });
     }
 
-    const Model = getUserModel(userType);
-
-    const user = await Model.findOne({ email });
+    const { user, userType } = await findAccountByEmail(email, requestedType);
 
     if (!user) {
       return res.status(404).json({
@@ -410,8 +420,9 @@ export const forgotPassword = async (req, res) => {
 // @access  Public
 export const resetPassword = async (req, res) => {
   try {
-    const { newPassword, userType } = req.body;
+    const { newPassword, userType: requestedType } = req.body;
     const { resetToken } = req.params;
+    const userType = normalizeUserType(requestedType);
 
     if (!newPassword || !userType) {
       return res.status(400).json({
@@ -427,13 +438,10 @@ export const resetPassword = async (req, res) => {
       });
     }
 
-    // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
-    if (!validUserTypes.includes(userType)) {
+    if (!isValidUserType(userType)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid user type. Must be: customer, consultant, team_member, or tele_sales",
+        message: INVALID_USER_TYPE,
       });
     }
 
@@ -483,28 +491,35 @@ export const resetPassword = async (req, res) => {
 // @access  Public
 export const refreshToken = async (req, res) => {
   try {
-    const { refreshToken, userType } = req.body;
+    const { refreshToken, userType: requestedType } = req.body;
 
-    if (!refreshToken || !userType) {
+    if (!refreshToken) {
       return res.status(400).json({
         success: false,
-        message: "Please provide refresh token and user type",
+        message: "Please provide refresh token",
       });
     }
 
-    // Validate userType
-    const validUserTypes = ["customer", "consultant", "team_member", "tele_sales"];
-    if (!validUserTypes.includes(userType)) {
+    if (requestedType && !isValidUserType(normalizeUserType(requestedType))) {
       return res.status(400).json({
         success: false,
-        message: "Invalid user type",
+        message: INVALID_USER_TYPE,
       });
     }
 
-    const Model = getUserModel(userType);
-
-    // Find user with refresh token
-    const user = await Model.findOne({ refreshToken }).select("+refreshToken");
+    // Find the session in whichever collection holds it
+    const order = requestedType
+      ? [normalizeUserType(requestedType)]
+      : [USER_TYPES.EMPLOYEE, USER_TYPES.CUSTOMER];
+    let user = null;
+    let userType = null;
+    for (const type of order) {
+      user = await getUserModel(type).findOne({ refreshToken }).select("+refreshToken");
+      if (user) {
+        userType = type;
+        break;
+      }
+    }
 
     if (!user) {
       return res.status(401).json({
@@ -513,19 +528,13 @@ export const refreshToken = async (req, res) => {
       });
     }
 
-    // A refresh replaces the stored user in the client, so the tele-sales team has
-    // to come back populated here too — otherwise every team label in the UI
+    // A refresh replaces the stored user in the client, so department and team
+    // have to come back populated here too — otherwise every label in the UI
     // degrades to a placeholder the moment a session is refreshed.
-    if (userType === "tele_sales" && user.team) {
-      await user.populate("team", "name code isActive");
-    }
-    if (userType === "consultant") {
-      if (user.department) await user.populate("department", "name isActive");
-      if (user.teleSalesTeam) await user.populate("teleSalesTeam", "name code isActive");
-    }
+    await populateForSession(user, userType);
 
     // Send new token response
-    return sendTokenResponse(user, 200, res, userType);
+    return sendTokenResponse(user, 200, res, userType, withModules(user, userType));
   } catch (error) {
     res.status(500).json({
       success: false,

@@ -1,6 +1,7 @@
 import Customer from "../models/Customer.js";
 import { sendWelcomeEmail } from "../utils/emailService.js";
 
+import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
 // @desc    Get all users in the company admin's company
 // @route   GET /api/company-users
 // @access  company_admin customer
@@ -88,11 +89,12 @@ const createCompanyUser = async (req, res) => {
       });
     }
 
+    // Login is by e-mail alone, so the address must be free in both collections
     const emailExists = await Customer.findOne({ email });
-    if (emailExists) {
+    if (emailExists || (await emailTakenElsewhere(email, Customer))) {
       return res.status(400).json({
         success: false,
-        message: "A user with this email already exists",
+        message: EMAIL_TAKEN_MESSAGE,
       });
     }
 

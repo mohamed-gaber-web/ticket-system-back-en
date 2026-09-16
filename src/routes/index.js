@@ -4,13 +4,11 @@ import customerRoutes from "./customerRoutes.js";
 import slaRoutes from "./slaRoutes.js";
 import consultantRoutes from "./consultantRoutes.js";
 import ticketRoutes from "./ticketRoutes.js";
-import teamMemberRoutes from "./teamMemberRoutes.js";
 import ticketAssignmentRoutes from "./ticketAssignmentRoutes.js";
 import ticketCommentRoutes from "./ticketCommentRoutes.js";
 import ticketAttachmentRoutes from "./ticketAttachmentRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import ticketStatusHistoryRoutes from "./ticketStatusHistoryRoutes.js";
-import teamRoutes from "./teamRoutes.js";
 import categoryRoutes from "./categoryRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
 import environmentRoutes from "./environmentRoutes.js";
@@ -64,12 +62,6 @@ router.use("/consultants", consultantRoutes);
 
 // Ticket routes
 router.use("/tickets", ticketRoutes);
-
-// Team routes
-router.use("/teams", teamRoutes);
-
-// Team Member routes
-router.use("/team-members", teamMemberRoutes);
 
 // Ticket Assignment routes
 router.use("/ticket-assignments", ticketAssignmentRoutes);

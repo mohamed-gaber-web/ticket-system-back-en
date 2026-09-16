@@ -1,22 +1,50 @@
-import TeleSalesAgent from "../models/TeleSalesAgent.js";
+import Consultant from "../models/Consltant.js";
 import {
   teamScopeFilter,
   canManageAgent,
   isSuperAdmin,
+  isCrossTeamReader,
   resolveCreateTeam,
   resolveExistingTeam,
   callerTeamId,
 } from "../utils/teleSalesScope.js";
+import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
-// Roles a team manager is allowed to hand out. Promoting someone to super admin is
-// a super admin's decision alone — otherwise a manager could mint an account that
-// sees every other team, which is exactly the boundary this module exists to hold.
-const MANAGER_ASSIGNABLE_ROLES = ["user", "manager"];
+/**
+ * The tele-sales "agents" are simply the employees of the sales family. This
+ * controller is a sales-flavoured window onto the employee collection: it lists
+ * and manages `sales` / `sales_manager` records and speaks the field names the
+ * tele-sales UI expects (`team` rather than `teleSalesTeam`).
+ */
+
+const AGENT_ROLES = ["sales", "sales_manager"];
+
+// Roles a sales manager is allowed to hand out. Creating another manager or an
+// admin is an admin's decision alone — otherwise a manager could mint an account
+// that outranks them.
+const MANAGER_ASSIGNABLE_ROLES = ["sales"];
+
+// Old clients still send the tele-sales role names.
+const LEGACY_ROLE_MAP = { user: "sales", manager: "sales_manager" };
+const normalizeAgentRole = (role) => LEGACY_ROLE_MAP[role] ?? role;
+
+// What the roster screens read from an agent record.
+const AGENT_FIELDS = "firstName lastName email phone role status teleSalesTeam profilePicture lastLogin createdAt updatedAt";
+
+/** Present an employee document the way the tele-sales UI expects it. */
+const toAgent = (doc) => {
+  if (!doc) return doc;
+  const plain = doc.toObject ? doc.toObject({ virtuals: false }) : { ...doc };
+  plain.team = plain.teleSalesTeam ?? null;
+  delete plain.password;
+  delete plain.refreshToken;
+  return plain;
+};
 
 // @desc    Create a new tele sales agent
 // @route   POST /api/tele-sales-agents
-// @access  Private (team manager within their team, or super admin)
+// @access  Private (sales manager, or admin)
 export const createAgent = async (req, res) => {
   try {
     const { firstName, lastName, email, password, phone, role } = req.body;
@@ -28,19 +56,27 @@ export const createAgent = async (req, res) => {
       });
     }
 
-    const requestedRole = role || "user";
+    const requestedRole = normalizeAgentRole(role || "sales");
     if (!isSuperAdmin(req) && !MANAGER_ASSIGNABLE_ROLES.includes(requestedRole)) {
       return res.status(403).json({
         success: false,
-        message: "Only a super admin can create an admin account.",
+        message: "Only an administrator can create a manager or admin account.",
+      });
+    }
+    if (!AGENT_ROLES.includes(requestedRole) && requestedRole !== "admin") {
+      return res.status(400).json({
+        success: false,
+        message: `Role must be one of: ${[...AGENT_ROLES, "admin"].join(", ")}`,
       });
     }
 
-    // A super admin may place the new agent in any team (and must say which,
-    // unless they are creating another super admin, who belongs to none).
-    // A manager always creates inside their own team, whatever the payload says.
+    // A plain agent must sit in a team; a manager or admin works across every
+    // team and may optionally name a home team (the default owner of leads they
+    // create). Either way the team has to be real — a malformed id would surface
+    // as a 500 CastError, and a dangling one would quietly become the default
+    // owner of their new leads.
     let team = null;
-    if (requestedRole !== "admin") {
+    if (requestedRole === "sales") {
       const resolved = resolveCreateTeam(req, req.body.team);
       if (resolved.error) {
         return res.status(400).json({ success: false, message: resolved.error });
@@ -51,10 +87,6 @@ export const createAgent = async (req, res) => {
       }
       team = existing.team;
     } else if (req.body.team) {
-      // Super admins work across every team; an optional home team is still useful
-      // as the default when they create leads. It still has to be a real team —
-      // a malformed id would surface as a 500 CastError, and a well-formed but
-      // dangling one would quietly become the default owner of their new leads.
       const resolved = await resolveExistingTeam(req.body.team);
       if (resolved.error) {
         return res.status(400).json({ success: false, message: resolved.error });
@@ -62,31 +94,26 @@ export const createAgent = async (req, res) => {
       team = resolved.team;
     }
 
-    const existing = await TeleSalesAgent.findOne({ email });
-    if (existing) {
-      return res.status(400).json({
-        success: false,
-        message: "An agent with this email already exists",
-      });
+    const existing = await Consultant.findOne({ email });
+    if (existing || (await emailTakenElsewhere(email, Consultant))) {
+      return res.status(400).json({ success: false, message: EMAIL_TAKEN_MESSAGE });
     }
 
-    const agent = await TeleSalesAgent.create({
+    const agent = await Consultant.create({
       firstName,
       lastName,
       email,
       password,
       phone,
       role: requestedRole,
-      team,
+      teleSalesTeam: team,
+      position: req.body.position || "Tele-sales Agent",
     });
-
-    const agentData = agent.toObject();
-    delete agentData.password;
 
     res.status(201).json({
       success: true,
       message: "Agent created successfully",
-      data: agentData,
+      data: toAgent(agent),
     });
   } catch (error) {
     if (error.name === "ValidationError") {
@@ -102,7 +129,7 @@ export const createAgent = async (req, res) => {
 
 // @desc    Get all tele sales agents
 // @route   GET /api/tele-sales-agents
-// @access  Private (any tele-sales user — the lead screens need the assignee list)
+// @access  Private (anyone in the module — the lead screens need the assignee list)
 //
 // Readable below manager level on purpose: the leads UI has to render "assigned
 // to" names and offer an assignee picker. The team filter still applies, so an
@@ -111,13 +138,19 @@ export const getAllAgents = async (req, res) => {
   try {
     const { status, role, search, team, page = 1, limit = 20 } = req.query;
 
-    const filter = { ...teamScopeFilter(req) };
+    const filter = {
+      ...teamScopeFilter(req, "teleSalesTeam"),
+      role: { $in: AGENT_ROLES },
+    };
 
-    // Only a super admin spans teams, so only they can narrow to a specific one.
-    if (team && isSuperAdmin(req)) filter.team = team;
+    // Only cross-team readers span teams, so only they can narrow to one.
+    if (team && isCrossTeamReader(req)) filter.teleSalesTeam = team;
 
     if (status) filter.status = status;
-    if (role) filter.role = role;
+    if (role) {
+      const wanted = normalizeAgentRole(role);
+      filter.role = AGENT_ROLES.includes(wanted) ? wanted : { $in: [] };
+    }
     if (search) {
       // Escaped so a stray bracket mid-typing is a literal, not an invalid pattern
       // that Mongo rejects and the catch block reports as a 500.
@@ -131,12 +164,13 @@ export const getAllAgents = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [agents, total] = await Promise.all([
-      TeleSalesAgent.find(filter)
-        .populate("team", "name code")
+      Consultant.find(filter)
+        .select(AGENT_FIELDS)
+        .populate("teleSalesTeam", "name code")
         .skip(skip)
         .limit(parseInt(limit))
         .sort({ createdAt: -1 }),
-      TeleSalesAgent.countDocuments(filter),
+      Consultant.countDocuments(filter),
     ]);
 
     res.status(200).json({
@@ -144,7 +178,7 @@ export const getAllAgents = async (req, res) => {
       total,
       page: parseInt(page),
       pages: Math.ceil(total / parseInt(limit)),
-      data: agents,
+      data: agents.map(toAgent),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching agents", error: error.message });
@@ -153,10 +187,12 @@ export const getAllAgents = async (req, res) => {
 
 // @desc    Get single agent by ID
 // @route   GET /api/tele-sales-agents/:id
-// @access  Private (same team, or super admin)
+// @access  Private (same team, or a cross-team reader)
 export const getAgentById = async (req, res) => {
   try {
-    const agent = await TeleSalesAgent.findById(req.params.id).populate("team", "name code");
+    const agent = await Consultant.findOne({ _id: req.params.id, role: { $in: AGENT_ROLES } })
+      .select(AGENT_FIELDS)
+      .populate("teleSalesTeam", "name code");
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
@@ -164,12 +200,13 @@ export const getAgentById = async (req, res) => {
     // An agent on another team answers as if they don't exist — no confirming
     // rival headcount by walking ids.
     const own = callerTeamId(req);
-    const sameTeam = own && agent.team && String(agent.team._id ?? agent.team) === own;
-    if (!isSuperAdmin(req) && !sameTeam) {
+    const agentTeam = agent.teleSalesTeam ? String(agent.teleSalesTeam._id ?? agent.teleSalesTeam) : null;
+    const sameTeam = own && agentTeam === own;
+    if (!isCrossTeamReader(req) && !sameTeam) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    res.status(200).json({ success: true, data: agent });
+    res.status(200).json({ success: true, data: toAgent(agent) });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching agent", error: error.message });
   }
@@ -177,10 +214,10 @@ export const getAgentById = async (req, res) => {
 
 // @desc    Update agent
 // @route   PATCH /api/tele-sales-agents/:id
-// @access  Private (team manager within their team, or super admin)
+// @access  Private (sales manager on plain agents, or admin)
 export const updateAgent = async (req, res) => {
   try {
-    const agent = await TeleSalesAgent.findById(req.params.id);
+    const agent = await Consultant.findOne({ _id: req.params.id, role: { $in: AGENT_ROLES } });
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
@@ -189,49 +226,55 @@ export const updateAgent = async (req, res) => {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    const allowedUpdates = ["firstName", "lastName", "phone", "status", "role"];
-    // Moving an agent between teams is a super admin's call — a manager could
-    // otherwise transfer someone into a team they have no authority over.
-    if (isSuperAdmin(req)) allowedUpdates.push("team");
+    const allowedUpdates = ["firstName", "lastName", "phone", "status", "role", "team"];
 
     const updateData = {};
     allowedUpdates.forEach((field) => {
       if (req.body[field] !== undefined) updateData[field] = req.body[field];
     });
 
-    if (updateData.role && !isSuperAdmin(req) && !MANAGER_ASSIGNABLE_ROLES.includes(updateData.role)) {
-      return res.status(403).json({
-        success: false,
-        message: "Only a super admin can grant admin access.",
-      });
-    }
-
-    // Every non-admin account must sit in a team; an agent with none would see an
-    // empty screen and be unable to work at all.
-    if (updateData.team === null || updateData.team === "") {
-      const effectiveRole = updateData.role || agent.role;
-      if (effectiveRole !== "admin") {
+    if (updateData.role !== undefined) {
+      updateData.role = normalizeAgentRole(updateData.role);
+      if (!isSuperAdmin(req) && !MANAGER_ASSIGNABLE_ROLES.includes(updateData.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only an administrator can grant manager or admin access.",
+        });
+      }
+      if (!AGENT_ROLES.includes(updateData.role) && updateData.role !== "admin") {
         return res.status(400).json({
           success: false,
-          message: "An agent must belong to a team. Choose one, or make the account a super admin.",
+          message: `Role must be one of: ${[...AGENT_ROLES, "admin"].join(", ")}`,
         });
       }
     }
 
-    if (updateData.team) {
+    // Every plain agent must sit in a team; one with none would see an empty
+    // screen and be unable to work at all.
+    if (updateData.team === null || updateData.team === "") {
+      const effectiveRole = updateData.role || agent.role;
+      if (effectiveRole === "sales") {
+        return res.status(400).json({
+          success: false,
+          message: "An agent must belong to a team. Choose one, or make the account a manager.",
+        });
+      }
+      updateData.teleSalesTeam = null;
+    } else if (updateData.team) {
       const existing = await resolveExistingTeam(updateData.team);
       if (existing.error) {
         return res.status(400).json({ success: false, message: existing.error });
       }
-      updateData.team = existing.team;
+      updateData.teleSalesTeam = existing.team;
     }
+    delete updateData.team;
 
-    const updated = await TeleSalesAgent.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
-      runValidators: true,
-    }).populate("team", "name code");
+    // Go through save() so the role→department sync hook runs.
+    Object.assign(agent, updateData);
+    await agent.save();
+    await agent.populate("teleSalesTeam", "name code");
 
-    res.status(200).json({ success: true, message: "Agent updated successfully", data: updated });
+    res.status(200).json({ success: true, message: "Agent updated successfully", data: toAgent(agent) });
   } catch (error) {
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((e) => e.message);
@@ -243,10 +286,10 @@ export const updateAgent = async (req, res) => {
 
 // @desc    Delete agent
 // @route   DELETE /api/tele-sales-agents/:id
-// @access  Private (team manager within their team, or super admin)
+// @access  Private (sales manager on plain agents, or admin)
 export const deleteAgent = async (req, res) => {
   try {
-    const agent = await TeleSalesAgent.findById(req.params.id);
+    const agent = await Consultant.findOne({ _id: req.params.id, role: { $in: AGENT_ROLES } });
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
@@ -264,10 +307,10 @@ export const deleteAgent = async (req, res) => {
 
 // @desc    Toggle agent active/inactive status
 // @route   PATCH /api/tele-sales-agents/:id/toggle-status
-// @access  Private (team manager within their team, or super admin)
+// @access  Private (sales manager on plain agents, or admin)
 export const toggleAgentStatus = async (req, res) => {
   try {
-    const agent = await TeleSalesAgent.findById(req.params.id);
+    const agent = await Consultant.findOne({ _id: req.params.id, role: { $in: AGENT_ROLES } });
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
@@ -282,7 +325,7 @@ export const toggleAgentStatus = async (req, res) => {
     res.status(200).json({
       success: true,
       message: `Agent status changed to ${agent.status}`,
-      data: agent,
+      data: toAgent(agent),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error toggling status", error: error.message });

@@ -6,12 +6,10 @@ import {
   getAssignmentHistoryForTicket,
   createTicketAssignment,
   updateTicketAssignment,
-  acceptTicketAssignment,
   reassignTicket,
   deleteTicketAssignment,
   getTicketAssignmentStats,
   getAssignmentsByTeam,
-  getAssignmentsByTeamMember,
   assignToMultipleConsultants,
   reassignConsultants,
   updateConsultantAssignmentStatus,
@@ -32,7 +30,6 @@ router.get("/weekly-summary", getWeeklySummary);
 router.get("/team/:teamId", getAssignmentsByTeam);
 
 // Get assignments by team member
-router.get("/team-member/:memberId", getAssignmentsByTeamMember);
 
 // Get assignments by consultant
 router.get("/consultant/:consultantId", getAssignmentsByConsultant);
@@ -53,7 +50,6 @@ router
   .delete(deleteTicketAssignment);
 
 // Accept assignment
-router.patch("/:id/accept", acceptTicketAssignment);
 
 // Reassign ticket
 router.post("/:id/reassign", reassignTicket);

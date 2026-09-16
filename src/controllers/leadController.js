@@ -18,8 +18,8 @@ import {
   resolveCreateTeam,
   resolveExistingTeam,
   assigneeTeamError,
-  isSuperAdmin,
-  isTeamManager,
+  isCrossTeamReader,
+  isCrossTeamWriter,
 } from "../utils/teleSalesScope.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
@@ -162,7 +162,7 @@ export const importLeads = async (req, res) => {
     }
 
     // Optional batch-wide defaults
-    const canBulkAssign = isSuperAdmin(req) || isTeamManager(req);
+    const canBulkAssign = isCrossTeamWriter(req);
     const defaultAssignedTo =
       canBulkAssign && cleanStr(req.body.assignedTo) ? cleanStr(req.body.assignedTo) : undefined;
 
@@ -392,8 +392,8 @@ export const getAllLeads = async (req, res) => {
     // query parameters.
     const filter = { ...teamScopeFilter(req) };
 
-    // Only a super admin sees more than one team, so only they can narrow to one.
-    if (team && isSuperAdmin(req)) filter.team = team;
+    // Only cross-team readers see more than one team, so only they can narrow to one.
+    if (team && isCrossTeamReader(req)) filter.team = team;
 
     if (status) filter.status = status;
     if (priority) filter.priority = priority;

@@ -9,7 +9,7 @@ const callLogSchema = mongoose.Schema(
     },
     calledBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "TeleSalesAgent",
+      ref: "Consultant",
       required: [true, "Caller reference is required"],
     },
     // Owning team, copied from the lead when the call is logged. Denormalised

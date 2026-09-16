@@ -1,5 +1,6 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
+import { normalizeUserType } from "../utils/roles.js";
 
 let io = null;
 
@@ -21,7 +22,8 @@ export const initSocket = (httpServer, allowedOrigins) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET); // { id, userType }
       socket.userId = decoded.id;
-      socket.userType = decoded.userType;
+      // Older tokens still say "consultant" / "tele_sales"; one room per employee.
+      socket.userType = normalizeUserType(decoded.userType);
       next();
     } catch {
       next(new Error("Invalid token"));
@@ -44,7 +46,7 @@ export const initSocket = (httpServer, allowedOrigins) => {
 export const emitNotification = (notifications = []) => {
   if (!io) return;
   notifications.forEach((n) => {
-    io.to(`user:${n.userId}:${n.userType}`).emit("notification:new", n);
+    io.to(`user:${n.userId}:${normalizeUserType(n.userType)}`).emit("notification:new", n);
   });
 };
 

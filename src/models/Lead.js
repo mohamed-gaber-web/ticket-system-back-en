@@ -268,7 +268,7 @@ const leadSchema = mongoose.Schema(
     },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "TeleSalesAgent",
+      ref: "Consultant",
     },
     priority: {
       type: String,
@@ -337,7 +337,7 @@ const leadSchema = mongoose.Schema(
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "TeleSalesAgent",
+      ref: "Consultant",
       required: true,
     },
   },

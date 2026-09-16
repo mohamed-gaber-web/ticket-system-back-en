@@ -5,11 +5,11 @@ import {
   updateComment,
   deleteComment,
 } from "../controllers/taskCommentController.js";
-import { protect, authorize } from "../middleware/authMiddleware.js";
+import { protect, requireModule } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-const consultantOrMember = [protect, authorize("consultant", "team_member")];
+const consultantOrMember = [protect, requireModule("tasks")];
 
 router.get("/task/:taskId", ...consultantOrMember, getCommentsByTask);
 router.post("/", ...consultantOrMember, createComment);

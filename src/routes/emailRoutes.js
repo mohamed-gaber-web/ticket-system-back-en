@@ -7,13 +7,13 @@ import {
   sendTaskAssignedEmailHandler,
 } from "../controllers/emailController.js";
 import { sendComposedEmail } from "../controllers/leadEmailController.js";
-import { protect, authorize, authorizeRole, authorizeTeleSalesAccess } from "../middleware/authMiddleware.js";
+import { protect, requireEmployee, requireManagerOrAdmin, requireModule } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
 // All email routes require authentication as a consultant
-const consultantOnly = [protect, authorize("consultant")];
-const adminOnly = [protect, authorize("consultant"), authorizeRole("admin", "senior_consultant")];
+const consultantOnly = [protect, requireEmployee];
+const adminOnly = [protect, requireManagerOrAdmin];
 
 // GET /api/emails/logs - View email sending history
 router.get("/logs", ...consultantOnly, getEmailLogs);
@@ -33,6 +33,6 @@ router.post("/send-task-assigned", protect, sendTaskAssignedEmailHandler);
 
 // POST /api/emails/compose - Free-form message from the tele-sales compose window,
 // not tied to any single lead
-router.post("/compose", protect, authorizeTeleSalesAccess, sendComposedEmail);
+router.post("/compose", protect, requireModule("telesales"), sendComposedEmail);
 
 export default router;

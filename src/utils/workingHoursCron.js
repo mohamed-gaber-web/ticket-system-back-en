@@ -5,6 +5,7 @@ import WorkingHours from "../models/WorkingHours.js";
 import { notifyAndEmail } from "./emailHelper.js";
 import { sendDeliveryReminderEmail } from "./emailService.js";
 
+import { USER_TYPES } from "./access.js";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -84,7 +85,7 @@ const autoCloseDeliveredTickets = async () => {
       const closedAtFormatted = closedAt.toLocaleDateString("en-GB");
 
       const recipients = [];
-      if (assignee) recipients.push({ userId: assignee._id, userType: "consultant" });
+      if (assignee) recipients.push({ userId: assignee._id, userType: USER_TYPES.EMPLOYEE });
       if (customer) recipients.push({ userId: customer._id, userType: "customer" });
 
       await notifyAndEmail("ticket_auto_closed", {
@@ -199,7 +200,7 @@ const sendDeliveryReminders = async () => {
       const emailRecipients = [];
 
       if (assignee) {
-        notifyRecipients.push({ userId: assignee._id, userType: "consultant" });
+        notifyRecipients.push({ userId: assignee._id, userType: USER_TYPES.EMPLOYEE });
         emailRecipients.push({
           ...assignee,
           email: assignee.email,

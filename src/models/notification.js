@@ -12,7 +12,9 @@ const notificationSchema = new mongoose.Schema(
     userType: {
       type: String,
       required: [true, "User type is required"],
-      enum: ["customer", "consultant", "team_member"],
+      // "employee" is the current value; the rest survive on rows written before
+      // the employee/customer split and resolve to the same model.
+      enum: ["customer", "employee", "consultant", "team_member", "tele_sales"],
     },
     notificationType: {
       type: String,

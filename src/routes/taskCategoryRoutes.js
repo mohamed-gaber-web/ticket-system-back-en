@@ -6,16 +6,18 @@ import {
   updateTaskCategory,
   deleteTaskCategory,
 } from "../controllers/taskCategoryController.js";
-import { protect, authorize } from "../middleware/authMiddleware.js";
+import { protect, requireModule, requireManagerOrAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-const consultantOnly = [protect, authorize("consultant")];
+const consultantOnly = [protect, requireModule("tasks")];
+// Categories are shared by the whole module, so shaping them is a manager's job.
+const managerOnly = [...consultantOnly, requireManagerOrAdmin];
 
 router.get("/", ...consultantOnly, getAllTaskCategories);
-router.post("/", ...consultantOnly, createTaskCategory);
+router.post("/", ...managerOnly, createTaskCategory);
 router.get("/:id", ...consultantOnly, getTaskCategoryById);
-router.patch("/:id", ...consultantOnly, updateTaskCategory);
-router.delete("/:id", ...consultantOnly, deleteTaskCategory);
+router.patch("/:id", ...managerOnly, updateTaskCategory);
+router.delete("/:id", ...managerOnly, deleteTaskCategory);
 
 export default router;

@@ -1,10 +1,10 @@
 import express from "express";
 import { getTasks, getTaskStats, getTaskById, createTask, updateTask, deleteTask } from "../controllers/taskController.js";
-import { protect, authorize } from "../middleware/authMiddleware.js";
+import { protect, requireModule } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-const consultantOnly = [protect, authorize("consultant")];
+const consultantOnly = [protect, requireModule("tasks")];
 
 router.get("/", ...consultantOnly, getTasks);
 router.get("/stats", ...consultantOnly, getTaskStats);

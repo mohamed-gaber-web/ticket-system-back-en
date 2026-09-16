@@ -2,9 +2,9 @@ import TicketComment from "../models/TicketComment.js";
 import Ticket from "../models/Ticket.js";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
-import TeamMember from "../models/TeamMember.js";
 import { notifyAndEmail, resolveUser } from "../utils/emailHelper.js";
 
+import { USER_TYPES, isValidUserType, normalizeUserType } from "../utils/access.js";
 // Helper function to populate commentBy based on userType
 const populateCommentBy = async (comment) => {
   let commentBy = null;
@@ -13,12 +13,9 @@ const populateCommentBy = async (comment) => {
     commentBy = await Customer.findById(comment.commentByUserId).select(
       "companyName email contactPerson"
     );
-  } else if (comment.commentByUserType === "consultant") {
+  } else if (comment.commentByUserType) {
+    // Every non-customer author is an employee (old rows still say "consultant")
     commentBy = await Consultant.findById(comment.commentByUserId).select(
-      "firstName lastName email"
-    );
-  } else if (comment.commentByUserType === "team_member") {
-    commentBy = await TeamMember.findById(comment.commentByUserId).select(
       "firstName lastName email"
     );
   }
@@ -250,11 +247,11 @@ const createComment = async (req, res) => {
             // Notify assigned consultant
             if (fullTicket.assignedBy) {
               recipient = fullTicket.assignedBy;
-              recipients.push({ userId: fullTicket.assignedBy._id, userType: "consultant" });
+              recipients.push({ userId: fullTicket.assignedBy._id, userType: USER_TYPES.EMPLOYEE });
             }
           } else {
             commenterName = `${commenterUser.firstName} ${commenterUser.lastName}`;
-            commenterRole = commentByUserType === "consultant" ? "Consultant" : "Team Member";
+            commenterRole = "Consultant";
             // Notify customer
             if (fullTicket.customer) {
               recipient = fullTicket.customer;
@@ -536,11 +533,10 @@ const getCommentsByUserType = async (req, res) => {
     const { userType } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const validUserTypes = ["customer", "consultant", "team_member"];
-    if (!validUserTypes.includes(userType)) {
+    if (!isValidUserType(normalizeUserType(userType))) {
       return res.status(400).json({
         success: false,
-        message: "Invalid user type. Must be: customer, consultant, or team_member",
+        message: "Invalid user type. Must be: customer or employee",
       });
     }
 

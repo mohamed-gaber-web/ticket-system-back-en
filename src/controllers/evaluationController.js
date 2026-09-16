@@ -217,7 +217,7 @@ export const getAllEvaluations = async (req, res) => {
 
     // Fetch all consultants + stored evals + all tickets for the month in parallel
     const [consultants, storedEvals, allTickets] = await Promise.all([
-      Consultant.find({ role: { $ne: "team_member" } })
+      Consultant.find({ role: { $in: ["admin", "consultant"] } })
         .select("firstName lastName position role profilePicture")
         .lean(),
       EmployeeEvaluation.find({ year, month }).lean(),
@@ -326,7 +326,7 @@ export const getAllEvaluationsRange = async (req, res) => {
     const meetingCategoryIds = await getMeetingCategoryIds();
 
     const [consultants, storedEvals, allTickets] = await Promise.all([
-      Consultant.find({ role: { $ne: "team_member" } })
+      Consultant.find({ role: { $in: ["admin", "consultant"] } })
         .select("firstName lastName position role profilePicture")
         .lean(),
       EmployeeEvaluation.find({ $or: monthPairs }).lean(),

@@ -1,10 +1,9 @@
 import TeleSalesTeam from "../models/TeleSalesTeam.js";
-import TeleSalesAgent from "../models/TeleSalesAgent.js";
 import Consultant from "../models/Consltant.js";
 import Lead from "../models/Lead.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
-import { isSuperAdmin, callerTeamId } from "../utils/teleSalesScope.js";
+import { isCrossTeamReader, callerTeamId } from "../utils/teleSalesScope.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
@@ -50,14 +49,14 @@ export const createTeam = async (req, res) => {
 // @access  Private (any tele-sales user)
 //
 // Readable by everyone in the module — the frontend needs team names to label
-// leads and agents. A non-super-admin only ever gets their OWN team back, so the
-// list can't be used to discover how the rest of the business is structured.
+// leads and agents. A team-scoped agent only ever gets their OWN team back, so
+// the list can't be used to discover how the rest of the business is structured.
 export const getAllTeams = async (req, res) => {
   try {
     const { isActive, search } = req.query;
 
     const filter = {};
-    if (!isSuperAdmin(req)) {
+    if (!isCrossTeamReader(req)) {
       const own = callerTeamId(req);
       if (!own) return res.status(200).json({ success: true, total: 0, data: [] });
       filter._id = own;
@@ -94,12 +93,12 @@ export const getTeamById = async (req, res) => {
     // would confirm the id belongs to a real team, and the pair of responses would
     // let any tele-sales user enumerate exactly how the business is structured —
     // which is what scoping getAllTeams was meant to prevent.
-    if (!isSuperAdmin(req) && callerTeamId(req) !== String(team._id)) {
+    if (!isCrossTeamReader(req) && callerTeamId(req) !== String(team._id)) {
       return res.status(404).json({ success: false, message: "Team not found" });
     }
 
     const [agentCount, leadCount] = await Promise.all([
-      TeleSalesAgent.countDocuments({ team: team._id }),
+      Consultant.countDocuments({ teleSalesTeam: team._id }),
       Lead.countDocuments({ team: team._id }),
     ]);
 
@@ -168,23 +167,21 @@ export const deleteTeam = async (req, res) => {
       return res.status(404).json({ success: false, message: "Team not found" });
     }
 
-    // Everything that can point at a team has to be counted, not just agents and
-    // leads. A consultant left with a dangling teleSalesTeam is locked out of the
-    // module silently — their scope filter matches nothing and the Teams screen
-    // cannot show an administrator why. Call logs and follow-ups can outlive their
-    // lead too, so they are checked on their own.
-    const [agentCount, leadCount, consultantCount, callCount, followUpCount] = await Promise.all([
-      TeleSalesAgent.countDocuments({ team: team._id }),
-      Lead.countDocuments({ team: team._id }),
+    // Everything that can point at a team has to be counted, not just leads. An
+    // employee left with a dangling teleSalesTeam is locked out of the module
+    // silently — their scope filter matches nothing and the Teams screen cannot
+    // show an administrator why. Call logs and follow-ups can outlive their lead
+    // too, so they are checked on their own.
+    const [agentCount, leadCount, callCount, followUpCount] = await Promise.all([
       Consultant.countDocuments({ teleSalesTeam: team._id }),
+      Lead.countDocuments({ team: team._id }),
       CallLog.countDocuments({ team: team._id }),
       FollowUp.countDocuments({ team: team._id }),
     ]);
 
     const blockers = [
-      [agentCount, "agent"],
+      [agentCount, "employee"],
       [leadCount, "lead"],
-      [consultantCount, "consultant"],
       [callCount, "call log"],
       [followUpCount, "follow-up"],
     ].filter(([count]) => count > 0);
@@ -200,7 +197,6 @@ export const deleteTeam = async (req, res) => {
           "or deactivate this team instead of deleting it.",
         agentCount,
         leadCount,
-        consultantCount,
         callCount,
         followUpCount,
       });

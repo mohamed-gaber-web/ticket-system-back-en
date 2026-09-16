@@ -45,7 +45,9 @@ const ticketStatusHistorySchema = mongoose.Schema(
     changedByUserType: {
       type: String,
       required: [true, "User type is required"],
-      enum: ["customer", "consultant", "team_member"],
+      // "employee" is the current value; the rest survive on rows written before
+      // the employee/customer split and resolve to the same model.
+      enum: ["customer", "employee", "consultant", "team_member", "tele_sales"],
     },
     notes: {
       type: String,
@@ -77,8 +79,8 @@ ticketStatusHistorySchema.virtual("changedBy", {
 // Add virtual field for model name
 ticketStatusHistorySchema.virtual("changedByUserModel").get(function () {
   if (this.changedByUserType === "customer") return "Customer";
-  if (this.changedByUserType === "consultant") return "Consultant";
-  if (this.changedByUserType === "team_member") return "TeamMember";
+  // Every non-customer actor is an employee; old rows still say "consultant".
+  if (this.changedByUserType) return "Consultant";
   return null;
 });
 

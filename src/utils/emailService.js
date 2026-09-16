@@ -3,6 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import EmailLog from "../models/EmailLog.js";
 
+import { USER_TYPES, ROLE_LABELS } from "./access.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const TEMPLATES_DIR = path.join(__dirname, "../templates/email");
@@ -508,7 +509,7 @@ export const sendTicketAssignedEmail = async (ticket, assignee, customerName) =>
       category,
       ticketUrl,
     },
-    { ticketId: ticket._id, userId: assignee._id, userType: "consultant" }
+    { ticketId: ticket._id, userId: assignee._id, userType: USER_TYPES.EMPLOYEE }
   );
 };
 
@@ -658,9 +659,9 @@ export const sendConsultantWelcomeEmail = async (consultant) => {
       firstName: consultant.firstName,
       lastName: consultant.lastName,
       email: consultant.email,
-      role: consultant.role || "consultant",
+      role: ROLE_LABELS[consultant.role] || consultant.role || "Consultant",
     },
-    { userId: consultant._id, userType: "consultant" }
+    { userId: consultant._id, userType: USER_TYPES.EMPLOYEE }
   );
 };
 
@@ -700,7 +701,7 @@ export const sendSlaAlertEmail = async (ticket, assignee, variables = {}) => {
       category,
       ticketUrl,
     },
-    { ticketId: ticket._id, userId: assignee._id, userType: "consultant" }
+    { ticketId: ticket._id, userId: assignee._id, userType: USER_TYPES.EMPLOYEE }
   );
 };
 
@@ -795,7 +796,7 @@ export const sendVacationRequestEmail = async (admins, variables = {}) => {
         reason: variables.reason || "—",
         requestUrl,
       },
-      { userId: admin._id, userType: "consultant" }
+      { userId: admin._id, userType: USER_TYPES.EMPLOYEE }
     );
     results.push({ adminEmail: admin.email, ...result });
   }
@@ -821,6 +822,6 @@ export const sendSlaBreachEmail = async (ticket, assignee, variables = {}) => {
       overdueBy: variables.overdueBy || "N/A",
       ticketUrl,
     },
-    { ticketId: ticket._id, userId: assignee._id, userType: "consultant" }
+    { ticketId: ticket._id, userId: assignee._id, userType: USER_TYPES.EMPLOYEE }
   );
 };

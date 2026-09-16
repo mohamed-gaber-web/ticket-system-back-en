@@ -25,7 +25,9 @@ const leadStatusHistorySchema = mongoose.Schema(
     changedByUserType: {
       type: String,
       required: [true, "User type is required"],
-      enum: ["tele_sales", "consultant"],
+      // "employee" is the current value; the rest survive on rows written before
+      // the employee/customer split and resolve to the same model.
+      enum: ["employee", "tele_sales", "consultant"],
     },
     // The dynamic field values submitted for this status (see buildFieldValueMap
     // in leadStatusWorkflow.js) — label lookups happen at render time against
@@ -54,9 +56,8 @@ leadStatusHistorySchema.virtual("changedBy", {
 });
 
 leadStatusHistorySchema.virtual("changedByUserModel").get(function () {
-  if (this.changedByUserType === "tele_sales") return "TeleSalesAgent";
-  if (this.changedByUserType === "consultant") return "Consultant";
-  return null;
+  // Every actor is an employee; old rows still say "tele_sales" / "consultant".
+  return this.changedByUserType ? "Consultant" : null;
 });
 
 leadStatusHistorySchema.set("toJSON", { virtuals: true });
