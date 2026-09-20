@@ -9,6 +9,7 @@ import cookieParser from "cookie-parser";
 import routes from "./src/routes/index.js";
 import { startSLACron } from "./src/utils/slaCron.js";
 import { startWorkingHoursCron } from "./src/utils/workingHoursCron.js";
+import { startMeetingReminderCron } from "./src/utils/meetingReminderCron.js";
 import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
 import { seedIndustrySectors } from "./src/utils/seedIndustrySectors.js";
 import { seedCountries } from "./src/utils/seedCountries.js";
@@ -168,6 +169,9 @@ const startServer = async () => {
 
       // Start working hours cron jobs (auto-close, pending reminders, delivery reminders)
       startWorkingHoursCron();
+
+      // Meeting reminder emails / notifications
+      startMeetingReminderCron();
     });
   } catch (error) {
     console.error("Failed to start server:", error);

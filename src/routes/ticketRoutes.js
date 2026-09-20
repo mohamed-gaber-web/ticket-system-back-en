@@ -6,6 +6,7 @@ import {
   createTicket,
   updateTicket,
   updateTicketStatus,
+  getPendingCandidates,
   assignTicket,
   acceptTicket,
   addCustomerFeedback,
@@ -18,7 +19,7 @@ import {
   getSubTickets,
   setTicketAdminPoints,
 } from "../controllers/ticketController.js";
-import { protect } from "../middleware/authMiddleware.js";
+import { protect, authorize } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -333,6 +334,7 @@ router
 
 // Update ticket status
 router.patch("/:id/status", protect, updateTicketStatus);
+router.get("/:id/pending-candidates", protect, authorize("consultant"), getPendingCandidates);
 
 // Assign ticket
 router.patch("/:id/assign", assignTicket);

@@ -5,6 +5,11 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Ticket",
     },
+    // Set instead of `ticket` for meeting-book notifications.
+    meeting: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Meeting",
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       required: [true, "User ID is required"],
@@ -12,7 +17,7 @@ const notificationSchema = new mongoose.Schema(
     userType: {
       type: String,
       required: [true, "User type is required"],
-      enum: ["customer", "consultant", "team_member"],
+      enum: ["customer", "consultant", "team_member", "tele_sales"],
     },
     notificationType: {
       type: String,
@@ -30,6 +35,10 @@ const notificationSchema = new mongoose.Schema(
         "ticket_reopened",
         "vacation_request",
         "excuse_request",
+        "meeting_invite",
+        "meeting_updated",
+        "meeting_cancelled",
+        "meeting_reminder",
       ],
     },
     message: {
@@ -71,6 +80,7 @@ notificationSchema.statics.getUnreadForUser = function (userId, userType) {
     isRead: false,
   })
     .populate("ticket", "ticketNumber subject priority status")
+    .populate("meeting", "title startAt status")
     .sort({ createdAt: -1 });
 };
 
@@ -82,6 +92,7 @@ notificationSchema.statics.getForUser = function (
 ) {
   return this.find({ userId, userType })
     .populate("ticket", "ticketNumber subject priority status")
+    .populate("meeting", "title startAt status")
     .sort({ createdAt: -1 })
     .limit(limit);
 };

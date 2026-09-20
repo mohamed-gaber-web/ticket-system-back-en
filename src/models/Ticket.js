@@ -149,6 +149,24 @@ const ticketSchema = mongoose.Schema(
     internalDeliveryDate: {
       type: Date,
     },
+    // Who the ticket is waiting on while status is "customer_pending": a
+    // customer user of the ticket's company (defaults to the ticket's customer),
+    // when it went pending and which consultant put it there. Cleared whenever
+    // the status moves away from customer_pending.
+    pendingOn: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      default: null,
+    },
+    pendingSince: {
+      type: Date,
+      default: null,
+    },
+    pendingBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+      default: null,
+    },
     scheduledWeek: {
       type: Number,
       min: 1,

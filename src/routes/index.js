@@ -43,6 +43,7 @@ import employeeBalanceRoutes from "./employeeBalanceRoutes.js";
 import aiRoutes from "./aiRoutes.js";
 import kpiRoutes from "./kpiRoutes.js";
 import evaluationRoutes from "./evaluationRoutes.js";
+import meetingRoutes from "./meetingRoutes.js";
 
 const router = express.Router();
 
@@ -163,6 +164,9 @@ router.use("/kpi", kpiRoutes);
 
 // Employee Evaluation routes
 router.use("/evaluations", evaluationRoutes);
+
+// Meeting book (calendar) routes
+router.use("/meetings", meetingRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

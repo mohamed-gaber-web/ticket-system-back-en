@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
@@ -83,6 +84,49 @@ const parseEntryDate = (value) => {
 const isSameEntryDay = (a, b) => {
   if (!(a instanceof Date) || !(b instanceof Date)) return false;
   return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
+};
+
+// Resolves the "waiting on" fields for a status change.
+//  - entering / staying in customer_pending: pendingOn = the chosen customer
+//    user (must belong to the ticket's company) or the ticket's own customer;
+//    pendingSince/pendingBy are (re)stamped when the target changes.
+//  - any other status: all three are cleared.
+// Returns { error } when the requested person is not allowed.
+const applyPendingTransition = async ({ updateData, ticket, status, pendingOn, actingConsultantId }) => {
+  if (!status) return {};
+  if (status !== "customer_pending") {
+    updateData.pendingOn = null;
+    updateData.pendingSince = null;
+    updateData.pendingBy = null;
+    return {};
+  }
+
+  const ticketCustomerId = ticket.customer?._id ?? ticket.customer;
+  // No explicit person in this request (e.g. the edit form re-sending the
+  // status): keep whoever it is already waiting on, else the ticket's customer.
+  let target = pendingOn === undefined && ticket.status === "customer_pending" && ticket.pendingOn
+    ? ticket.pendingOn
+    : ticketCustomerId;
+  if (pendingOn && String(pendingOn) !== String(ticketCustomerId)) {
+    if (!mongoose.Types.ObjectId.isValid(String(pendingOn))) return { error: "Invalid pending-on user" };
+    const [person, owner] = await Promise.all([
+      Customer.findById(pendingOn).select("company").lean(),
+      Customer.findById(ticketCustomerId).select("company").lean(),
+    ]);
+    if (!person) return { error: "Pending-on user not found" };
+    if (!owner || String(person.company) !== String(owner.company)) {
+      return { error: "The pending-on user must belong to the ticket's company" };
+    }
+    target = person._id;
+  }
+
+  const changedTarget = String(ticket.pendingOn ?? "") !== String(target ?? "");
+  updateData.pendingOn = target ?? null;
+  if (ticket.status !== "customer_pending" || changedTarget || !ticket.pendingSince) {
+    updateData.pendingSince = new Date();
+    updateData.pendingBy = actingConsultantId ?? ticket.pendingBy ?? null;
+  }
+  return {};
 };
 
 // Helper function to populate commentBy based on userType
@@ -387,6 +431,8 @@ const getAllTickets = async (req, res) => {
 
     const tickets = await Ticket.find(query)
       .populate("customer", "companyName email contactPerson")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
@@ -432,6 +478,8 @@ const getTicketById = async (req, res) => {
   try {
     const ticket = await Ticket.findById(req.params.id)
       .populate("customer", "companyName email contactPerson phone address")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName description")
@@ -497,6 +545,8 @@ const getTicketByNumber = async (req, res) => {
   try {
     const ticket = await Ticket.findOne({ ticketNumber: req.params.ticketNumber })
       .populate("customer", "companyName email contactPerson phone")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
@@ -634,6 +684,8 @@ const createTicket = async (req, res) => {
 
     const populatedTicket = await Ticket.findById(ticket._id)
       .populate("customer", "companyName email contactPerson")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
@@ -812,6 +864,15 @@ const updateTicket = async (req, res) => {
       updateData.firstResponseAt = new Date();
     }
 
+    if (status) {
+      const pending = await applyPendingTransition({
+        updateData, ticket, status, pendingOn: req.body.pendingOn, actingConsultantId,
+      });
+      if (pending.error) {
+        return res.status(400).json({ success: false, message: pending.error });
+      }
+    }
+
     const oldStatus = ticket.status;
 
     ticket = await Ticket.findByIdAndUpdate(
@@ -823,6 +884,8 @@ const updateTicket = async (req, res) => {
       }
     )
       .populate("customer", "companyName email contactPerson")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
@@ -943,7 +1006,7 @@ const updateTicket = async (req, res) => {
 // @access  Public
 const updateTicketStatus = async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, pendingOn } = req.body;
 
     if (!status) {
       return res.status(400).json({
@@ -1002,6 +1065,11 @@ const updateTicketStatus = async (req, res) => {
       updateData.deliveredAt = new Date();
     }
 
+    const pending = await applyPendingTransition({ updateData, ticket, status, pendingOn, actingConsultantId });
+    if (pending.error) {
+      return res.status(400).json({ success: false, message: pending.error });
+    }
+
     const oldStatus = ticket.status;
 
     ticket = await Ticket.findByIdAndUpdate(
@@ -1010,6 +1078,8 @@ const updateTicketStatus = async (req, res) => {
       { new: true, runValidators: true }
     )
       .populate("customer", "companyName contactPerson email")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
@@ -1130,6 +1200,8 @@ const assignTicket = async (req, res) => {
       { new: true, runValidators: true }
     )
       .populate("customer", "companyName contactPerson email")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
@@ -1265,6 +1337,8 @@ const addCustomerFeedback = async (req, res) => {
       { new: true, runValidators: true }
     )
       .populate("customer", "companyName email")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
@@ -1441,6 +1515,31 @@ const getTicketSLAStatus = async (req, res) => {
   }
 };
 
+// @desc    Customer users the ticket can be marked "waiting on" (same company)
+// @route   GET /api/tickets/:id/pending-candidates
+// @access  Private (consultants)
+const getPendingCandidates = async (req, res) => {
+  try {
+    const ticket = await Ticket.findById(req.params.id).select("customer").lean();
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+    const owner = await Customer.findById(ticket.customer).select("company companyName").lean();
+    if (!owner) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+    const users = await Customer.find({ company: owner.company })
+      .select("contactPerson companyName email phone role status")
+      .sort({ contactPerson: 1 })
+      .lean();
+    // The ticket's own customer first, then the rest of the company.
+    users.sort((a, b) => (String(a._id) === String(ticket.customer) ? -1 : String(b._id) === String(ticket.customer) ? 1 : 0));
+    res.status(200).json({ success: true, ticketCustomer: ticket.customer, data: users });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error fetching pending candidates", error: error.message });
+  }
+};
+
 // @desc    Get tickets by status
 // @route   GET /api/tickets/status/:status
 // @access  Public
@@ -1461,6 +1560,8 @@ const getTicketsByStatus = async (req, res) => {
 
     const tickets = await Ticket.find({ status })
       .populate("customer", "companyName email")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
@@ -1508,6 +1609,8 @@ const getTicketsByPriority = async (req, res) => {
 
     const tickets = await Ticket.find({ priority })
       .populate("customer", "companyName email")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
@@ -1639,6 +1742,8 @@ const createSubTicket = async (req, res) => {
 
     const populatedSubTicket = await Ticket.findById(subTicket._id)
       .populate("customer", "companyName email contactPerson")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
@@ -1730,6 +1835,8 @@ const getSubTickets = async (req, res) => {
 
     const subTickets = await Ticket.find(query)
       .populate("customer", "companyName email contactPerson")
+      .populate("pendingOn", "companyName contactPerson email")
+      .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("scope", "name")
       .populate("assignedTeam", "teamName")
@@ -1816,4 +1923,5 @@ export {
   createSubTicket,
   getSubTickets,
   setTicketAdminPoints,
+  getPendingCandidates,
 };

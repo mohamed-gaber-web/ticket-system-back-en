@@ -15,6 +15,7 @@ const taskSchema = mongoose.Schema(
     },
     description: {
       type: String,
+      required: [true, "Description is required"],
       trim: true,
     },
     department: {
@@ -29,25 +30,27 @@ const taskSchema = mongoose.Schema(
     },
     startDate: {
       type: Date,
+      required: [true, "Start date is required"],
     },
     endDate: {
       type: Date,
+      required: [true, "End date is required"],
     },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Consultant",
-      default: null,
+      required: [true, "Assigned to is required"],
     },
     scheduledWeek: {
       type: Number,
       min: 1,
       max: 52,
-      default: null,
+      required: [true, "Week is required"],
     },
     duration: {
       type: Number,
       min: 0,
-      default: null,
+      required: [true, "Duration is required"],
     },
     status: {
       type: String,
@@ -61,13 +64,15 @@ const taskSchema = mongoose.Schema(
     responsible: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Consultant",
-      default: null,
+      required: [true, "Responsible is required"],
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Consultant",
       default: null,
     },
+    // Only one level of nesting is allowed: a subtask can never be a parent.
+    // Enforced in the controller (needs a DB lookup of the parent).
     parentTask: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Task",

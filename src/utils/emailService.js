@@ -107,6 +107,109 @@ const toRecipientList = (value) => {
  * @param {Array<{name: string, contentType?: string, content: Buffer}>} [options.attachments]
  * @param {boolean} [options.saveToSentItems]
  */
+// Graph's one-shot /sendMail request is capped at 4MB and base64 inflates the
+// attachments by ~33%, so anything above this much raw attachment data goes
+// through the draft + upload-session path instead (see sendLargeViaGraph).
+const SIMPLE_SEND_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+// Attachments at or above this size must use an upload session; smaller ones
+// can be POSTed to the draft directly. (Graph rule: < 3MB direct, else session.)
+const DIRECT_ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024 - 1;
+// Upload chunks must be a multiple of 320 KiB and at most 4 MiB.
+const UPLOAD_CHUNK_BYTES = 320 * 1024 * 10;
+
+const toBuffer = (content) => (Buffer.isBuffer(content) ? content : Buffer.from(content));
+
+const toGraphFileAttachment = (att) => {
+  const attachment = {
+    "@odata.type": "#microsoft.graph.fileAttachment",
+    name: att.name,
+    contentType: att.contentType || "application/octet-stream",
+    contentBytes: toBuffer(att.content).toString("base64"),
+  };
+  // Inline parts are referenced from the HTML as cid:<contentId> and are
+  // hidden from the recipient's attachment list.
+  if (att.isInline) {
+    attachment.isInline = true;
+    attachment.contentId = att.contentId;
+  }
+  return attachment;
+};
+
+const graphJson = async (url, accessToken, method, body) => {
+  const response = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody?.error?.message || `Graph API error: ${response.status} ${response.statusText}`);
+  }
+  if (response.status === 202 || response.status === 204) return null;
+  return response.json().catch(() => null);
+};
+
+// Streams one large attachment into a draft through an upload session.
+const uploadLargeAttachment = async (messageUrl, accessToken, att) => {
+  const content = toBuffer(att.content);
+  const session = await graphJson(`${messageUrl}/attachments/createUploadSession`, accessToken, "POST", {
+    AttachmentItem: {
+      attachmentType: "file",
+      name: att.name,
+      contentType: att.contentType || "application/octet-stream",
+      size: content.length,
+      ...(att.isInline ? { isInline: true, contentId: att.contentId } : {}),
+    },
+  });
+  const uploadUrl = session?.uploadUrl;
+  if (!uploadUrl) throw new Error(`Graph did not return an upload session for ${att.name}`);
+
+  for (let start = 0; start < content.length; start += UPLOAD_CHUNK_BYTES) {
+    const end = Math.min(start + UPLOAD_CHUNK_BYTES, content.length);
+    const chunk = content.subarray(start, end);
+    // The session URL is pre-authorised: no Authorization header on chunk PUTs.
+    const response = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(chunk.length),
+        "Content-Range": `bytes ${start}-${end - 1}/${content.length}`,
+      },
+      body: chunk,
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody?.error?.message || `Attachment upload failed for ${att.name}: ${response.status}`);
+    }
+  }
+};
+
+// Large mail: create a draft, attach each file (directly or via an upload
+// session), then send the draft. Sending a draft always keeps a copy in Sent
+// Items, which is what composed mail wants anyway.
+const sendLargeViaGraph = async (from, message, attachments, accessToken) => {
+  const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}`;
+  const draft = await graphJson(`${base}/messages`, accessToken, "POST", message);
+  if (!draft?.id) throw new Error("Graph did not return a draft message id");
+  const messageUrl = `${base}/messages/${draft.id}`;
+
+  try {
+    for (const att of attachments) {
+      if (toBuffer(att.content).length > DIRECT_ATTACHMENT_MAX_BYTES) {
+        await uploadLargeAttachment(messageUrl, accessToken, att);
+      } else {
+        await graphJson(`${messageUrl}/attachments`, accessToken, "POST", toGraphFileAttachment(att));
+      }
+    }
+    await graphJson(`${messageUrl}/send`, accessToken, "POST");
+  } catch (error) {
+    // Don't leave a half-built draft behind in the mailbox.
+    await fetch(messageUrl, { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => {});
+    throw error;
+  }
+  return { messageId: draft.id };
+};
+
 const sendViaMicrosoftGraph = async (from, to, subject, html, options = {}) => {
   const accessToken = await getAccessToken();
 
@@ -125,24 +228,15 @@ const sendViaMicrosoftGraph = async (from, to, subject, html, options = {}) => {
   const replyTo = toRecipientList(options.replyTo);
   if (replyTo.length) message.replyTo = replyTo;
 
-  if (Array.isArray(options.attachments) && options.attachments.length > 0) {
-    message.attachments = options.attachments.map((att) => {
-      const attachment = {
-        "@odata.type": "#microsoft.graph.fileAttachment",
-        name: att.name,
-        contentType: att.contentType || "application/octet-stream",
-        contentBytes: Buffer.isBuffer(att.content)
-          ? att.content.toString("base64")
-          : Buffer.from(att.content).toString("base64"),
-      };
-      // Inline parts are referenced from the HTML as cid:<contentId> and are
-      // hidden from the recipient's attachment list.
-      if (att.isInline) {
-        attachment.isInline = true;
-        attachment.contentId = att.contentId;
-      }
-      return attachment;
-    });
+  const attachments = Array.isArray(options.attachments) ? options.attachments : [];
+  const rawAttachmentBytes = attachments.reduce((sum, att) => sum + toBuffer(att.content).length, 0);
+
+  if (rawAttachmentBytes > SIMPLE_SEND_ATTACHMENT_BYTES) {
+    return sendLargeViaGraph(from, message, attachments, accessToken);
+  }
+
+  if (attachments.length > 0) {
+    message.attachments = attachments.map(toGraphFileAttachment);
   }
 
   const response = await fetch(
@@ -255,9 +349,10 @@ export const sendEmail = async (to, subject, templateName, variables = {}, optio
 // Custom (agent-composed) email — free-form body, cc/bcc and file attachments
 // ---------------------------------------------------------------------------
 
-// Graph's simple sendMail caps the whole request at 4MB, and base64 inflates
-// bytes by roughly a third — so the raw payload has to stay well under that.
-export const MAX_TOTAL_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+// Total attachment budget for a composed email. Mails above ~3MB of attachments
+// are sent through Graph's draft + upload-session flow (see sendViaMicrosoftGraph),
+// so this is a product choice, not a transport limit.
+export const MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 // Composed mail is a person writing to a lead, so it carries the GrowPath
 // letterhead but none of the "automated message, do not reply" chrome that
