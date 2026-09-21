@@ -7,7 +7,14 @@ import Notification from "../models/notification.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import { emitNotification } from "../socket/io.js";
 import { sanitizeEmailHtml } from "./htmlSanitizer.js";
-import { listInboxMessagesSince, getMessageAttachments, senderMailbox, MAX_TOTAL_ATTACHMENT_BYTES } from "./emailService.js";
+import {
+  listInboxMessagesSince,
+  getMessageAttachments,
+  senderMailbox,
+  MAX_TOTAL_ATTACHMENT_BYTES,
+  isGraphAccessDenied,
+  MAIL_READWRITE_MISSING,
+} from "./emailService.js";
 
 // Pulls lead replies out of the shared mailbox and files them under the right
 // lead, so agents see the whole exchange in the system and can answer from it.
@@ -194,11 +201,14 @@ export const syncLeadInbox = async () => {
     if (filed) console.log(`📥 Lead inbox: filed ${filed} reply(ies)`);
     return { processed: messages.length, filed };
   } catch (error) {
+    // Reading the inbox needs Mail.Read / Mail.ReadWrite on the app registration;
+    // say so instead of Graph's bare "Access is denied".
+    const message = isGraphAccessDenied(error) ? MAIL_READWRITE_MISSING : error.message;
     state.lastRunAt = new Date();
-    state.lastError = error.message;
+    state.lastError = message;
     await state.save().catch(() => {});
-    console.error("Lead inbox sync error:", error.message);
-    return { processed: 0, filed: 0, error: error.message };
+    console.error("Lead inbox sync error:", message);
+    return { processed: 0, filed: 0, error: message };
   } finally {
     running = false;
   }
