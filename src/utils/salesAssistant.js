@@ -12,7 +12,7 @@ import mongoose from "mongoose";
 import Lead from "../models/Lead.js";
 import Product from "../models/Product.js";
 import SalesDocument from "../models/SalesDocument.js";
-import MessageTemplate, { PURPOSE_DOCUMENT_TYPE } from "../models/MessageTemplate.js";
+import MessageTemplate from "../models/MessageTemplate.js";
 import CompanySettings from "../models/CompanySettings.js";
 import { canViewLead } from "./teleSalesScope.js";
 import { buildTemplateContext, renderTemplate } from "./templateVariables.js";
@@ -113,7 +113,7 @@ export const findDocumentForType = async (type, product = null) => {
  * when something the action needs isn't set up (no active company profile, no
  * default template…), so the button can say why instead of failing later.
  */
-export const resolveQuickAction = async ({ action, channel, product = null }) => {
+export const resolveQuickAction = async ({ action, channel, product = null, document = null }) => {
   const spec = QUICK_ACTIONS.find((a) => a.key === action);
   if (!spec) return { error: "Unknown quick action" };
   if (spec.requiresProduct && !product) return { action: spec, error: "Pick a product first" };
@@ -123,11 +123,12 @@ export const resolveQuickAction = async ({ action, channel, product = null }) =>
     return { action: spec, error: `No active ${channel === "email" ? "email" : "WhatsApp"} template is set up for "${spec.label}"` };
   }
 
-  let document = null;
-  if (spec.documentType) {
+  // An explicitly chosen document (from a product's own list) wins over the
+  // action's default lookup.
+  if (!document && spec.documentType) {
     document = await findDocumentForType(spec.documentType, spec.productScoped ? product : null);
     if (!document) return { action: spec, template, error: `No active "${spec.documentType.replace("_", " ")}" document is available` };
-  } else if (spec.key === "product_details" && product?.documents?.length) {
+  } else if (!document && spec.key === "product_details" && product?.documents?.length) {
     // Product details ride along with the product's own brochure when it has one.
     document = product.documents.find((d) => d.type === "brochure") ?? product.documents[0];
   }

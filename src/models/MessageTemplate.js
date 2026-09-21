@@ -20,14 +20,6 @@ export const TEMPLATE_PURPOSES = [
   "general",
 ];
 
-// Which SalesDocument type a purpose sends, when it sends one.
-export const PURPOSE_DOCUMENT_TYPE = {
-  company_profile: "company_profile",
-  catalog: "catalog",
-  pricing: "pricing",
-  brochure: "brochure",
-};
-
 export const TEMPLATE_STATUSES = ["active", "inactive"];
 
 const messageTemplateSchema = new mongoose.Schema(

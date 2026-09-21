@@ -168,11 +168,9 @@ export const prepareMessage = async (req, res) => {
     let document = inputs.document;
     let actionSpec = null;
     if (action) {
-      const resolved = await resolveQuickAction({ action, channel, product });
+      const resolved = await resolveQuickAction({ action, channel, product, document });
       if (resolved.error) return res.status(409).json({ success: false, message: resolved.error });
-      ({ template, action: actionSpec } = resolved);
-      // An explicitly chosen document wins over the action's default.
-      document = document ?? resolved.document;
+      ({ template, action: actionSpec, document } = resolved);
     } else {
       if (!isObjectId(templateId)) return res.status(404).json({ success: false, message: "Template not found" });
       template = await MessageTemplate.findById(templateId).lean();
