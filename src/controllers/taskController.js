@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Task from "../models/Task.js";
+import { getWeekNumber } from "../utils/weekUtils.js";
 
 // Whitelist of sortable fields → actual document path used by the aggregation $sort.
 // Guards against injection and lets the client sort on populated names + computed delay.
@@ -11,6 +12,7 @@ const SORT_FIELDS = {
   assignedTo: "assignedTo.firstName",
   responsible: "responsible.firstName",
   scheduledWeek: "scheduledWeek",
+  endWeek: "endWeek",
   duration: "duration",
   startDate: "startDate",
   endDate: "endDate",
@@ -52,6 +54,21 @@ const lookupOne = (from, localField, fields) => [
   { $unwind: { path: `$${localField}`, preserveNullAndEmptyArrays: true } },
 ];
 
+// Tasks whose start..end week range covers the given week. Rows created before
+// endWeek existed match on their start week alone.
+const weekCoverFilter = (week) => ({
+  $or: [
+    { scheduledWeek: { $lte: week }, endWeek: { $gte: week } },
+    { endWeek: null, scheduledWeek: week },
+  ],
+});
+
+// Both weeks come from the dates so they can never disagree with them.
+const weeksFromDates = (start, end) => ({
+  scheduledWeek: getWeekNumber(start),
+  endWeek: getWeekNumber(end),
+});
+
 // Non-admin consultants are locked to their own department; admins may filter by any.
 // req.user.department is populated as an object by the auth middleware.
 const departmentScope = (req, department) => {
@@ -73,7 +90,7 @@ const REQUIRED_FIELDS = {
   endDate: "End date",
   assignedTo: "Assigned to",
   responsible: "Responsible",
-  scheduledWeek: "Week",
+  scheduledWeek: "Start week",
   duration: "Duration",
   status: "Status",
 };
@@ -182,13 +199,17 @@ const getTasks = async (req, res) => {
 
     if (status) match.status = status;
     if (assignedTo) match.assignedTo = toObjectId(assignedTo);
-    if (scheduledWeek) match.scheduledWeek = parseInt(scheduledWeek);
+    const and = [];
+    if (scheduledWeek) and.push(weekCoverFilter(parseInt(scheduledWeek)));
     if (search) {
-      match.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-      ];
+      and.push({
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { description: { $regex: search, $options: "i" } },
+        ],
+      });
     }
+    if (and.length) match.$and = and;
 
     const sortField = SORT_FIELDS[sort] || "createdAt";
     const sortOrder = order === "asc" ? 1 : -1;
@@ -272,9 +293,10 @@ const getTaskById = async (req, res) => {
 // @route   POST /api/tasks
 const createTask = async (req, res) => {
   try {
-    const { name, description, department, category, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status, parentTask } = req.body;
+    const { name, description, department, category, startDate, endDate, assignedTo, responsible, duration, status, parentTask } = req.body;
 
-    const body = { ...req.body, status: status || "pending" };
+    // Weeks are always derived from the dates (the client shows the same values read-only).
+    const body = { ...req.body, status: status || "pending", ...weeksFromDates(startDate, endDate) };
     const errors = missingFieldErrors(body);
     if (errors.length) {
       return res.status(400).json({ success: false, message: "Validation error", errors });
@@ -303,7 +325,8 @@ const createTask = async (req, res) => {
       endDate: end,
       assignedTo,
       responsible,
-      scheduledWeek,
+      scheduledWeek: body.scheduledWeek,
+      endWeek: body.endWeek,
       duration,
       status: body.status,
       completedAt: body.status === "done" ? new Date() : null,
@@ -327,15 +350,17 @@ const createTask = async (req, res) => {
 // @route   PATCH /api/tasks/:id
 const updateTask = async (req, res) => {
   try {
-    const { name, description, department, category, startDate, endDate, assignedTo, responsible, scheduledWeek, duration, status, parentTask } = req.body;
+    const { name, description, department, category, startDate, endDate, assignedTo, responsible, duration, status, parentTask } = req.body;
 
     const existing = await Task.findById(req.params.id);
     if (!existing) {
       return res.status(404).json({ success: false, message: "Task not found" });
     }
 
-    // No field may be emptied - every task field is mandatory.
-    const errors = missingFieldErrors(req.body, { partial: true });
+    // No field may be emptied - every task field is mandatory. Weeks are derived
+    // from the dates below, so client-sent week values are ignored.
+    const { scheduledWeek: _sw, endWeek: _ew, ...checked } = req.body;
+    const errors = missingFieldErrors(checked, { partial: true });
     if (errors.length) {
       return res.status(400).json({ success: false, message: "Validation error", errors });
     }
@@ -386,7 +411,9 @@ const updateTask = async (req, res) => {
     if (endDate !== undefined) updateData.endDate = end;
     if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
     if (responsible !== undefined) updateData.responsible = responsible;
-    if (scheduledWeek !== undefined) updateData.scheduledWeek = scheduledWeek;
+    if (startDate !== undefined || endDate !== undefined || existing.endWeek == null) {
+      Object.assign(updateData, weeksFromDates(start, end));
+    }
     if (duration !== undefined) updateData.duration = duration;
     if (parentTask !== undefined) updateData.parentTask = parentTask || null;
     if (status !== undefined) {
@@ -499,7 +526,7 @@ const getTaskStats = async (req, res) => {
 
     // Populated task lists for the dashboard panels.
     const now = new Date();
-    const listFields = "taskNumber name status endDate scheduledWeek duration assignedTo department category createdAt";
+    const listFields = "taskNumber name status endDate scheduledWeek endWeek duration assignedTo department category createdAt";
     const [recent, upcoming, overdue] = await Promise.all([
       populateTask(Task.find(match).sort({ createdAt: -1 }).limit(6).select(listFields)),
       populateTask(
@@ -599,7 +626,7 @@ const getTaskReport = async (req, res) => {
     if (status) match.status = status;
     if (assignedTo) match.assignedTo = toObjectId(assignedTo);
     if (responsible) match.responsible = toObjectId(responsible);
-    if (scheduledWeek) match.scheduledWeek = parseInt(scheduledWeek);
+    if (scheduledWeek) Object.assign(match, weekCoverFilter(parseInt(scheduledWeek)));
     if (scope === "main") match.parentTask = null;
     if (scope === "sub") match.parentTask = { $ne: null };
     // Period filter = overlap: task ends after the period starts AND starts before it ends.

@@ -47,6 +47,7 @@ const getAllNotifications = async (req, res) => {
     const notifications = await Notification.find(query)
       .populate("ticket", "ticketNumber subject priority status")
       .populate("meeting", "title startAt status")
+      .populate("lead", "companyName contactPersonName")
       .sort(sortOptions)
       .limit(parseInt(limit))
       .skip(skip);
@@ -262,7 +263,8 @@ const updateNotification = async (req, res) => {
         runValidators: true,
       }
     ).populate("ticket", "ticketNumber subject priority status")
-      .populate("meeting", "title startAt status");
+      .populate("meeting", "title startAt status")
+      .populate("lead", "companyName contactPersonName");
 
     res.status(200).json({
       success: true,

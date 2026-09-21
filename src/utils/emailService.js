@@ -50,7 +50,7 @@ const withBrandLogo = (html, attachments = []) => {
 // Microsoft 365 / Azure AD — Graph API via Client Credentials (direct HTTP)
 // ---------------------------------------------------------------------------
 
-const getAccessToken = async () => {
+export const getAccessToken = async () => {
   const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET } = process.env;
 
   const missing = [
@@ -135,10 +135,14 @@ const toGraphFileAttachment = (att) => {
   return attachment;
 };
 
-const graphJson = async (url, accessToken, method, body) => {
+// Immutable ids survive a message moving between folders (Drafts → Sent Items),
+// so the id we store for a sent message keeps working for replies later.
+const GRAPH_ID_HEADERS = { Prefer: 'IdType="ImmutableId"' };
+
+export const graphJson = async (url, accessToken, method, body, extraHeaders = {}) => {
   const response = await fetch(url, {
     method,
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", ...GRAPH_ID_HEADERS, ...extraHeaders },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
@@ -184,12 +188,27 @@ const uploadLargeAttachment = async (messageUrl, accessToken, att) => {
   }
 };
 
-// Large mail: create a draft, attach each file (directly or via an upload
-// session), then send the draft. Sending a draft always keeps a copy in Sent
-// Items, which is what composed mail wants anyway.
-const sendLargeViaGraph = async (from, message, attachments, accessToken) => {
+// Draft path: create a draft (or a reply draft on an existing message), attach
+// each file (directly or via an upload session), then send it. Used for large
+// mails, for anything whose Graph ids must be tracked (lead conversations) and
+// for threaded replies. Sending a draft always keeps a copy in Sent Items.
+const sendViaDraft = async (from, message, attachments, accessToken, { replyToGraphId } = {}) => {
   const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}`;
-  const draft = await graphJson(`${base}/messages`, accessToken, "POST", message);
+  let draft;
+  if (replyToGraphId) {
+    // Graph builds the RE: subject, recipients and quoted history for us; we
+    // then put our message above the quote and adjust recipients if asked.
+    draft = await graphJson(`${base}/messages/${encodeURIComponent(replyToGraphId)}/createReply`, accessToken, "POST", {});
+    if (!draft?.id) throw new Error("Graph did not return a reply draft id");
+    const patch = { body: { contentType: "HTML", content: `${message.body.content}${draft.body?.content ?? ""}` } };
+    if (message.toRecipients?.length) patch.toRecipients = message.toRecipients;
+    if (message.ccRecipients?.length) patch.ccRecipients = message.ccRecipients;
+    if (message.bccRecipients?.length) patch.bccRecipients = message.bccRecipients;
+    if (message.replyTo?.length) patch.replyTo = message.replyTo;
+    draft = await graphJson(`${base}/messages/${draft.id}`, accessToken, "PATCH", patch);
+  } else {
+    draft = await graphJson(`${base}/messages`, accessToken, "POST", message);
+  }
   if (!draft?.id) throw new Error("Graph did not return a draft message id");
   const messageUrl = `${base}/messages/${draft.id}`;
 
@@ -207,7 +226,13 @@ const sendLargeViaGraph = async (from, message, attachments, accessToken) => {
     await fetch(messageUrl, { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => {});
     throw error;
   }
-  return { messageId: draft.id };
+  return {
+    messageId: draft.id,
+    graphMessageId: draft.id,
+    internetMessageId: draft.internetMessageId ?? null,
+    conversationId: draft.conversationId ?? null,
+    subject: draft.subject ?? message.subject,
+  };
 };
 
 const sendViaMicrosoftGraph = async (from, to, subject, html, options = {}) => {
@@ -231,8 +256,8 @@ const sendViaMicrosoftGraph = async (from, to, subject, html, options = {}) => {
   const attachments = Array.isArray(options.attachments) ? options.attachments : [];
   const rawAttachmentBytes = attachments.reduce((sum, att) => sum + toBuffer(att.content).length, 0);
 
-  if (rawAttachmentBytes > SIMPLE_SEND_ATTACHMENT_BYTES) {
-    return sendLargeViaGraph(from, message, attachments, accessToken);
+  if (rawAttachmentBytes > SIMPLE_SEND_ATTACHMENT_BYTES || options.track || options.replyToGraphId) {
+    return sendViaDraft(from, message, attachments, accessToken, { replyToGraphId: options.replyToGraphId });
   }
 
   if (attachments.length > 0) {
@@ -421,6 +446,8 @@ export const sendCustomEmail = async ({
   replyTo,
   attachments = [],
   logMeta = {},
+  // Graph id of the mailbox message this is a reply to (threads the mail for the lead).
+  replyToGraphId = null,
 }) => {
   const toLabel = Array.isArray(to) ? to.join(", ") : to;
 
@@ -446,6 +473,10 @@ export const sendCustomEmail = async ({
       replyTo,
       attachments: withBrandLogo(html, attachments),
       saveToSentItems: true,
+      // Always go through a draft so we get the conversation / message ids that
+      // let the inbox sync match the lead's reply back to this message.
+      track: true,
+      replyToGraphId,
     });
 
     console.log(`✅ Custom email sent to ${toLabel} - ${info.messageId}`);
@@ -461,7 +492,14 @@ export const sendCustomEmail = async ({
       relatedUserType: logMeta.userType || undefined,
     }).catch((err) => console.error("EmailLog save error:", err.message));
 
-    return { success: true, messageId: info.messageId };
+    return {
+      success: true,
+      messageId: info.messageId,
+      graphMessageId: info.graphMessageId ?? null,
+      internetMessageId: info.internetMessageId ?? null,
+      conversationId: info.conversationId ?? null,
+      subject: info.subject ?? subject,
+    };
   } catch (error) {
     console.error(`❌ Custom email failed to ${toLabel}:`, error.message);
 
@@ -918,4 +956,49 @@ export const sendSlaBreachEmail = async (ticket, assignee, variables = {}) => {
     },
     { ticketId: ticket._id, userId: assignee._id, userType: "consultant" }
   );
+};
+
+// ---------------------------------------------------------------------------
+// Reading the shared mailbox (lead replies)
+// ---------------------------------------------------------------------------
+
+export const senderMailbox = () => process.env.MS_EMAIL_FROM || process.env.EMAIL_USER || null;
+
+const INBOX_SELECT =
+  "id,internetMessageId,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,hasAttachments,isRead";
+
+/**
+ * Inbox messages received at or after `since`, oldest first. Follows paging.
+ * Requires Mail.Read (application) on the sender mailbox.
+ */
+export const listInboxMessagesSince = async (since, { max = 200 } = {}) => {
+  const mailbox = senderMailbox();
+  if (!mailbox) throw new Error("Email sender address missing. Set MS_EMAIL_FROM in .env");
+  const accessToken = await getAccessToken();
+  const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}`;
+  const filter = `receivedDateTime ge ${new Date(since).toISOString()}`;
+  let url = `${base}/mailFolders/inbox/messages?$filter=${encodeURIComponent(filter)}&$orderby=receivedDateTime asc&$top=50&$select=${INBOX_SELECT}`;
+  const out = [];
+  while (url && out.length < max) {
+    const page = await graphJson(url, accessToken, "GET", undefined, { Prefer: `IdType="ImmutableId", outlook.body-content-type="html"` });
+    out.push(...(page?.value ?? []));
+    url = page?.["@odata.nextLink"] ?? null;
+  }
+  return { mailbox, messages: out.slice(0, max) };
+};
+
+/** File attachments of a mailbox message as { name, contentType, size, content: Buffer }. */
+export const getMessageAttachments = async (graphMessageId) => {
+  const mailbox = senderMailbox();
+  const accessToken = await getAccessToken();
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(graphMessageId)}/attachments?$top=50`;
+  const page = await graphJson(url, accessToken, "GET");
+  return (page?.value ?? [])
+    .filter((a) => a["@odata.type"] === "#microsoft.graph.fileAttachment" && a.contentBytes && !a.isInline)
+    .map((a) => ({
+      name: a.name,
+      contentType: a.contentType || "application/octet-stream",
+      size: a.size ?? 0,
+      content: Buffer.from(a.contentBytes, "base64"),
+    }));
 };

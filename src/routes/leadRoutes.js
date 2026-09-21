@@ -18,7 +18,15 @@ import {
   deleteFollowUp,
 } from "../controllers/followUpController.js";
 import { addAttachment, getAttachments, deleteAttachment } from "../controllers/leadAttachmentController.js";
-import { sendLeadEmail, getLeadEmails, deleteLeadEmail } from "../controllers/leadEmailController.js";
+import {
+  sendLeadEmail,
+  getLeadEmails,
+  deleteLeadEmail,
+  replyToLeadEmail,
+  markLeadEmailRead,
+  syncInboxNow,
+  getEmailInbox,
+} from "../controllers/leadEmailController.js";
 import {
   protect,
   authorizeTeleSalesAccess,
@@ -37,6 +45,9 @@ router.post("/import", importLeads);
 router.post("/backfill-customer-ids", authorizeRole("admin"), backfillCustomerIds);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
+// Email management — static paths must sit above the /:id routes.
+router.get("/emails/inbox", getEmailInbox);
+router.post("/emails/sync", syncInboxNow);
 router.get("/:id", getLeadById);
 router.patch("/:id", updateLead);
 // A team manager may delete inside their own team; the controller enforces that
@@ -66,6 +77,8 @@ router.delete("/:leadId/attachments/:attachmentId", deleteAttachment);
 
 // Emails
 router.post("/:leadId/emails", sendLeadEmail);
+router.post("/:leadId/emails/:emailId/reply", replyToLeadEmail);
+router.patch("/:leadId/emails/:emailId/read", markLeadEmailRead);
 router.get("/:leadId/emails", getLeadEmails);
 router.delete("/:leadId/emails/:emailId", deleteLeadEmail);
 

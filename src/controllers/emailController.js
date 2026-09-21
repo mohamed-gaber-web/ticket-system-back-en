@@ -236,6 +236,7 @@ const sendTaskAssignedEmailHandler = async (req, res) => {
       startDate,
       endDate,
       scheduledWeek,
+      endWeek,
       weekRange,
       duration,
       status,
@@ -259,8 +260,9 @@ const sendTaskAssignedEmailHandler = async (req, res) => {
     };
 
     const descriptionRow = description ? `<p><strong>Description:</strong> ${description}</p>` : "";
+    const weekLabel = endWeek != null && endWeek !== scheduledWeek ? `W${scheduledWeek} – W${endWeek}` : `W${scheduledWeek}`;
     const weekRow = scheduledWeek != null
-      ? `<p><strong>Scheduled Week:</strong> W${scheduledWeek}${weekRange ? ` (${weekRange})` : ""}</p>`
+      ? `<p><strong>Scheduled Week:</strong> ${weekLabel}${weekRange ? ` (${weekRange})` : ""}</p>`
       : "";
     const durationRow = duration != null ? `<p><strong>Duration:</strong> ${duration}h</p>` : "";
     const startDateRow = startDate ? `<p><strong>Start Date:</strong> ${fmtDate(startDate)}</p>` : "";

@@ -10,6 +10,7 @@ import routes from "./src/routes/index.js";
 import { startSLACron } from "./src/utils/slaCron.js";
 import { startWorkingHoursCron } from "./src/utils/workingHoursCron.js";
 import { startMeetingReminderCron } from "./src/utils/meetingReminderCron.js";
+import { startLeadInboxCron } from "./src/utils/leadInboxSync.js";
 import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
 import { seedIndustrySectors } from "./src/utils/seedIndustrySectors.js";
 import { seedCountries } from "./src/utils/seedCountries.js";
@@ -172,6 +173,9 @@ const startServer = async () => {
 
       // Meeting reminder emails / notifications
       startMeetingReminderCron();
+
+      // Lead replies from the shared mailbox
+      startLeadInboxCron();
     });
   } catch (error) {
     console.error("Failed to start server:", error);

@@ -10,6 +10,11 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Meeting",
     },
+    // Set for tele-sales lead notifications (e.g. an email reply from the lead).
+    lead: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Lead",
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       required: [true, "User ID is required"],
@@ -39,6 +44,7 @@ const notificationSchema = new mongoose.Schema(
         "meeting_updated",
         "meeting_cancelled",
         "meeting_reminder",
+        "lead_email_reply",
       ],
     },
     message: {
@@ -81,6 +87,7 @@ notificationSchema.statics.getUnreadForUser = function (userId, userType) {
   })
     .populate("ticket", "ticketNumber subject priority status")
     .populate("meeting", "title startAt status")
+    .populate("lead", "companyName contactPersonName")
     .sort({ createdAt: -1 });
 };
 
@@ -93,6 +100,7 @@ notificationSchema.statics.getForUser = function (
   return this.find({ userId, userType })
     .populate("ticket", "ticketNumber subject priority status")
     .populate("meeting", "title startAt status")
+    .populate("lead", "companyName contactPersonName")
     .sort({ createdAt: -1 })
     .limit(limit);
 };

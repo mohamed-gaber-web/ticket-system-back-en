@@ -41,11 +41,19 @@ const taskSchema = mongoose.Schema(
       ref: "Consultant",
       required: [true, "Assigned to is required"],
     },
+    // Week range covered by the task. `scheduledWeek` is the START week (name
+    // kept for compatibility); both are derived from startDate / endDate.
     scheduledWeek: {
       type: Number,
       min: 1,
       max: 52,
-      required: [true, "Week is required"],
+      required: [true, "Start week is required"],
+    },
+    endWeek: {
+      type: Number,
+      min: 1,
+      max: 52,
+      default: null,
     },
     duration: {
       type: Number,
@@ -88,7 +96,7 @@ taskSchema.index({ department: 1 });
 taskSchema.index({ category: 1 });
 taskSchema.index({ status: 1 });
 taskSchema.index({ assignedTo: 1 });
-taskSchema.index({ scheduledWeek: 1 });
+taskSchema.index({ scheduledWeek: 1, endWeek: 1 });
 taskSchema.index({ parentTask: 1 });
 
 // Pre-save middleware to generate a human-readable task number: TASK-{YEAR}-{NNNNN}.
