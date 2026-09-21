@@ -139,6 +139,16 @@ const toGraphFileAttachment = (att) => {
 // so the id we store for a sent message keeps working for replies later.
 const GRAPH_ID_HEADERS = { Prefer: 'IdType="ImmutableId"' };
 
+// Graph's wording when the app registration lacks a permission for the call
+// (ErrorAccessDenied). Distinct from a bad secret, which fails at the token step.
+export const isGraphAccessDenied = (error) =>
+  /access is denied|ErrorAccessDenied|Insufficient privileges/i.test(String(error?.message ?? ""));
+
+export const MAIL_READWRITE_MISSING =
+  "The mailbox app registration is missing the Mail.ReadWrite (application) permission, which lead " +
+  "email replies and inbox sync need. Add it in Azure → App registrations → API permissions and grant " +
+  "admin consent (Mail.Send alone only allows plain sends).";
+
 export const graphJson = async (url, accessToken, method, body, extraHeaders = {}) => {
   const response = await fetch(url, {
     method,
@@ -256,8 +266,21 @@ const sendViaMicrosoftGraph = async (from, to, subject, html, options = {}) => {
   const attachments = Array.isArray(options.attachments) ? options.attachments : [];
   const rawAttachmentBytes = attachments.reduce((sum, att) => sum + toBuffer(att.content).length, 0);
 
-  if (rawAttachmentBytes > SIMPLE_SEND_ATTACHMENT_BYTES || options.track || options.replyToGraphId) {
-    return sendViaDraft(from, message, attachments, accessToken, { replyToGraphId: options.replyToGraphId });
+  // The draft path needs Mail.ReadWrite (application) on the Azure app; the
+  // one-shot /sendMail below needs only Mail.Send. When the app registration
+  // lacks the extra permission, Graph answers "Access is denied. Check
+  // credentials and try again." Fall back to /sendMail for ordinary tracked
+  // sends so agents can still email (losing only the conversation id used to
+  // thread replies), and say plainly what is missing when no fallback exists.
+  const needsDraft = rawAttachmentBytes > SIMPLE_SEND_ATTACHMENT_BYTES || options.replyToGraphId;
+  if (needsDraft || options.track) {
+    try {
+      return await sendViaDraft(from, message, attachments, accessToken, { replyToGraphId: options.replyToGraphId });
+    } catch (error) {
+      if (!isGraphAccessDenied(error)) throw error;
+      if (needsDraft) throw new Error(MAIL_READWRITE_MISSING);
+      console.warn(`⚠️  Graph draft send denied for ${from} — falling back to /sendMail. ${MAIL_READWRITE_MISSING}`);
+    }
   }
 
   if (attachments.length > 0) {
