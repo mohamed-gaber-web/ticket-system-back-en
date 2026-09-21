@@ -72,3 +72,13 @@ Nodemailer-based email service in `src/utils/emailService.js`. Requires Gmail SM
 ### Lookup/Reference Tables
 
 Several simple CRUD entities serve as dropdowns/references for tickets: Environment, Feature, ProductType, Scope, ServiceType, Department, ERPType, VersionNumber, Category, SLA.
+
+### Tele-Sales Assistant (sales kit)
+
+The lead page's "Assistant" tab is a one-click send flow built on four catalogs plus an audit log:
+
+- **Models:** `Product` (sales-oriented catalog — distinct from the ticket lookup `ProductType`), `SalesDocument` (GridFS file + `type`: company_profile / brochure / catalog / pricing …, and an unguessable `shareKey`), `MessageTemplate` (one collection for both channels via `channel: email|whatsapp`; `purpose` maps it to a quick action; one `isDefault` per channel+purpose), `CompanySettings` (singleton — *our* company, unlike `Company` which is a customer's), `CommunicationLog` (what was sent/prepared, with template/product/document snapshots; email rows link to the `LeadEmail`).
+- **Routes:** `/products`, `/sales-documents`, `/message-templates`, `/company-settings` (read: `authorizeTeleSalesAccess`; write: `authorizeTeleSalesAdmin`), `/sales-assistant/{overview,prepare,send-email,whatsapp}`, `GET /leads/:id/communications`. `GET /sales-documents/public/:shareKey` is deliberately unauthenticated — it is the link a lead receives on WhatsApp; only active documents are served.
+- **Templates:** placeholders (`{{lead.firstName}}`, `{{salesAgent.phone}}`, `{{company.instagram}}`, `{{product.benefits}}`, `{{document.url}}` …) live in `src/utils/templateVariables.js`. To add one, add it to `TEMPLATE_VARIABLES` and produce it in `buildTemplateContext` — nothing else changes. Email bodies are rendered HTML-escaped; lists render as `<ul>` / bullet lines. Defaults: `node src/scripts/seedSalesTemplates.js` (idempotent).
+- **Sending:** `sales-assistant/send-email` calls `leadEmailController.sendAndRecord` — the same path as `POST /leads/:id/emails` — then writes a `CommunicationLog`. There is **no WhatsApp provider**: `sales-assistant/whatsapp` logs the message and returns a `wa.me` link (`src/utils/whatsapp.js` is where a Business/Cloud API adapter would go).
+- **Scope:** every assistant call resolves the lead through `canViewLead` / `canEditLead`; archived products/documents and inactive templates answer 409 with a user-facing message. Tests: `tests/salesAssistant.test.js`.

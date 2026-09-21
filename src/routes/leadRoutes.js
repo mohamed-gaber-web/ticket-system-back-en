@@ -27,6 +27,7 @@ import {
   syncInboxNow,
   getEmailInbox,
 } from "../controllers/leadEmailController.js";
+import { getLeadCommunications } from "../controllers/salesAssistantController.js";
 import {
   protect,
   authorizeTeleSalesAccess,
@@ -81,5 +82,8 @@ router.post("/:leadId/emails/:emailId/reply", replyToLeadEmail);
 router.patch("/:leadId/emails/:emailId/read", markLeadEmailRead);
 router.get("/:leadId/emails", getLeadEmails);
 router.delete("/:leadId/emails/:emailId", deleteLeadEmail);
+
+// Sales-assistant communication history (emails + WhatsApp prepared for the lead)
+router.get("/:leadId/communications", getLeadCommunications);
 
 export default router;

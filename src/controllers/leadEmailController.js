@@ -81,44 +81,42 @@ const senderIdentity = (req) => {
 // Validates the payload, sends via Graph and records the result. `lead` is null
 // for standalone messages composed from the leads toolbar. `replyTo` is the
 // LeadEmail being answered (threads the mail and marks it replied).
-const composeAndSend = async (req, res, lead, replyTo = null) => {
+//
+// Returns `{ status, body }` rather than writing the response so the sales
+// assistant can send through this exact path and then add its own audit record.
+export const sendAndRecord = async (req, lead, replyTo = null) => {
+  const fail = (status, message, extra = {}) => ({ status, body: { success: false, message, ...extra } });
   try {
     const to = normaliseAddresses(req.body.to);
     const cc = normaliseAddresses(req.body.cc);
     const bcc = normaliseAddresses(req.body.bcc);
 
     if (to.length === 0) {
-      return res.status(400).json({ success: false, message: "At least one recipient is required" });
+      return fail(400, "At least one recipient is required");
     }
 
     const allAddresses = [...to, ...cc, ...bcc];
     if (allAddresses.length > MAX_RECIPIENTS) {
-      return res.status(400).json({
-        success: false,
-        message: `Too many recipients. The limit is ${MAX_RECIPIENTS} across To, Cc and Bcc.`,
-      });
+      return fail(400, `Too many recipients. The limit is ${MAX_RECIPIENTS} across To, Cc and Bcc.`);
     }
 
     const invalid = findInvalidAddress(allAddresses);
     if (invalid) {
-      return res.status(400).json({ success: false, message: `Invalid email address: ${invalid}` });
+      return fail(400, `Invalid email address: ${invalid}`);
     }
 
     const subject = String(req.body.subject ?? "").trim();
     if (!subject) {
-      return res.status(400).json({ success: false, message: "Subject is required" });
+      return fail(400, "Subject is required");
     }
     if (subject.length > MAX_SUBJECT_LENGTH) {
-      return res.status(400).json({
-        success: false,
-        message: `Subject must be ${MAX_SUBJECT_LENGTH} characters or fewer`,
-      });
+      return fail(400, `Subject must be ${MAX_SUBJECT_LENGTH} characters or fewer`);
     }
 
     const body = sanitizeEmailHtml(req.body.message ?? req.body.body ?? "");
     const hasAttachmentsRequested = Array.isArray(req.body.attachments) && req.body.attachments.length > 0;
     if (!body && !hasAttachmentsRequested) {
-      return res.status(400).json({ success: false, message: "Message body is required" });
+      return fail(400, "Message body is required");
     }
 
     let attachments = [];
@@ -126,7 +124,7 @@ const composeAndSend = async (req, res, lead, replyTo = null) => {
     try {
       ({ attachments, records } = await loadAttachments(req.body.attachments));
     } catch (attachmentError) {
-      return res.status(400).json({ success: false, message: attachmentError.message });
+      return fail(400, attachmentError.message);
     }
 
     const identity = senderIdentity(req);
@@ -173,17 +171,20 @@ const composeAndSend = async (req, res, lead, replyTo = null) => {
     }
 
     if (!result.success) {
-      return res.status(502).json({
-        success: false,
-        message: result.error || "Failed to send email",
-        data: record,
-      });
+      return fail(502, result.error || "Failed to send email", { data: record });
     }
 
-    res.status(201).json({ success: true, message: "Email sent", data: record });
+    return { status: 201, body: { success: true, message: "Email sent", data: record } };
   } catch (error) {
-    res.status(500).json({ success: false, message: "Error sending email", error: error.message });
+    console.error("Error sending email:", error);
+    return fail(500, "Error sending email");
   }
+};
+
+// Thin wrapper for the routes: send, then write the outcome as the response.
+const composeAndSend = async (req, res, lead, replyTo = null) => {
+  const { status, body } = await sendAndRecord(req, lead, replyTo);
+  res.status(status).json(body);
 };
 
 // @desc    Compose and send an email to a lead's contacts

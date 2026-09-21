@@ -44,6 +44,11 @@ import aiRoutes from "./aiRoutes.js";
 import kpiRoutes from "./kpiRoutes.js";
 import evaluationRoutes from "./evaluationRoutes.js";
 import meetingRoutes from "./meetingRoutes.js";
+import productRoutes from "./productRoutes.js";
+import salesDocumentRoutes from "./salesDocumentRoutes.js";
+import messageTemplateRoutes from "./messageTemplateRoutes.js";
+import companySettingsRoutes from "./companySettingsRoutes.js";
+import salesAssistantRoutes from "./salesAssistantRoutes.js";
 
 const router = express.Router();
 
@@ -167,6 +172,14 @@ router.use("/evaluations", evaluationRoutes);
 
 // Meeting book (calendar) routes
 router.use("/meetings", meetingRoutes);
+
+// Tele-sales assistant: product catalog, sales documents, message templates,
+// company profile and the one-click send flow built on top of them.
+router.use("/products", productRoutes);
+router.use("/sales-documents", salesDocumentRoutes);
+router.use("/message-templates", messageTemplateRoutes);
+router.use("/company-settings", companySettingsRoutes);
+router.use("/sales-assistant", salesAssistantRoutes);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);
