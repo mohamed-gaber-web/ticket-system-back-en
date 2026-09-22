@@ -4,6 +4,7 @@ import { Readable } from "stream";
 import mongoose from "mongoose";
 import { getGridFSBucket } from "../config/gridfs.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { fixUploadedFileNames, contentDisposition } from "../utils/fileName.js";
 
 const router = express.Router();
 
@@ -135,7 +136,7 @@ const avatarUpload = multer({
  *       500:
  *         description: Server error during upload
  */
-router.post("/upload", protect, upload.single("file"), async (req, res) => {
+router.post("/upload", protect, upload.single("file"), fixUploadedFileNames, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -271,9 +272,11 @@ router.get("/files/:id", protect, async (req, res) => {
     const isInlineImage = contentType.startsWith("image/") && contentType !== "image/svg+xml";
     res.set("Content-Type", contentType);
     res.set("Content-Length", file.length.toString());
+    // Non-ASCII names need the RFC 6266 pair; a raw Arabic name in the header
+    // makes Node throw ERR_INVALID_CHAR and the download fail outright.
     res.set(
       "Content-Disposition",
-      `${isInlineImage ? "inline" : "attachment"}; filename="${file.metadata?.originalName || file.filename}"`
+      contentDisposition(file.metadata?.originalName || file.filename, { inline: isInlineImage })
     );
 
     // Stream file to response
@@ -450,7 +453,7 @@ router.get("/files/:id/info", protect, async (req, res) => {
  *       400:
  *         description: No file provided or invalid image type
  */
-router.post("/avatar", protect, avatarUpload.single("avatar"), async (req, res) => {
+router.post("/avatar", protect, avatarUpload.single("avatar"), fixUploadedFileNames, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({

@@ -7,6 +7,7 @@ import { actorRef } from "../utils/actor.js";
 import { isSuperAdmin } from "../utils/teleSalesScope.js";
 import { InputError, isInputError } from "../utils/inputError.js";
 import { publicDocumentUrl } from "../utils/templateVariables.js";
+import { contentDisposition } from "../utils/fileName.js";
 
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(String(v ?? ""));
 
@@ -247,10 +248,9 @@ export const streamPublicSalesDocument = async (req, res) => {
     // PDFs and images open in the browser; everything else downloads. SVG is
     // never inlined (stored XSS), same rule as /api/files/:id.
     const inline = contentType === "application/pdf" || (contentType.startsWith("image/") && contentType !== "image/svg+xml");
-    const safeName = String(doc.file.fileName || file.filename).replace(/["\r\n]/g, "");
     res.set("Content-Type", contentType);
     res.set("Content-Length", file.length.toString());
-    res.set("Content-Disposition", `${inline ? "inline" : "attachment"}; filename="${safeName}"`);
+    res.set("Content-Disposition", contentDisposition(doc.file.fileName || file.filename, { inline }));
     res.set("Cache-Control", "private, max-age=3600");
     res.set("Cross-Origin-Resource-Policy", "cross-origin");
 
