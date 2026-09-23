@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import { getGridFSBucket } from "../config/gridfs.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { fixUploadedFileNames, contentDisposition } from "../utils/fileName.js";
+import { resolveContentType, isInlineType } from "../utils/fileType.js";
 
 const router = express.Router();
 
@@ -169,6 +170,9 @@ router.post("/upload", protect, upload.single("file"), fixUploadedFileNames, asy
     // Prepare metadata
     const metadata = {
       originalName: req.file.originalname,
+      // The driver dropped support for the `contentType` option below, so the
+      // type only survives here — see src/utils/fileType.js.
+      contentType: req.file.mimetype,
       uploadedAt: new Date(),
       uploadedBy: req.user._id,
       uploadedByType: req.userType,
@@ -267,16 +271,19 @@ router.get("/files/:id", protect, async (req, res) => {
 
     const file = files[0];
 
-    const contentType = file.contentType || "application/octet-stream";
-    // SVG must always be forced to attachment to prevent stored XSS
-    const isInlineImage = contentType.startsWith("image/") && contentType !== "image/svg+xml";
+    // The stored contentType is absent on everything uploaded before the type
+    // was moved into metadata, so fall back to the file extension — otherwise
+    // every attachment is octet-stream and a PDF downloads instead of opening.
+    const contentType = resolveContentType(file);
+    // Images and PDFs preview; SVG never does (stored XSS).
+    const inline = isInlineType(contentType);
     res.set("Content-Type", contentType);
     res.set("Content-Length", file.length.toString());
     // Non-ASCII names need the RFC 6266 pair; a raw Arabic name in the header
     // makes Node throw ERR_INVALID_CHAR and the download fail outright.
     res.set(
       "Content-Disposition",
-      contentDisposition(file.metadata?.originalName || file.filename, { inline: isInlineImage })
+      contentDisposition(file.metadata?.originalName || file.filename, { inline })
     );
 
     // Stream file to response
@@ -408,7 +415,7 @@ router.get("/files/:id/info", protect, async (req, res) => {
         length: file.length,
         chunkSize: file.chunkSize,
         uploadDate: file.uploadDate,
-        contentType: file.contentType,
+        contentType: resolveContentType(file),
         metadata: file.metadata,
       },
     });
@@ -484,6 +491,7 @@ router.post("/avatar", protect, avatarUpload.single("avatar"), fixUploadedFileNa
         // /api/avatars/:id route refuses to stream anything without it.
         category: "avatar",
         originalName: req.file.originalname,
+        contentType: req.file.mimetype,
         uploadedAt: new Date(),
         uploadedBy: req.user._id,
         uploadedByType: req.userType,
@@ -564,7 +572,7 @@ router.get("/avatars/:id", async (req, res) => {
       return res.status(404).json({ success: false, message: "Avatar not found" });
     }
 
-    const contentType = file.contentType || "image/jpeg";
+    const contentType = resolveContentType(file) || "image/jpeg";
     res.set("Content-Type", contentType);
     res.set("Content-Length", file.length.toString());
     res.set("Content-Disposition", "inline");

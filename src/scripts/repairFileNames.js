@@ -1,15 +1,18 @@
 /**
- * Repair file names that were stored mojibake'd.
+ * Repair stored file metadata: mojibake'd names, and missing content types.
  *
- * Until `src/utils/fileName.js` was added, multer handed us the multipart
- * file name latin1-decoded, so every non-ASCII upload was saved wrong —
- * "تاسك فايل تست.xlsx" landed in the database as
- * "ØªØ§Ø³Ù ÙØ§ÙÙ ØªØ³Øª.xlsx". This walks the collections that keep a file
- * name and puts the real one back.
+ * 1. Until `src/utils/fileName.js` was added, multer handed us the multipart
+ *    file name latin1-decoded, so every non-ASCII upload was saved wrong —
+ *    "تاسك فايل تست.xlsx" landed in the database as
+ *    "ØªØ§Ø³Ù ÙØ§ÙÙ ØªØ³Øª.xlsx". This walks the collections that keep a file
+ *    name and puts the real one back.
+ * 2. The MongoDB driver stopped persisting a GridFS file's `contentType`, so
+ *    older uploads are served as application/octet-stream and PDFs download
+ *    instead of previewing. The type is inferred from the name.
  *
- * Only names whose bytes are valid UTF-8 are touched (see
- * decodeUploadedFileName), so a name that was always fine is left alone and
- * running this twice changes nothing.
+ * Both passes are conservative — only names whose bytes are valid UTF-8 are
+ * decoded, and only files with no type at all are typed — so a record that was
+ * always fine is left alone and running this twice changes nothing.
  *
  *   node src/scripts/repairFileNames.js          # dry run — lists what would change
  *   node src/scripts/repairFileNames.js --apply  # writes the fixes
@@ -17,6 +20,7 @@
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import { decodeUploadedFileName } from "../utils/fileName.js";
+import { mimeFromName } from "../utils/fileType.js";
 
 import TaskAttachment from "../models/TaskAttachment.js";
 import TicketAttachment from "../models/TicketAttachment.js";
@@ -72,6 +76,32 @@ const repairArray = async (Model, label, arrayField) => {
   return count;
 };
 
+/**
+ * Put a content type back on GridFS records.
+ *
+ * The MongoDB driver stopped persisting the `contentType` option, so every file
+ * uploaded before that was noticed has none and is served as
+ * application/octet-stream — which stops a PDF from ever previewing. The type
+ * is inferred from the file name and written to `metadata.contentType`, where
+ * the driver does keep it.
+ */
+const repairContentTypes = async () => {
+  const files = mongoose.connection.db.collection("uploads.files");
+  const docs = await files
+    .find({ contentType: { $exists: false }, "metadata.contentType": { $exists: false } })
+    .project({ filename: 1, "metadata.originalName": 1 })
+    .toArray();
+  let count = 0;
+  for (const doc of docs) {
+    const type = mimeFromName(doc.metadata?.originalName) || mimeFromName(doc.filename);
+    if (!type) continue;
+    count += 1;
+    if (APPLY) await files.updateOne({ _id: doc._id }, { $set: { "metadata.contentType": type } });
+  }
+  console.log(`  ${count} of ${docs.length} untyped file(s) can be typed from their name`);
+  return count;
+};
+
 /** The GridFS file records themselves (`filename` and `metadata.originalName`). */
 const repairGridFs = async () => {
   const files = mongoose.connection.db.collection("uploads.files");
@@ -98,6 +128,7 @@ const run = async () => {
 
   let total = 0;
   total += await repairGridFs();
+  total += await repairContentTypes();
   total += await repairSimple(TaskAttachment, "task attachment");
   total += await repairSimple(TicketAttachment, "ticket attachment");
   total += await repairSimple(LeadAttachment, "lead attachment");
@@ -108,7 +139,7 @@ const run = async () => {
   total += await repairArray(TicketComment, "ticket comment", "attachments");
   total += await repairArray(Product, "product image", "images");
 
-  console.log(`\n${total} file name(s) ${APPLY ? "repaired" : "would be repaired"}`);
+  console.log(`\n${total} record(s) ${APPLY ? "repaired" : "would be repaired"}`);
   await mongoose.disconnect();
 };
 
