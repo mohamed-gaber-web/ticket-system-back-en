@@ -8,6 +8,7 @@ import { isSuperAdmin } from "../utils/teleSalesScope.js";
 import { InputError, isInputError } from "../utils/inputError.js";
 import { publicDocumentUrl } from "../utils/templateVariables.js";
 import { contentDisposition } from "../utils/fileName.js";
+import { resolveContentType, isInlineType } from "../utils/fileType.js";
 
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(String(v ?? ""));
 
@@ -244,10 +245,12 @@ export const streamPublicSalesDocument = async (req, res) => {
     const [file] = await bucket.find({ _id: doc.file.fileId }).toArray();
     if (!file) return res.status(404).json({ success: false, message: "Document not found" });
 
-    const contentType = file.contentType || "application/octet-stream";
+    // GridFS no longer stores a content type (see utils/fileType.js), but the
+    // document record kept the one reported at upload — prefer it.
+    const contentType = doc.file.fileType || resolveContentType(file, doc.file.fileName);
     // PDFs and images open in the browser; everything else downloads. SVG is
     // never inlined (stored XSS), same rule as /api/files/:id.
-    const inline = contentType === "application/pdf" || (contentType.startsWith("image/") && contentType !== "image/svg+xml");
+    const inline = isInlineType(contentType);
     res.set("Content-Type", contentType);
     res.set("Content-Length", file.length.toString());
     res.set("Content-Disposition", contentDisposition(doc.file.fileName || file.filename, { inline }));
