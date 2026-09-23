@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import Consultant from "../models/Consltant.js";
 import TeleSalesTeam from "../models/TeleSalesTeam.js";
-import { isAdmin, roleFamily } from "./access.js";
+import { isAdmin, roleFamily, holdsPrivilegedModule } from "./access.js";
 
 /**
  * The single authority for "what may this caller see and touch in tele-sales?".
@@ -228,6 +228,8 @@ export const canManageLeadChild = (req, lead, doc, ownerField) => {
 export const canManageAgent = (req, agent) => {
   if (isSuperAdmin(req)) return true;
   if (!isSalesManager(req)) return false;
+  // An agent an admin has given HR or admin access is admin-managed
+  if (holdsPrivilegedModule(agent)) return false;
   return agent?.role === "sales";
 };
 

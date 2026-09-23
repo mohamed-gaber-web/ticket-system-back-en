@@ -11,6 +11,7 @@ import notificationRoutes from "./notificationRoutes.js";
 import ticketStatusHistoryRoutes from "./ticketStatusHistoryRoutes.js";
 import categoryRoutes from "./categoryRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
+import { guardHrFiles } from "../controllers/employeeDocumentController.js";
 import environmentRoutes from "./environmentRoutes.js";
 import featureRoutes from "./featureRoutes.js";
 import productTypeRoutes from "./productTypeRoutes.js";
@@ -159,6 +160,10 @@ router.use("/kpi", kpiRoutes);
 
 // Employee Evaluation routes
 router.use("/evaluations", evaluationRoutes);
+
+// HR documents live in the same GridFS bucket but are only ever served through
+// /consultants/:id/documents — the generic file routes refuse them.
+router.all(["/files/:id", "/files/:id/info"], guardHrFiles);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

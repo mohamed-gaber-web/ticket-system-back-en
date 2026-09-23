@@ -1,6 +1,8 @@
-import Consultant from "../models/Consltant.js";
+import mongoose from "mongoose";
+import Consultant, { HR_ENUMS } from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
 import { sendConsultantWelcomeEmail } from "../utils/emailService.js";
+import { deleteAllEmployeeDocuments } from "./employeeDocumentController.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import {
   ROLES,
@@ -10,6 +12,7 @@ import {
   roleFamily,
   familyRoles,
   canManageEmployee,
+  canViewHr,
   assignableRoles,
   emailTakenElsewhere,
   EMAIL_TAKEN_MESSAGE,
@@ -17,8 +20,64 @@ import {
 
 const EMPLOYEE_SELECT = "-password -refreshToken -resetPasswordToken -resetPasswordExpire";
 
-const populateEmployee = (q) =>
+// `withHr` opts back into the confidential HR file (select: false on the model)
+const populateEmployee = (q, withHr = false) => {
   q.populate("department", "name").populate("teleSalesTeam", "name code isActive");
+  if (withHr) {
+    q.select("+hr").populate("hr.directManager", "firstName lastName email employeeCode position");
+  }
+  return q;
+};
+
+// ── HR file sanitiser ─────────────────────────────────────────────────────────
+// Only these keys are ever written into `hr`, each coerced from what a form
+// sends ("" means "clear it"). Anything else in the payload is dropped.
+const HR_STRING_FIELDS = ["fullLegalName", "nationalId", "address", "recruiterName", "section", "workLocation", "bankName", "bankAccount", "notes"];
+const HR_DATE_FIELDS = ["dateOfBirth", "applicationDate", "interviewDate", "hireDate", "contractEndDate"];
+const HR_NUMBER_FIELDS = ["contractDurationMonths", "probationPeriodMonths", "basicSalary", "grossSalary", "netSalary", "insuranceWage", "employeeInsuranceShare", "employerInsuranceShare"];
+const HR_ENUM_FIELDS = Object.keys(HR_ENUMS);
+
+class HrInputError extends Error {}
+
+const blank = (v) => v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+
+const sanitizeHr = (input) => {
+  if (!input || typeof input !== "object") return {};
+  const out = {};
+  for (const k of HR_STRING_FIELDS) {
+    if (k in input) out[k] = blank(input[k]) ? null : String(input[k]).trim();
+  }
+  for (const k of HR_ENUM_FIELDS) {
+    if (k in input) out[k] = blank(input[k]) ? null : String(input[k]);
+  }
+  for (const k of HR_DATE_FIELDS) {
+    if (!(k in input)) continue;
+    if (blank(input[k])) { out[k] = null; continue; }
+    const d = new Date(input[k]);
+    if (Number.isNaN(d.getTime())) throw new HrInputError(`Invalid date for ${k}`);
+    out[k] = d;
+  }
+  for (const k of HR_NUMBER_FIELDS) {
+    if (!(k in input)) continue;
+    if (blank(input[k])) { out[k] = k === "insuranceWage" ? 0 : null; continue; }
+    const n = Number(input[k]);
+    if (!Number.isFinite(n)) throw new HrInputError(`Invalid number for ${k}`);
+    out[k] = n;
+  }
+  if ("directManager" in input) {
+    const m = input.directManager && typeof input.directManager === "object" ? input.directManager._id : input.directManager;
+    if (blank(m)) out.directManager = null;
+    else if (!mongoose.isValidObjectId(m)) throw new HrInputError("Invalid direct manager");
+    else out.directManager = m;
+  }
+  return out;
+};
+
+const badRequest = (res, message, errors) =>
+  res.status(400).json({ success: false, message, ...(errors && { errors }) });
+
+/** Mongo duplicate-key on the sparse unique employeeCode index. */
+const isDuplicateCode = (error) => error?.code === 11000 && Boolean(error.keyPattern?.employeeCode);
 
 // Out-of-scope employees answer 404, never 403 — a manager must not be able to
 // confirm which ids belong to people outside their family.
@@ -74,6 +133,7 @@ const getAllConsultants = async (req, res) => {
         { firstName: { $regex: safe, $options: "i" } },
         { lastName: { $regex: safe, $options: "i" } },
         { email: { $regex: safe, $options: "i" } },
+        { employeeCode: { $regex: safe, $options: "i" } },
       ];
     }
 
@@ -109,7 +169,7 @@ const getAllConsultants = async (req, res) => {
 // @access  Public
 const getConsultantById = async (req, res) => {
   try {
-    const consultant = await populateEmployee(Consultant.findById(req.params.id))
+    const consultant = await populateEmployee(Consultant.findById(req.params.id), canViewHr(req.user))
       .select(EMPLOYEE_SELECT)
       .populate({
         path: "assignments",
@@ -160,7 +220,14 @@ const createConsultant = async (req, res) => {
       profilePicture,
       teleSalesTeam,
       modules,
+      employeeCode,
     } = req.body;
+
+    const withHr = canViewHr(req.user);
+    const hr = withHr ? sanitizeHr(req.body.hr) : {};
+    if (withHr && employeeCode && (await Consultant.exists({ employeeCode: String(employeeCode).trim() }))) {
+      return badRequest(res, "This employee code is already in use.");
+    }
 
     // A manager may only mint the plain role of their own family; an admin any role.
     const allowed = assignableRoles(req.user);
@@ -190,6 +257,8 @@ const createConsultant = async (req, res) => {
       role,
       status,
       monthlyTargetHours: monthlyTargetHours ?? null,
+      // The HR file and employee code are written by admins and HR only
+      ...(withHr && { employeeCode, hr }),
       // Sales and marketing departments are derived from the role in the model;
       // an explicit department only applies to consultants and admins.
       ...(department && { department }),
@@ -199,7 +268,7 @@ const createConsultant = async (req, res) => {
       ...(isAdmin(req.user) && modules !== undefined && { modules: validModules(modules) }),
     });
 
-    const consultantResponse = await populateEmployee(Consultant.findById(consultant._id))
+    const consultantResponse = await populateEmployee(Consultant.findById(consultant._id), withHr)
       .select(EMPLOYEE_SELECT);
 
     sendConsultantWelcomeEmail(consultant).catch((err) =>
@@ -208,10 +277,12 @@ const createConsultant = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Consultant created successfully",
+      message: "Employee created successfully",
       data: consultantResponse,
     });
   } catch (error) {
+    if (error instanceof HrInputError) return badRequest(res, error.message);
+    if (isDuplicateCode(error)) return badRequest(res, "This employee code is already in use.");
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({
@@ -247,9 +318,13 @@ const updateConsultant = async (req, res) => {
       profilePicture,
       teleSalesTeam,
       modules,
+      employeeCode,
     } = req.body;
 
-    const consultant = await Consultant.findById(req.params.id);
+    const withHr = canViewHr(req.user);
+    const hr = withHr && req.body.hr !== undefined ? sanitizeHr(req.body.hr) : null;
+
+    const consultant = await Consultant.findById(req.params.id).select(hr ? "+hr" : "");
 
     if (!consultant || !canManageEmployee(req.user, consultant)) {
       return notFound(res);
@@ -270,6 +345,15 @@ const updateConsultant = async (req, res) => {
           message: EMAIL_TAKEN_MESSAGE,
         });
       }
+    }
+
+    if (withHr && employeeCode && String(employeeCode).trim() !== consultant.employeeCode) {
+      if (await Consultant.exists({ employeeCode: String(employeeCode).trim(), _id: { $ne: consultant._id } })) {
+        return badRequest(res, "This employee code is already in use.");
+      }
+    }
+    if (hr?.directManager && String(hr.directManager) === String(consultant._id)) {
+      return badRequest(res, "An employee cannot be their own direct manager.");
     }
 
     const nextRole = role ?? consultant.role;
@@ -294,9 +378,14 @@ const updateConsultant = async (req, res) => {
 
     // save() rather than findByIdAndUpdate so the role→department sync hook runs
     consultant.set(updates);
+    if (withHr && employeeCode !== undefined) consultant.employeeCode = employeeCode;
+    if (hr) {
+      if (!consultant.hr) consultant.hr = {};
+      for (const [k, v] of Object.entries(hr)) consultant.set(`hr.${k}`, v);
+    }
     await consultant.save();
 
-    const updated = await populateEmployee(Consultant.findById(consultant._id)).select(EMPLOYEE_SELECT);
+    const updated = await populateEmployee(Consultant.findById(consultant._id), withHr).select(EMPLOYEE_SELECT);
 
     res.status(200).json({
       success: true,
@@ -310,6 +399,8 @@ const updateConsultant = async (req, res) => {
         message: "Consultant not found",
       });
     }
+    if (error instanceof HrInputError) return badRequest(res, error.message);
+    if (isDuplicateCode(error)) return badRequest(res, "This employee code is already in use.");
 
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
@@ -342,6 +433,7 @@ const deleteConsultant = async (req, res) => {
       });
     }
 
+    await deleteAllEmployeeDocuments(consultant._id);
     await consultant.deleteOne();
 
     res.status(200).json({

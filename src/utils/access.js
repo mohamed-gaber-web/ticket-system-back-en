@@ -99,14 +99,43 @@ export const hasModule = (user, module) => effectiveModules(user).includes(modul
 // ── Managing people ───────────────────────────────────────────────────────────
 
 /**
+ * HR staff: anyone an admin has given the `hr` module. They run the whole
+ * employee file (personal, contract, payroll) for everyone but admins.
+ */
+export const isHr = (user) => hasModule(user, "hr");
+
+/**
+ * May `actor` read and write the confidential HR file (national ID, salary,
+ * bank account…)? Admins and HR only — managers run their people's access, not
+ * their pay.
+ */
+export const canViewHr = (actor) => isAdmin(actor) || isHr(actor);
+
+/** Anyone who may open the employee create/edit screens at all. */
+export const canManageEmployees = (actor) => isManagerOrAdmin(actor) || isHr(actor);
+
+/** Modules that open other people's data — holding one makes an account admin-managed. */
+export const PRIVILEGED_MODULES = Object.freeze(["admin", "hr"]);
+
+/** Does this employee hold a privileged module (by role default or override)? */
+export const holdsPrivilegedModule = (user) =>
+  effectiveModules(user).some((m) => PRIVILEGED_MODULES.includes(m));
+
+/**
  * May `actor` create, edit, deactivate or reset the password of `target`?
  *
- * Admins: anyone. Managers: only the plain employees of their own family — never
- * another manager, never an admin, never someone from a different family. A
- * manager editing themselves goes through the profile route, not this one.
+ * Admins: anyone. HR: anyone but an admin, and never themselves (their own file
+ * goes through the profile route). Managers: only the plain employees of their
+ * own family — never another manager, never an admin, never someone from a
+ * different family.
+ *
+ * Nobody but an admin manages an account that holds a privileged module (`hr`,
+ * `admin`): resetting its password would hand the actor that access.
  */
 export const canManageEmployee = (actor, target) => {
   if (isAdmin(actor)) return true;
+  if (holdsPrivilegedModule(target)) return false;
+  if (isHr(actor) && target?.role && !isAdmin(target) && String(target._id) !== String(actor._id)) return true;
   if (!isManager(actor)) return false;
   if (!target?.role || isManagerOrAdmin(target)) return false;
   return isSameFamily(actor, target);
@@ -114,10 +143,12 @@ export const canManageEmployee = (actor, target) => {
 
 /**
  * The roles `actor` may hand out when creating or editing an employee. Admins may
- * assign any role; a manager may only assign the plain role of their own family.
+ * assign any role; HR any role but admin; a manager only the plain role of their
+ * own family.
  */
 export const assignableRoles = (actor) => {
   if (isAdmin(actor)) return [...ROLES];
+  if (isHr(actor)) return ROLES.filter((r) => r !== "admin");
   if (!isManager(actor)) return [];
   return [roleFamily(actor.role)];
 };
@@ -155,6 +186,12 @@ export const requireManagerOrAdmin = (req, res, next) =>
   isEmployee(req) && isManagerOrAdmin(req.user)
     ? next()
     : forbid(res, "Manager or administrator access required.");
+
+/** Managers, admins and HR — the people who run employee records. */
+export const requireEmployeeManager = (req, res, next) =>
+  isEmployee(req) && canManageEmployees(req.user)
+    ? next()
+    : forbid(res, "Manager, HR or administrator access required.");
 
 /** Pass when the employee may open ANY of the named modules. */
 export const requireModule = (...modules) => (req, res, next) => {

@@ -253,6 +253,12 @@ export const updateProfile = async (req, res) => {
       "department",
       "teleSalesTeam",
       "company",
+      // The HR file and employee code are HR's to write (consultantController),
+      // never the employee's own — salary, contract, IBAN, national ID…
+      "hr",
+      "employeeCode",
+      "resetPasswordToken",
+      "resetPasswordExpire",
     ];
     const updateData = { ...req.body };
 

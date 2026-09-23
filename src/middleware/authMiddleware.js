@@ -10,6 +10,7 @@ export {
   requireCustomer,
   requireAdmin,
   requireManagerOrAdmin,
+  requireEmployeeManager,
   requireModule,
 } from "../utils/access.js";
 

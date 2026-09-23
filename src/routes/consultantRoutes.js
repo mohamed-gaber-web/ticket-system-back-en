@@ -10,15 +10,23 @@ import {
   getConsultantMonthlyHours,
   getConsultantTotalHours,
 } from "../controllers/consultantController.js";
-import { protect, requireEmployee, requireAdmin, requireManagerOrAdmin } from "../middleware/authMiddleware.js";
+import {
+  receiveDocuments,
+  getEmployeeDocuments,
+  uploadEmployeeDocuments,
+  downloadEmployeeDocument,
+  deleteEmployeeDocument,
+} from "../controllers/employeeDocumentController.js";
+import { protect, requireEmployee, requireAdmin, requireEmployeeManager } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Reading the roster is open to every employee (pickers need names). Writing is
-// for admins and managers; the controller confines a manager to their own
+// Reading the roster is open to every employee (pickers need names); the
+// confidential HR file on each record is only returned to admins and HR. Writing
+// is for admins, HR and managers; the controller confines a manager to their own
 // family via canManageEmployee. Deleting stays admin-only.
 const consultantAuth = [protect, requireEmployee];
-const managerAuth = [protect, requireManagerOrAdmin];
+const managerAuth = [protect, requireEmployeeManager];
 const adminAuth = [protect, requireAdmin];
 
 /**
@@ -386,6 +394,15 @@ router
  *         description: Server error
  */
 router.put("/:id/password", ...managerAuth, updateConsultantPassword);
+
+// HR documents (national ID, certificates…). The controller confines them to
+// admins and HR — anyone else gets 404.
+router
+  .route("/:id/documents")
+  .get(...consultantAuth, getEmployeeDocuments)
+  .post(...consultantAuth, ...receiveDocuments, uploadEmployeeDocuments);
+router.get("/:id/documents/:docId/file", ...consultantAuth, downloadEmployeeDocument);
+router.delete("/:id/documents/:docId", ...consultantAuth, deleteEmployeeDocument);
 
 router.get("/:id/monthly-hours", ...consultantAuth, getConsultantMonthlyHours);
 router.get("/:id/total-hours", ...consultantAuth, getConsultantTotalHours);

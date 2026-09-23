@@ -24,6 +24,9 @@ import {
   requireModule,
   requireAdmin,
   requireManagerOrAdmin,
+  requireEmployeeManager,
+  canViewHr,
+  holdsPrivilegedModule,
 } from "../src/utils/access.js";
 
 const user = (role, extra = {}) => ({ _id: "u", role, ...extra });
@@ -204,5 +207,70 @@ describe("middlewares", () => {
     assert.equal(run(requireManagerOrAdmin, employee("sales_manager")).passed, true);
     assert.equal(run(requireManagerOrAdmin, employee("sales")).status, 403);
     assert.equal(run(requireManagerOrAdmin, customer).status, 403);
+  });
+});
+
+describe("HR module", () => {
+  const hr = user("consultant", { _id: "hr1", modules: ["tickets", "hr"] });
+  const employee = (role, extra) => ({ userType: "employee", user: user(role, extra) });
+  const customer = { userType: "customer", user: { role: "company_admin" } };
+
+  it("only admins and HR may see the confidential HR file", () => {
+    assert.equal(canViewHr(user("admin")), true);
+    assert.equal(canViewHr(hr), true);
+    assert.equal(canViewHr(user("sales_manager")), false);
+    assert.equal(canViewHr(user("consultant")), false);
+  });
+
+  it("HR manages every non-admin employee, managers included, but not themselves", () => {
+    assert.equal(canManageEmployee(hr, user("sales")), true);
+    assert.equal(canManageEmployee(hr, user("developer_manager")), true);
+    assert.equal(canManageEmployee(hr, user("admin")), false);
+    assert.equal(canManageEmployee(hr, hr), false);
+  });
+
+  it("HR may hand out any role except admin", () => {
+    const roles = assignableRoles(hr);
+    assert.equal(roles.includes("admin"), false);
+    assert.equal(roles.length, ROLES.length - 1);
+  });
+
+  it("requireEmployeeManager passes managers, admins and HR only", () => {
+    assert.equal(run(requireEmployeeManager, employee("consultant", { modules: ["hr"] })).passed, true);
+    assert.equal(run(requireEmployeeManager, employee("marketing_manager")).passed, true);
+    assert.equal(run(requireEmployeeManager, employee("admin")).passed, true);
+    assert.equal(run(requireEmployeeManager, employee("consultant")).status, 403);
+    assert.equal(run(requireEmployeeManager, customer).status, 403);
+  });
+
+  it("no role opens HR by default; admins always do", () => {
+    assert.equal(effectiveModules(user("admin")).includes("hr"), true);
+    for (const r of ROLES.filter((x) => x !== "admin")) {
+      assert.equal(effectiveModules(user(r)).includes("hr"), false, r);
+    }
+  });
+});
+
+describe("privileged accounts (hr / admin module holders)", () => {
+  const hr = user("consultant", { _id: "hr1", modules: ["tickets", "hr"] });
+  const salesWithHr = user("sales", { _id: "s1", modules: ["telesales", "hr"] });
+  const consultantWithAdmin = user("consultant", { _id: "c1", modules: ["tickets", "admin"] });
+
+  it("detects the privileged modules, by override or by role", () => {
+    assert.equal(holdsPrivilegedModule(salesWithHr), true);
+    assert.equal(holdsPrivilegedModule(consultantWithAdmin), true);
+    assert.equal(holdsPrivilegedModule(user("admin")), true);
+    assert.equal(holdsPrivilegedModule(user("sales")), false);
+  });
+
+  it("a manager cannot manage (e.g. reset the password of) a family member holding HR", () => {
+    assert.equal(canManageEmployee(user("sales_manager"), salesWithHr), false);
+    assert.equal(canManageEmployee(user("sales_manager"), user("sales")), true);
+  });
+
+  it("HR cannot manage another HR holder or an admin-module holder; admins can", () => {
+    assert.equal(canManageEmployee(hr, salesWithHr), false);
+    assert.equal(canManageEmployee(hr, consultantWithAdmin), false);
+    assert.equal(canManageEmployee(user("admin"), salesWithHr), true);
   });
 });

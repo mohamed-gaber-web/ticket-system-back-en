@@ -10,6 +10,7 @@ import {
 } from "../utils/teleSalesScope.js";
 import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
+import { deleteAllEmployeeDocuments } from "./employeeDocumentController.js";
 
 /**
  * The tele-sales "agents" are simply the employees of the sales family. This
@@ -298,6 +299,7 @@ export const deleteAgent = async (req, res) => {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
+    await deleteAllEmployeeDocuments(agent._id);
     await agent.deleteOne();
     res.status(200).json({ success: true, message: "Agent deleted successfully", data: {} });
   } catch (error) {
