@@ -4,6 +4,7 @@ import Lead from "../models/Lead.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
 import { isCrossTeamReader, callerTeamId } from "../utils/teleSalesScope.js";
+import { canViewHr } from "../utils/access.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
@@ -56,7 +57,8 @@ export const getAllTeams = async (req, res) => {
     const { isActive, search } = req.query;
 
     const filter = {};
-    if (!isCrossTeamReader(req)) {
+    // HR places sales employees in any team, so it sees the whole list
+    if (!isCrossTeamReader(req) && !canViewHr(req.user)) {
       const own = callerTeamId(req);
       if (!own) return res.status(200).json({ success: true, total: 0, data: [] });
       filter._id = own;
@@ -93,7 +95,7 @@ export const getTeamById = async (req, res) => {
     // would confirm the id belongs to a real team, and the pair of responses would
     // let any tele-sales user enumerate exactly how the business is structured —
     // which is what scoping getAllTeams was meant to prevent.
-    if (!isCrossTeamReader(req) && callerTeamId(req) !== String(team._id)) {
+    if (!isCrossTeamReader(req) && !canViewHr(req.user) && callerTeamId(req) !== String(team._id)) {
       return res.status(404).json({ success: false, message: "Team not found" });
     }
 

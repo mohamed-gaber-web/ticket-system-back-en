@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Consultant, { HR_ENUMS } from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
+import TeleSalesTeam from "../models/TeleSalesTeam.js";
 import { sendConsultantWelcomeEmail } from "../utils/emailService.js";
 import { deleteAllEmployeeDocuments } from "./employeeDocumentController.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
@@ -32,7 +33,7 @@ const populateEmployee = (q, withHr = false) => {
 // ── HR file sanitiser ─────────────────────────────────────────────────────────
 // Only these keys are ever written into `hr`, each coerced from what a form
 // sends ("" means "clear it"). Anything else in the payload is dropped.
-const HR_STRING_FIELDS = ["fullLegalName", "nationalId", "address", "recruiterName", "section", "workLocation", "bankName", "bankAccount", "notes"];
+const HR_STRING_FIELDS = ["fullLegalName", "nationalId", "address", "recruiterName", "section", "bankName", "bankAccount", "notes"];
 const HR_DATE_FIELDS = ["dateOfBirth", "applicationDate", "interviewDate", "hireDate", "contractEndDate"];
 const HR_NUMBER_FIELDS = ["contractDurationMonths", "probationPeriodMonths", "basicSalary", "grossSalary", "netSalary", "insuranceWage", "employeeInsuranceShare", "employerInsuranceShare"];
 const HR_ENUM_FIELDS = Object.keys(HR_ENUMS);
@@ -71,6 +72,25 @@ const sanitizeHr = (input) => {
     else out.directManager = m;
   }
   return out;
+};
+
+/**
+ * Tele-sales team rules for an employee's (resulting) role. A `sales` employee
+ * must sit in a team — without one they would see no leads at all — and a team
+ * being newly chosen must exist and be active. Returns an error message or null.
+ * `changed` is false when the stored team is kept as it is, so editing someone
+ * else's details never fails on a team that was deactivated later.
+ */
+const salesTeamProblem = async (role, team, changed = true) => {
+  if (roleFamily(role) !== "sales") return null;
+  const id = team && typeof team === "object" ? team._id : team;
+  if (!id) return role === "sales" ? "A sales employee must belong to a tele-sales team — choose one." : null;
+  if (!changed) return null;
+  if (!mongoose.isValidObjectId(id)) return "Invalid tele-sales team.";
+  const found = await TeleSalesTeam.findById(id).select("isActive").lean();
+  if (!found) return "Tele-sales team not found.";
+  if (found.isActive === false) return "That tele-sales team is inactive — choose an active team.";
+  return null;
 };
 
 const badRequest = (res, message, errors) =>
@@ -239,6 +259,9 @@ const createConsultant = async (req, res) => {
       });
     }
 
+    const teamProblem = await salesTeamProblem(role, teleSalesTeam);
+    if (teamProblem) return badRequest(res, teamProblem);
+
     const consultantExists = await Consultant.findOne({ email });
     if (consultantExists || (await emailTakenElsewhere(email, Consultant))) {
       return res.status(400).json({
@@ -357,6 +380,11 @@ const updateConsultant = async (req, res) => {
     }
 
     const nextRole = role ?? consultant.role;
+    const currentTeam = consultant.teleSalesTeam ? String(consultant.teleSalesTeam) : null;
+    const nextTeam = teleSalesTeam !== undefined ? (teleSalesTeam || null) : currentTeam;
+    const nextTeamId = nextTeam && typeof nextTeam === "object" ? String(nextTeam._id) : nextTeam;
+    const teamProblem = await salesTeamProblem(nextRole, nextTeamId, nextTeamId !== currentTeam);
+    if (teamProblem) return badRequest(res, teamProblem);
     const updates = {
       firstName,
       lastName,

@@ -64,7 +64,6 @@ const hrSchema = new mongoose.Schema(
     // Job placement (job title = `position`, department = `department`)
     section: { type: String, trim: true, maxlength: 150, default: null },
     directManager: { type: mongoose.Schema.Types.ObjectId, ref: "Consultant", default: null },
-    workLocation: { type: String, trim: true, maxlength: 200, default: null },
     hireDate: { type: Date, default: null },
 
     // Contract
