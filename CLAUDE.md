@@ -22,15 +22,34 @@ Requires a `.env` file with: `MONGO_URI`, `JWT_SECRET`, `PORT`, `NODE_ENV`, `CLI
 
 `server.js` → connects to MongoDB, initializes GridFS, mounts all routes under `/api` via `src/routes/index.js`. Swagger docs served at `/api-docs`.
 
-### Four User Types
+### Two User Types, One Employee Collection
 
-Authentication supports four distinct user types stored in separate collections, each with their own model:
-- **Customer** (`Customer.js`) — company/client users who create tickets; roles: `company_admin`, `company_user`
-- **Consultant** (`Consltant.js` — note the typo in filename) — staff who manage/assign tickets; roles: `consultant`, `senior_consultant`, `admin`
-- **TeamMember** (`TeamMember.js`) — belong to a Team; roles: `member`, `team_lead`
-- **TeleSalesAgent** (`TeleSalesAgent.js`) — the tele-sales module; roles: `user`, `manager`, `admin`
+Two kinds of people log in, and the JWT carries `userType: "employee" | "customer"`:
+- **Customer** (`Customer.js`) — company/client users who create tickets; roles: `company_admin`, `company_user`. Separate collection with its own tenant (`company`).
+- **Employee** (`Consltant.js` — the model keeps its historical name `Consultant` because hundreds of refs point at it; read it as *Employee*). Every member of staff lives here with a flat **role**:
 
-The JWT payload includes `userType` to distinguish them. Auth middleware (`src/middleware/authMiddleware.js`) resolves the correct model based on `userType`. Use `protect` for authentication, `authorize(...userTypes)` for type-based access, and `authorizeRole(...roles)` for role-based access.
+| role | default modules | notes |
+|---|---|---|
+| `admin` | all | every module, every tele-sales team, manages everyone |
+| `consultant` | `tickets` | |
+| `sales` | `telesales` | pinned to one tele-sales team (`teleSalesTeam`) |
+| `sales_manager` | `telesales` | cross-team; manages the `sales` people |
+| `marketing` | `telesales` (read-only), `tasks` | |
+| `marketing_manager` | same | manages the `marketing` people |
+| `developer` | `development` | works the boards they created or were added to |
+| `developer_manager` | `development` | every board; manages the `developer` people |
+
+Modules are `tickets`, `telesales`, `tasks`, `admin` (config/lookup writes), `development` (kanban boards), `hr` (employee directory + confidential HR file; no role has it by default — an admin grants it per employee). An admin may override the list per employee via `modules[]` (empty = role defaults). The employee's HR file (national ID, contract, salary, IBAN, insurance…) is the `hr` sub-document on `Consltant.js`, `select: false`; `consultantController` opts in with `+hr` only when `canViewHr` (admin or `hr` module) and writes it through the `sanitizeHr` allow-list. HR staff manage every non-admin employee (`canManageEmployee`, `requireEmployeeManager`). Never return `hr` from any other endpoint. Scanned HR documents (national ID, certificates, فيش وتشبيه…) are `EmployeeDocument` records + GridFS files tagged `metadata.category: "hr-document"`, served only by `/api/consultants/:id/documents[/:docId/file]` (`employeeDocumentController.js`, same HR checks); `guardHrFiles` makes the generic `/api/files/:id` routes answer 404 for them. **All authorisation is a function of the role — never of a Department name.** `department` is kept on the employee only for the modules that group by it (tasks, requests) and is auto-synced from the role for sales/marketing.
+
+**`src/utils/access.js` is the single authority** (vocabulary in `src/utils/roles.js`): `roleFamily`, `isAdmin`, `isManager`, `effectiveModules`, `hasModule`, `canManageEmployee`, `emailTakenElsewhere`, and the middlewares `requireEmployee`, `requireCustomer`, `requireAdmin`, `requireManagerOrAdmin`, `requireModule(...)`. Route files import them from `authMiddleware.js` alongside `protect`. Never hand-roll a `role === "admin"` check in a controller. Tests: `tests/access.test.js`.
+
+**Login is by e-mail alone** (`POST /api/auth/signin` with `{email, password}`): employees are looked up first, then customers. Because of that, an e-mail must be unique across both collections — every create/update path calls `emailTakenElsewhere`. Legacy `userType` values (`consultant`, `tele_sales`) are still accepted and normalised to `employee`; `team_member` is gone.
+
+**Managers** (`*_manager`) see all data of their family, assign work, create/edit/deactivate the plain employees of their family (never admins or other managers, never `modules`), and approve vacation/excuse requests of their family. Admin does everything.
+
+**Every router is behind `protect`.** Lookup/config routers are GET-for-anyone-signed-in, write-for-admin. Customers are fenced to their own company's tickets server-side (`customerScopeIds` in `ticketController.js`).
+
+**Migration:** `migrate-employees.js --dry` then without `--dry` folds the old `TeleSalesAgent` collection into employees (same `_id`, e-mail-collision merge), re-roles old consultants, rewrites history markers and seeds an admin from `ADMIN_EMAIL`/`ADMIN_PASSWORD`. The old `TeleSalesAgent.js` model and `seed-telesales-admin.js` remain only until the migration has run everywhere.
 
 ### Tele-Sales Team Isolation
 
@@ -38,7 +57,7 @@ The tele-sales module is multi-tenant. **`TeleSalesTeam` (Egypt / UAE / KSA) is 
 
 **All of it is enforced in one file — `src/utils/teleSalesScope.js`.** Never hand-roll a team or ownership check in a controller; that rule used to be copy-pasted in ~15 places, which made it luck whether a new endpoint remembered it. Use:
 
-- `teamScopeFilter(req)` — spread into **every** list, count and aggregate. Fails closed: a caller with no team matches nothing, never everything. Returns a real `ObjectId` because `aggregate()` doesn't cast its `$match`.
+- `teamScopeFilter(req, field = "team")` — spread into **every** list, count and aggregate. Fails closed: a caller with no team matches nothing, never everything. Returns a real `ObjectId` because `aggregate()` doesn't cast its `$match`. Pass `"teleSalesTeam"` when scoping employees.
 - `activityScopeFilter(req, ownerField)` — for the two feeds that read `CallLog`/`FollowUp` directly (`/calls/recent`, `/followups/upcoming`) rather than through a lead. Those two collections carry a **denormalised `team`** for exactly this reason; it must be copied on create and re-stamped if the lead ever moves team.
 - `canViewLead` / `canEditLead` / `canManageLead` / `canClaimLead` / `canChangeLeadTeam` — per-document decisions. Viewing is team-wide (the team shares one pipeline); writing is narrower (own + unassigned); reassigning is a manager's; moving a lead between teams is a super admin's alone.
 - `canManageActivity` (team-bearing docs) / `canManageLeadChild` (attachments and emails, whose team comes from the lead).
@@ -46,9 +65,15 @@ The tele-sales module is multi-tenant. **`TeleSalesTeam` (Egypt / UAE / KSA) is 
 
 **Out-of-team requests answer 404, not 403** — a 403 confirms the record is real and lets anyone walk the id space to size another team's pipeline. A same-team-but-not-yours refusal is a 403 with a reason.
 
-Roles: `user` sees their whole team and works their own + unassigned leads; `manager` runs one team and its roster; `admin` is the cross-team super admin and legitimately has no team. `Consultant.teleSalesTeam` scopes sales-department consultants the same way; consultant admins remain cross-team.
+Roles (`Employee.role`): `sales` sees their whole team and works their own + unassigned leads; `sales_manager` sees and writes **every** team and manages the sales roster; `marketing` / `marketing_manager` read every team but write nothing (`requireTeleSalesWrite` refuses them); `admin` does everything and alone manages the teams. Cross-team readers legitimately have no team.
 
-Migration: `backfill-telesales-teams.js` seeds the three teams and adopts pre-team records (super admins deliberately excluded). Security tests: `tests/teleSalesScope.test.js`.
+Security tests: `tests/teleSalesScope.test.js`.
+
+### Development Boards (kanban)
+
+The `development` module is `DevBoard` → `DevList` (columns) → `DevCard` (+ `DevCardComment`), all under `src/controllers/development/` and one router `developmentRoutes.js` (`/api/development`). Ordering is an integer `position` per list, renumbered server-side with `bulkWrite` on every move/reorder (`PATCH /cards/:id/move { listId, position }` answers the resulting order of both lists so the client only reconciles).
+
+**`src/utils/developmentScope.js` decides who sees what** — never inline it. Admins and `developer_manager` see every board; everyone else only boards they created or are a member of (`boardScopeFilter`, `canViewBoard`). Every member may work the board (lists, cards, checklist, comments); only the creator / manager / admin may shape it (`canAdminBoard`: rename, archive, delete, members, labels, delete lists). Out-of-scope ids answer **404**, an in-scope non-admin gets **403**. Labels live on the board (`board.labels` subdocs) and cards reference them by id; assignees and members must be active employees who can open the module (`validDevelopers`). Tests: `tests/developmentScope.test.js`.
 
 ### Code Organization
 

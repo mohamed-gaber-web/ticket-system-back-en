@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 
+// Only "Consultant" is written now; the others survive on pre-migration rows.
 const EMPLOYEE_MODELS = ["Consultant", "TeamMember", "TeleSalesAgent"];
 
 // Per-employee, per-year vacation balance. Excuse usage is tracked in hours

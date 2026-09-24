@@ -1,5 +1,10 @@
 import mongoose from "mongoose";
 
+/**
+ * LEGACY. Team-based ticket assignment was retired along with the TeamMember
+ * user type; this model only remains so old tickets' `assignedTeam` refs still
+ * resolve. Nothing creates teams any more.
+ */
 const teamSchema = mongoose.Schema(
   {
     teamName: {
@@ -16,7 +21,7 @@ const teamSchema = mongoose.Schema(
     },
     teamLead: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "TeamMember",
+      ref: "Consultant",
     },
     specialization: {
       type: String,
@@ -36,13 +41,6 @@ const teamSchema = mongoose.Schema(
     toObject: { virtuals: true },
   }
 );
-
-// Virtual for team members
-teamSchema.virtual("members", {
-  ref: "TeamMember",
-  localField: "_id",
-  foreignField: "team",
-});
 
 // Virtual for assigned tickets
 teamSchema.virtual("assignedTickets", {

@@ -4,6 +4,7 @@ import LeadEmail from "../models/LeadEmail.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import { sendCustomEmail, senderMailbox, MAX_TOTAL_ATTACHMENT_BYTES } from "../utils/emailService.js";
 import { sanitizeEmailHtml } from "../utils/htmlSanitizer.js";
+import { HR_DOCUMENT_CATEGORY } from "../models/EmployeeDocument.js";
 import { canViewLead, canEditLead, canManageLeadChild, teamScopeFilter } from "../utils/teleSalesScope.js";
 import { syncLeadInbox } from "../utils/leadInboxSync.js";
 
@@ -40,7 +41,10 @@ const loadAttachments = async (requested) => {
 
     const fileId = new mongoose.Types.ObjectId(item.fileId);
     const [file] = await bucket.find({ _id: fileId }).toArray();
-    if (!file) throw new Error(`Attachment not found: ${item.fileName || item.fileId}`);
+    // HR documents share the bucket but are only reachable through the HR routes
+    if (!file || file.metadata?.category === HR_DOCUMENT_CATEGORY) {
+      throw new Error(`Attachment not found: ${item.fileName || item.fileId}`);
+    }
 
     totalBytes += file.length;
     if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
@@ -72,7 +76,7 @@ const senderIdentity = (req) => {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email;
   return {
     sentBy: user._id,
-    sentByType: userType === "consultant" ? "Consultant" : "TeleSalesAgent",
+    sentByType: "Consultant",
     sentByName: name,
     sentByEmail: user.email,
   };

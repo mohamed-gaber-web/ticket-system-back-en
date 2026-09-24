@@ -35,7 +35,9 @@ const ticketAttachmentSchema = new mongoose.Schema(
     uploadedByUserType: {
       type: String,
       required: [true, "Uploader type is required"],
-      enum: ["customer", "consultant", "team_member"],
+      // "employee" is the current value; the rest survive on rows written before
+      // the employee/customer split and resolve to the same model.
+      enum: ["customer", "employee", "consultant", "team_member", "tele_sales"],
     },
     uploadedAt: {
       type: Date,
@@ -60,8 +62,8 @@ ticketAttachmentSchema.virtual("uploadedBy", {
 // Add virtual field for model name
 ticketAttachmentSchema.virtual("uploadedByUserModel").get(function () {
   if (this.uploadedByUserType === "customer") return "Customer";
-  if (this.uploadedByUserType === "consultant") return "Consultant";
-  if (this.uploadedByUserType === "team_member") return "TeamMember";
+  // Every non-customer uploader is an employee; old rows still say "consultant".
+  if (this.uploadedByUserType) return "Consultant";
   return null;
 });
 

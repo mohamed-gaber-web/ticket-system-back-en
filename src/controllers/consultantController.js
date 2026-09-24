@@ -1,13 +1,117 @@
-import Consultant from "../models/Consltant.js";
+import mongoose from "mongoose";
+import Consultant, { HR_ENUMS } from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
+import TeleSalesTeam from "../models/TeleSalesTeam.js";
 import { sendConsultantWelcomeEmail } from "../utils/emailService.js";
+import { deleteAllEmployeeDocuments } from "./employeeDocumentController.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
+import {
+  ROLES,
+  MODULES,
+  ROLE_DEFAULT_MODULES,
+  isAdmin,
+  roleFamily,
+  familyRoles,
+  canManageEmployee,
+  canViewHr,
+  assignableRoles,
+  emailTakenElsewhere,
+  EMAIL_TAKEN_MESSAGE,
+} from "../utils/access.js";
+
+const EMPLOYEE_SELECT = "-password -refreshToken -resetPasswordToken -resetPasswordExpire";
+
+// `withHr` opts back into the confidential HR file (select: false on the model)
+const populateEmployee = (q, withHr = false) => {
+  q.populate("department", "name").populate("teleSalesTeam", "name code isActive");
+  if (withHr) {
+    q.select("+hr").populate("hr.directManager", "firstName lastName email employeeCode position");
+  }
+  return q;
+};
+
+// ── HR file sanitiser ─────────────────────────────────────────────────────────
+// Only these keys are ever written into `hr`, each coerced from what a form
+// sends ("" means "clear it"). Anything else in the payload is dropped.
+const HR_STRING_FIELDS = ["fullLegalName", "nationalId", "address", "recruiterName", "section", "bankName", "bankAccount", "notes"];
+const HR_DATE_FIELDS = ["dateOfBirth", "applicationDate", "interviewDate", "hireDate", "contractEndDate"];
+const HR_NUMBER_FIELDS = ["contractDurationMonths", "probationPeriodMonths", "basicSalary", "grossSalary", "netSalary", "insuranceWage", "employeeInsuranceShare", "employerInsuranceShare"];
+const HR_ENUM_FIELDS = Object.keys(HR_ENUMS);
+
+class HrInputError extends Error {}
+
+const blank = (v) => v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+
+const sanitizeHr = (input) => {
+  if (!input || typeof input !== "object") return {};
+  const out = {};
+  for (const k of HR_STRING_FIELDS) {
+    if (k in input) out[k] = blank(input[k]) ? null : String(input[k]).trim();
+  }
+  for (const k of HR_ENUM_FIELDS) {
+    if (k in input) out[k] = blank(input[k]) ? null : String(input[k]);
+  }
+  for (const k of HR_DATE_FIELDS) {
+    if (!(k in input)) continue;
+    if (blank(input[k])) { out[k] = null; continue; }
+    const d = new Date(input[k]);
+    if (Number.isNaN(d.getTime())) throw new HrInputError(`Invalid date for ${k}`);
+    out[k] = d;
+  }
+  for (const k of HR_NUMBER_FIELDS) {
+    if (!(k in input)) continue;
+    if (blank(input[k])) { out[k] = k === "insuranceWage" ? 0 : null; continue; }
+    const n = Number(input[k]);
+    if (!Number.isFinite(n)) throw new HrInputError(`Invalid number for ${k}`);
+    out[k] = n;
+  }
+  if ("directManager" in input) {
+    const m = input.directManager && typeof input.directManager === "object" ? input.directManager._id : input.directManager;
+    if (blank(m)) out.directManager = null;
+    else if (!mongoose.isValidObjectId(m)) throw new HrInputError("Invalid direct manager");
+    else out.directManager = m;
+  }
+  return out;
+};
+
+/**
+ * Tele-sales team rules for an employee's (resulting) role. A `sales` employee
+ * must sit in a team — without one they would see no leads at all — and a team
+ * being newly chosen must exist and be active. Returns an error message or null.
+ * `changed` is false when the stored team is kept as it is, so editing someone
+ * else's details never fails on a team that was deactivated later.
+ */
+const salesTeamProblem = async (role, team, changed = true) => {
+  if (roleFamily(role) !== "sales") return null;
+  const id = team && typeof team === "object" ? team._id : team;
+  if (!id) return role === "sales" ? "A sales employee must belong to a tele-sales team — choose one." : null;
+  if (!changed) return null;
+  if (!mongoose.isValidObjectId(id)) return "Invalid tele-sales team.";
+  const found = await TeleSalesTeam.findById(id).select("isActive").lean();
+  if (!found) return "Tele-sales team not found.";
+  if (found.isActive === false) return "That tele-sales team is inactive — choose an active team.";
+  return null;
+};
+
+const badRequest = (res, message, errors) =>
+  res.status(400).json({ success: false, message, ...(errors && { errors }) });
+
+/** Mongo duplicate-key on the sparse unique employeeCode index. */
+const isDuplicateCode = (error) => error?.code === 11000 && Boolean(error.keyPattern?.employeeCode);
+
+// Out-of-scope employees answer 404, never 403 — a manager must not be able to
+// confirm which ids belong to people outside their family.
+const notFound = (res) => res.status(404).json({ success: false, message: "Employee not found" });
+
+const validModules = (modules) =>
+  Array.isArray(modules) ? modules.filter((m) => MODULES.includes(m)) : [];
 
 // @desc    Get all consultants
 // @route   GET /api/consultants
 // @access  Public
 const getAllConsultants = async (req, res) => {
   try {
-    const { status, role, page = 1, limit = 10, search } = req.query;
+    const { status, role, family, module, teleSalesTeam, page = 1, limit = 10, search } = req.query;
 
     const query = {};
 
@@ -15,23 +119,48 @@ const getAllConsultants = async (req, res) => {
       query.status = status;
     }
 
+    // `role` narrows to one role, `family` to a whole family (sales + sales_manager)
     if (role) {
       query.role = role;
+    } else if (family) {
+      query.role = { $in: familyRoles(family) };
+    }
+
+    // Employees who can open a module — either by override or by role default
+    if (module && MODULES.includes(module)) {
+      const byDefault = ROLES.filter((r) =>
+        r === "admin" ? true : (ROLE_DEFAULT_MODULES[r] ?? []).includes(module)
+      );
+      query.$and = [
+        {
+          $or: [
+            { modules: module },
+            { modules: { $size: 0 }, role: { $in: byDefault } },
+            { modules: { $exists: false }, role: { $in: byDefault } },
+            { role: "admin" },
+          ],
+        },
+      ];
+    }
+
+    if (teleSalesTeam) {
+      query.teleSalesTeam = teleSalesTeam;
     }
 
     if (search) {
+      const safe = escapeRegex(search);
       query.$or = [
-        { firstName: { $regex: search, $options: "i" } },
-        { lastName: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
+        { firstName: { $regex: safe, $options: "i" } },
+        { lastName: { $regex: safe, $options: "i" } },
+        { email: { $regex: safe, $options: "i" } },
+        { employeeCode: { $regex: safe, $options: "i" } },
       ];
     }
 
     const skip = (page - 1) * limit;
 
-    const consultants = await Consultant.find(query)
-      .select("-password -refreshToken")
-      .populate("department", "name")
+    const consultants = await populateEmployee(Consultant.find(query))
+      .select(EMPLOYEE_SELECT)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
@@ -60,9 +189,8 @@ const getAllConsultants = async (req, res) => {
 // @access  Public
 const getConsultantById = async (req, res) => {
   try {
-    const consultant = await Consultant.findById(req.params.id)
-      .select("-password -refreshToken")
-      .populate("department", "name")
+    const consultant = await populateEmployee(Consultant.findById(req.params.id), canViewHr(req.user))
+      .select(EMPLOYEE_SELECT)
       .populate({
         path: "assignments",
         select: "title status priority createdAt",
@@ -94,9 +222,9 @@ const getConsultantById = async (req, res) => {
   }
 };
 
-// @desc    Create new consultant
+// @desc    Create new employee
 // @route   POST /api/consultants
-// @access  Public
+// @access  Private (admin: any role; manager: plain employees of their own family)
 const createConsultant = async (req, res) => {
   try {
     const {
@@ -106,19 +234,39 @@ const createConsultant = async (req, res) => {
       phone,
       position,
       password,
-      role,
       status,
       monthlyTargetHours,
       department,
       profilePicture,
+      teleSalesTeam,
+      modules,
+      employeeCode,
     } = req.body;
 
-    const consultantExists = await Consultant.findOne({ email });
+    const withHr = canViewHr(req.user);
+    const hr = withHr ? sanitizeHr(req.body.hr) : {};
+    if (withHr && employeeCode && (await Consultant.exists({ employeeCode: String(employeeCode).trim() }))) {
+      return badRequest(res, "This employee code is already in use.");
+    }
 
-    if (consultantExists) {
+    // A manager may only mint the plain role of their own family; an admin any role.
+    const allowed = assignableRoles(req.user);
+    const role = req.body.role || (isAdmin(req.user) ? "consultant" : allowed[0]);
+    if (!allowed.includes(role)) {
+      return res.status(403).json({
+        success: false,
+        message: `You may only create employees with role: ${allowed.join(", ")}`,
+      });
+    }
+
+    const teamProblem = await salesTeamProblem(role, teleSalesTeam);
+    if (teamProblem) return badRequest(res, teamProblem);
+
+    const consultantExists = await Consultant.findOne({ email });
+    if (consultantExists || (await emailTakenElsewhere(email, Consultant))) {
       return res.status(400).json({
         success: false,
-        message: "Consultant with this email already exists",
+        message: EMAIL_TAKEN_MESSAGE,
       });
     }
 
@@ -132,13 +280,19 @@ const createConsultant = async (req, res) => {
       role,
       status,
       monthlyTargetHours: monthlyTargetHours ?? null,
+      // The HR file and employee code are written by admins and HR only
+      ...(withHr && { employeeCode, hr }),
+      // Sales and marketing departments are derived from the role in the model;
+      // an explicit department only applies to consultants and admins.
       ...(department && { department }),
       ...(profilePicture !== undefined && { profilePicture }),
+      ...(roleFamily(role) === "sales" && teleSalesTeam !== undefined && { teleSalesTeam: teleSalesTeam || null }),
+      // Module overrides are the admin's alone
+      ...(isAdmin(req.user) && modules !== undefined && { modules: validModules(modules) }),
     });
 
-    const consultantResponse = await Consultant.findById(consultant._id)
-      .select("-password -refreshToken")
-      .populate("department", "name");
+    const consultantResponse = await populateEmployee(Consultant.findById(consultant._id), withHr)
+      .select(EMPLOYEE_SELECT);
 
     sendConsultantWelcomeEmail(consultant).catch((err) =>
       console.error("Consultant welcome email error:", err.message)
@@ -146,10 +300,12 @@ const createConsultant = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Consultant created successfully",
+      message: "Employee created successfully",
       data: consultantResponse,
     });
   } catch (error) {
+    if (error instanceof HrInputError) return badRequest(res, error.message);
+    if (isDuplicateCode(error)) return badRequest(res, "This employee code is already in use.");
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({
@@ -167,9 +323,9 @@ const createConsultant = async (req, res) => {
   }
 };
 
-// @desc    Update consultant
+// @desc    Update employee
 // @route   PUT /api/consultants/:id
-// @access  Public
+// @access  Private (admin: anyone; manager: plain employees of their own family)
 const updateConsultant = async (req, res) => {
   try {
     const {
@@ -183,51 +339,86 @@ const updateConsultant = async (req, res) => {
       monthlyTargetHours,
       department,
       profilePicture,
+      teleSalesTeam,
+      modules,
+      employeeCode,
     } = req.body;
 
-    let consultant = await Consultant.findById(req.params.id);
+    const withHr = canViewHr(req.user);
+    const hr = withHr && req.body.hr !== undefined ? sanitizeHr(req.body.hr) : null;
 
-    if (!consultant) {
-      return res.status(404).json({
+    const consultant = await Consultant.findById(req.params.id).select(hr ? "+hr" : "");
+
+    if (!consultant || !canManageEmployee(req.user, consultant)) {
+      return notFound(res);
+    }
+
+    if (role !== undefined && role !== consultant.role && !assignableRoles(req.user).includes(role)) {
+      return res.status(403).json({
         success: false,
-        message: "Consultant not found",
+        message: `You may only assign role: ${assignableRoles(req.user).join(", ")}`,
       });
     }
 
     if (email && email !== consultant.email) {
       const emailExists = await Consultant.findOne({ email });
-      if (emailExists) {
+      if (emailExists || (await emailTakenElsewhere(email, Consultant))) {
         return res.status(400).json({
           success: false,
-          message: "Email already in use by another consultant",
+          message: EMAIL_TAKEN_MESSAGE,
         });
       }
     }
 
-    consultant = await Consultant.findByIdAndUpdate(
-      req.params.id,
-      {
-        firstName,
-        lastName,
-        email,
-        phone,
-        position,
-        role,
-        status,
-        ...(monthlyTargetHours !== undefined && { monthlyTargetHours: monthlyTargetHours ?? null }),
-        ...(department !== undefined && { department: department || null }),
-        ...(profilePicture !== undefined && { profilePicture: profilePicture || null }),
-      },
-      {
-        new: true,
-        runValidators: true,
+    if (withHr && employeeCode && String(employeeCode).trim() !== consultant.employeeCode) {
+      if (await Consultant.exists({ employeeCode: String(employeeCode).trim(), _id: { $ne: consultant._id } })) {
+        return badRequest(res, "This employee code is already in use.");
       }
-    ).select("-password -refreshToken").populate("department", "name");
+    }
+    if (hr?.directManager && String(hr.directManager) === String(consultant._id)) {
+      return badRequest(res, "An employee cannot be their own direct manager.");
+    }
+
+    const nextRole = role ?? consultant.role;
+    const currentTeam = consultant.teleSalesTeam ? String(consultant.teleSalesTeam) : null;
+    const nextTeam = teleSalesTeam !== undefined ? (teleSalesTeam || null) : currentTeam;
+    const nextTeamId = nextTeam && typeof nextTeam === "object" ? String(nextTeam._id) : nextTeam;
+    const teamProblem = await salesTeamProblem(nextRole, nextTeamId, nextTeamId !== currentTeam);
+    if (teamProblem) return badRequest(res, teamProblem);
+    const updates = {
+      firstName,
+      lastName,
+      email,
+      phone,
+      position,
+      role,
+      status,
+      ...(monthlyTargetHours !== undefined && { monthlyTargetHours: monthlyTargetHours ?? null }),
+      ...(department !== undefined && { department: department || null }),
+      ...(profilePicture !== undefined && { profilePicture: profilePicture || null }),
+      // The team only means something for the sales family; anyone else is cleared
+      ...(roleFamily(nextRole) === "sales"
+        ? teleSalesTeam !== undefined && { teleSalesTeam: teleSalesTeam || null }
+        : { teleSalesTeam: null }),
+      ...(isAdmin(req.user) && modules !== undefined && { modules: validModules(modules) }),
+    };
+    Object.keys(updates).forEach((k) => updates[k] === undefined && delete updates[k]);
+
+    // save() rather than findByIdAndUpdate so the role→department sync hook runs
+    consultant.set(updates);
+    if (withHr && employeeCode !== undefined) consultant.employeeCode = employeeCode;
+    if (hr) {
+      if (!consultant.hr) consultant.hr = {};
+      for (const [k, v] of Object.entries(hr)) consultant.set(`hr.${k}`, v);
+    }
+    await consultant.save();
+
+    const updated = await populateEmployee(Consultant.findById(consultant._id), withHr).select(EMPLOYEE_SELECT);
 
     res.status(200).json({
       success: true,
-      message: "Consultant updated successfully",
-      data: consultant,
+      message: "Employee updated successfully",
+      data: updated,
     });
   } catch (error) {
     if (error.kind === "ObjectId") {
@@ -236,6 +427,8 @@ const updateConsultant = async (req, res) => {
         message: "Consultant not found",
       });
     }
+    if (error instanceof HrInputError) return badRequest(res, error.message);
+    if (isDuplicateCode(error)) return badRequest(res, "This employee code is already in use.");
 
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
@@ -268,6 +461,7 @@ const deleteConsultant = async (req, res) => {
       });
     }
 
+    await deleteAllEmployeeDocuments(consultant._id);
     await consultant.deleteOne();
 
     res.status(200).json({
@@ -356,11 +550,8 @@ const updateConsultantPassword = async (req, res) => {
 
     const consultant = await Consultant.findById(req.params.id);
 
-    if (!consultant) {
-      return res.status(404).json({
-        success: false,
-        message: "Consultant not found",
-      });
+    if (!consultant || !canManageEmployee(req.user, consultant)) {
+      return notFound(res);
     }
 
     consultant.password = newPassword;

@@ -66,7 +66,9 @@ const ticketSchema = mongoose.Schema(
     },
     createdByType: {
       type: String,
-      enum: ["customer", "consultant"],
+      // "employee" is the current value; the rest survive on rows written before
+      // the employee/customer split and resolve to the same model.
+      enum: ["customer", "employee", "consultant"],
     },
     createdByConsultant: {
       type: mongoose.Schema.Types.ObjectId,

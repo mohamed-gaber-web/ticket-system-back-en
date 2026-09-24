@@ -19,9 +19,17 @@ import {
   getSubTickets,
   setTicketAdminPoints,
 } from "../controllers/ticketController.js";
-import { protect, authorize } from "../middleware/authMiddleware.js";
+import { protect, requireModule, requireAdmin, requireEmployee } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+
+// Every ticket route needs a signed-in user. Customers reach the read routes
+// and a few writes (create, feedback, status, sub-tickets, comments); the
+// controllers scope customers to their own company. Everything a customer
+// never does is behind the ticketing module.
+router.use(protect);
+const staff = requireModule("tickets");
+
 
 /**
  * @swagger
@@ -69,7 +77,7 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.get("/stats", getTicketStats);
+router.get("/stats", staff, getTicketStats);
 
 /**
  * @swagger
@@ -111,7 +119,7 @@ router.get("/stats", getTicketStats);
  *       500:
  *         description: Server error
  */
-router.get("/status/:status", getTicketsByStatus);
+router.get("/status/:status", staff, getTicketsByStatus);
 
 /**
  * @swagger
@@ -153,7 +161,7 @@ router.get("/status/:status", getTicketsByStatus);
  *       500:
  *         description: Server error
  */
-router.get("/priority/:priority", getTicketsByPriority);
+router.get("/priority/:priority", staff, getTicketsByPriority);
 
 /**
  * @swagger
@@ -324,23 +332,23 @@ router.get("/number/:ticketNumber", getTicketByNumber);
  *       500:
  *         description: Server error
  */
-router.route("/").get(getAllTickets).post(protect, createTicket);
+router.route("/").get(getAllTickets).post(createTicket);
 
 router
   .route("/:id")
   .get(getTicketById)
-  .put(protect, updateTicket)
-  .delete(deleteTicket);
+  .put(updateTicket)
+  .delete(requireAdmin, deleteTicket);
 
 // Update ticket status
-router.patch("/:id/status", protect, updateTicketStatus);
-router.get("/:id/pending-candidates", protect, authorize("consultant"), getPendingCandidates);
+router.patch("/:id/status", updateTicketStatus);
+router.get("/:id/pending-candidates", requireEmployee, getPendingCandidates);
 
 // Assign ticket
-router.patch("/:id/assign", assignTicket);
+router.patch("/:id/assign", staff, assignTicket);
 
 // Accept ticket
-router.patch("/:id/accept", protect, acceptTicket);
+router.patch("/:id/accept", staff, acceptTicket);
 
 // Add customer feedback
 router.patch("/:id/feedback", addCustomerFeedback);
@@ -349,10 +357,10 @@ router.patch("/:id/feedback", addCustomerFeedback);
 router.get("/:id/sla-status", getTicketSLAStatus);
 
 // Sub-ticket routes
-router.post("/:id/sub-ticket", protect, createSubTicket);
+router.post("/:id/sub-ticket", createSubTicket);
 router.get("/:id/sub-tickets", getSubTickets);
 
 // Admin points override
-router.patch("/:id/admin-points", protect, setTicketAdminPoints);
+router.patch("/:id/admin-points", requireAdmin, setTicketAdminPoints);
 
 export default router;

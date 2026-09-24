@@ -1,6 +1,7 @@
 import TicketStatusHistory from "../models/TicketStatusHistory.js";
 import Ticket from "../models/Ticket.js";
 
+import { isValidUserType, normalizeUserType } from "../utils/access.js";
 // @desc    Get all status history records
 // @route   GET /api/ticket-status-history
 // @access  Public
@@ -335,12 +336,10 @@ const getStatusHistoryByUserType = async (req, res) => {
     const { userType } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const validUserTypes = ["customer", "consultant", "team_member"];
-    if (!validUserTypes.includes(userType)) {
+    if (!isValidUserType(normalizeUserType(userType))) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid user type. Must be: customer, consultant, or team_member",
+        message: "Invalid user type. Must be: customer or employee",
       });
     }
 

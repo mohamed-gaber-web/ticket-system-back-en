@@ -26,7 +26,7 @@ const leadAttachmentSchema = mongoose.Schema(
     },
     uploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "TeleSalesAgent",
+      ref: "Consultant",
       required: true,
     },
   },

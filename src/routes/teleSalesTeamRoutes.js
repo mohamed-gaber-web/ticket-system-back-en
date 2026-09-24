@@ -7,26 +7,24 @@ import {
   deleteTeam,
   toggleTeamStatus,
 } from "../controllers/teleSalesTeamController.js";
-import {
-  protect,
-  authorizeTeleSalesAccess,
-  authorizeTeleSalesAdmin,
-} from "../middleware/authMiddleware.js";
+import { protect, requireModule } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Anyone in the tele-sales module may read teams — the UI needs their names to
-// label leads and agents — but the controller only ever returns the caller's own
-// team unless they are a super admin.
-router.use(protect, authorizeTeleSalesAccess);
+// Teams are managed by HR (the Teams page lives in the HR module) and read by
+// the tele-sales module, which needs their names to label leads and agents.
+// Tele-sales staff only ever get their own team back unless they read across
+// teams (see the controller); HR and admins see all of them.
+const readers = [protect, requireModule("telesales", "hr")];
+// Changing the team structure is HR's: the `hr` module, which admins always have.
+const managers = [protect, requireModule("hr")];
 
-router.get("/", getAllTeams);
-router.get("/:id", getTeamById);
+router.get("/", ...readers, getAllTeams);
+router.get("/:id", ...readers, getTeamById);
 
-// Changing the team structure itself is cross-team by definition: super admin only.
-router.post("/", authorizeTeleSalesAdmin, createTeam);
-router.patch("/:id", authorizeTeleSalesAdmin, updateTeam);
-router.delete("/:id", authorizeTeleSalesAdmin, deleteTeam);
-router.patch("/:id/toggle-status", authorizeTeleSalesAdmin, toggleTeamStatus);
+router.post("/", ...managers, createTeam);
+router.patch("/:id", ...managers, updateTeam);
+router.delete("/:id", ...managers, deleteTeam);
+router.patch("/:id/toggle-status", ...managers, toggleTeamStatus);
 
 export default router;

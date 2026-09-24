@@ -9,11 +9,11 @@ import {
   deleteMessageTemplate,
   previewMessageTemplate,
 } from "../controllers/messageTemplateController.js";
-import { protect, authorizeTeleSalesAccess, authorizeTeleSalesAdmin } from "../middleware/authMiddleware.js";
+import { protect, requireModule, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.use(protect, authorizeTeleSalesAccess);
+router.use(protect, requireModule("telesales"));
 
 router.get("/", getAllMessageTemplates);
 // Static paths above /:id.
@@ -21,9 +21,9 @@ router.get("/variables", getTemplateVariables);
 router.post("/preview", previewMessageTemplate);
 router.get("/:id", getMessageTemplateById);
 
-router.post("/", authorizeTeleSalesAdmin, createMessageTemplate);
-router.patch("/:id", authorizeTeleSalesAdmin, updateMessageTemplate);
-router.patch("/:id/toggle-status", authorizeTeleSalesAdmin, toggleMessageTemplateStatus);
-router.delete("/:id", authorizeTeleSalesAdmin, deleteMessageTemplate);
+router.post("/", requireAdmin, createMessageTemplate);
+router.patch("/:id", requireAdmin, updateMessageTemplate);
+router.patch("/:id/toggle-status", requireAdmin, toggleMessageTemplateStatus);
+router.delete("/:id", requireAdmin, deleteMessageTemplate);
 
 export default router;

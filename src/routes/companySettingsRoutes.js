@@ -1,12 +1,12 @@
 import express from "express";
 import { getCompanySettings, updateCompanySettings } from "../controllers/companySettingsController.js";
-import { protect, authorizeTeleSalesAccess, authorizeTeleSalesAdmin } from "../middleware/authMiddleware.js";
+import { protect, requireModule, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.use(protect, authorizeTeleSalesAccess);
+router.use(protect, requireModule("telesales"));
 
 router.get("/", getCompanySettings);
-router.put("/", authorizeTeleSalesAdmin, updateCompanySettings);
+router.put("/", requireAdmin, updateCompanySettings);
 
 export default router;

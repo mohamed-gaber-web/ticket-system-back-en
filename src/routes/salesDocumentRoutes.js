@@ -8,7 +8,7 @@ import {
   deleteSalesDocument,
   streamPublicSalesDocument,
 } from "../controllers/salesDocumentController.js";
-import { protect, authorizeTeleSalesAccess, authorizeTeleSalesAdmin } from "../middleware/authMiddleware.js";
+import { protect, requireModule, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -16,14 +16,14 @@ const router = express.Router();
 // middleware on purpose — see streamPublicSalesDocument for what it serves.
 router.get("/public/:shareKey", streamPublicSalesDocument);
 
-router.use(protect, authorizeTeleSalesAccess);
+router.use(protect, requireModule("telesales"));
 
 router.get("/", getAllSalesDocuments);
 router.get("/:id", getSalesDocumentById);
 
-router.post("/", authorizeTeleSalesAdmin, createSalesDocument);
-router.patch("/:id", authorizeTeleSalesAdmin, updateSalesDocument);
-router.patch("/:id/toggle-status", authorizeTeleSalesAdmin, toggleSalesDocumentStatus);
-router.delete("/:id", authorizeTeleSalesAdmin, deleteSalesDocument);
+router.post("/", requireAdmin, createSalesDocument);
+router.patch("/:id", requireAdmin, updateSalesDocument);
+router.patch("/:id/toggle-status", requireAdmin, toggleSalesDocumentStatus);
+router.delete("/:id", requireAdmin, deleteSalesDocument);
 
 export default router;

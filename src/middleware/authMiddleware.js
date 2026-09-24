@@ -1,8 +1,18 @@
 import jwt from "jsonwebtoken";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
-import TeamMember from "../models/TeamMember.js";
-import TeleSalesAgent from "../models/TeleSalesAgent.js";
+import { USER_TYPES, normalizeUserType } from "../utils/access.js";
+
+// The role/module/manager decisions all live in access.js; re-exported here so a
+// route file needs one import for everything auth-related.
+export {
+  requireEmployee,
+  requireCustomer,
+  requireAdmin,
+  requireManagerOrAdmin,
+  requireEmployeeManager,
+  requireModule,
+} from "../utils/access.js";
 
 // Protect routes - verify JWT token
 export const protect = async (req, res, next) => {
@@ -29,26 +39,19 @@ export const protect = async (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Get user based on userType
+    // Older tokens still say "consultant" / "tele_sales"; both are employees now.
+    const userType = normalizeUserType(decoded.userType);
+
     let user;
-    if (decoded.userType === "customer") {
+    if (userType === USER_TYPES.CUSTOMER) {
       user = await Customer.findById(decoded.id).select("-password");
-    } else if (decoded.userType === "consultant") {
+    } else if (userType === USER_TYPES.EMPLOYEE) {
       user = await Consultant.findById(decoded.id)
-        .select("-password")
-        .populate("department", "name")
-        // Sales-department consultants are scoped to one tele-sales team; the
-        // scope helper reads it off req.user.
-        .populate("teleSalesTeam", "name code isActive");
-    } else if (decoded.userType === "team_member") {
-      user = await TeamMember.findById(decoded.id)
-        .select("-password")
-        .populate("team", "teamName department");
-    } else if (decoded.userType === "tele_sales") {
-      user = await TeleSalesAgent.findById(decoded.id)
         .select("-password -refreshToken")
-        // Every tele-sales query is scoped by this team — see teleSalesScope.js.
-        .populate("team", "name code isActive");
+        .populate("department", "name")
+        // Sales employees are scoped to one tele-sales team; the scope helper
+        // reads it off req.user.
+        .populate("teleSalesTeam", "name code isActive");
     }
 
     if (!user) {
@@ -68,7 +71,7 @@ export const protect = async (req, res, next) => {
 
     // Attach user and userType to request
     req.user = user;
-    req.userType = decoded.userType;
+    req.userType = userType;
 
     next();
   } catch (error) {
@@ -80,10 +83,11 @@ export const protect = async (req, res, next) => {
   }
 };
 
-// Authorize specific user types
+// Authorize specific user types ("employee" / "customer")
 export const authorize = (...userTypes) => {
+  const allowed = userTypes.map(normalizeUserType);
   return (req, res, next) => {
-    if (!userTypes.includes(req.userType)) {
+    if (!allowed.includes(req.userType)) {
       return res.status(403).json({
         success: false,
         message: `User type '${req.userType}' is not authorized to access this route`,
@@ -106,58 +110,9 @@ export const authorizeRole = (...roles) => {
   };
 };
 
-// Allow tele_sales users OR consultant admin OR consultant with sales/marketing department
-export const authorizeTeleSalesAccess = (req, res, next) => {
-  const { userType, user } = req;
-  if (userType === "tele_sales") return next();
-  if (userType === "consultant") {
-    if (user.role === "admin") return next();
-    const dept =
-      typeof user.department === "object"
-        ? String(user.department?.name ?? "").toLowerCase()
-        : String(user.department ?? "").toLowerCase();
-    if (dept === "sales" || dept === "marketing") return next();
-  }
-  return res.status(403).json({
-    success: false,
-    message: `User type '${userType}' is not authorized to access this route`,
-  });
-};
-
-// Allow tele_sales admin OR consultant admin. Reserved for genuinely cross-team
-// actions — managing the teams themselves, backfills, deleting leads.
-export const authorizeTeleSalesAdmin = (req, res, next) => {
-  const { userType, user } = req;
-  if ((userType === "tele_sales" || userType === "consultant") && user.role === "admin") {
-    return next();
-  }
-  return res.status(403).json({
-    success: false,
-    message: "Admin access required for this route",
-  });
-};
-
-// Allow a tele-sales team manager OR a super admin. Gates the agent-management
-// routes: a manager passes here, and teleSalesAgentController then confines every
-// query and write to their own team, so "manage agents" never means "manage all
-// agents". Super admins pass unscoped.
-export const authorizeTeleSalesManager = (req, res, next) => {
-  const { userType, user } = req;
-  if (
-    (userType === "tele_sales" || userType === "consultant") &&
-    (user.role === "admin" || user.role === "manager")
-  ) {
-    return next();
-  }
-  return res.status(403).json({
-    success: false,
-    message: "Team manager or admin access required for this route",
-  });
-};
-
 // Authorize company admin customers only
 export const authorizeCompanyAdmin = (req, res, next) => {
-  if (req.userType !== "customer" || req.user.role !== "company_admin") {
+  if (req.userType !== USER_TYPES.CUSTOMER || req.user.role !== "company_admin") {
     return res.status(403).json({
       success: false,
       message: "Company admin access required",

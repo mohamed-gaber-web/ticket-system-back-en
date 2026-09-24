@@ -4,6 +4,7 @@ import Company from "../models/Company.js";
 import Ticket from "../models/Ticket.js";
 import { sendBulkConsultantAssignmentEmails, sendWelcomeEmail } from "../utils/emailService.js";
 
+import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
 // @desc    Get all customers
 // @route   GET /api/customers
 // @access  Public
@@ -128,12 +129,13 @@ const createCustomer = async (req, res) => {
       return res.status(400).json({ success: false, message: "Company not found" });
     }
 
+    // Login is by e-mail alone, so the address must be free in both collections
     const customerExists = await Customer.findOne({ email });
 
-    if (customerExists) {
+    if (customerExists || (await emailTakenElsewhere(email, Customer))) {
       return res.status(400).json({
         success: false,
-        message: "Customer with this email already exists",
+        message: EMAIL_TAKEN_MESSAGE,
       });
     }
 
@@ -268,10 +270,10 @@ const updateCustomer = async (req, res) => {
 
     if (email && email !== customer.email) {
       const emailExists = await Customer.findOne({ email });
-      if (emailExists) {
+      if (emailExists || (await emailTakenElsewhere(email, Customer))) {
         return res.status(400).json({
           success: false,
-          message: "Email already in use by another customer",
+          message: EMAIL_TAKEN_MESSAGE,
         });
       }
       customer.email = email;

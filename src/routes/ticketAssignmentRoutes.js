@@ -6,12 +6,10 @@ import {
   getAssignmentHistoryForTicket,
   createTicketAssignment,
   updateTicketAssignment,
-  acceptTicketAssignment,
   reassignTicket,
   deleteTicketAssignment,
   getTicketAssignmentStats,
   getAssignmentsByTeam,
-  getAssignmentsByTeamMember,
   assignToMultipleConsultants,
   reassignConsultants,
   updateConsultantAssignmentStatus,
@@ -20,7 +18,12 @@ import {
   getWeeklySummary,
 } from "../controllers/ticketAssignmentController.js";
 
+import { protect } from "../middleware/authMiddleware.js";
 const router = express.Router();
+
+// Every route needs a signed-in user; the controllers branch on req.userType.
+router.use(protect);
+
 
 // Statistics route (must be before /:id route)
 router.get("/stats", getTicketAssignmentStats);
@@ -32,7 +35,6 @@ router.get("/weekly-summary", getWeeklySummary);
 router.get("/team/:teamId", getAssignmentsByTeam);
 
 // Get assignments by team member
-router.get("/team-member/:memberId", getAssignmentsByTeamMember);
 
 // Get assignments by consultant
 router.get("/consultant/:consultantId", getAssignmentsByConsultant);
@@ -53,7 +55,6 @@ router
   .delete(deleteTicketAssignment);
 
 // Accept assignment
-router.patch("/:id/accept", acceptTicketAssignment);
 
 // Reassign ticket
 router.post("/:id/reassign", reassignTicket);

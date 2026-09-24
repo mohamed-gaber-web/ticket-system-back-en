@@ -6,16 +6,21 @@ import Meeting, {
   MEETING_STATUSES,
 } from "../models/Meeting.js";
 import Consultant from "../models/Consltant.js";
-import TeleSalesAgent from "../models/TeleSalesAgent.js";
 import Customer from "../models/Customer.js";
 import Lead from "../models/Lead.js";
 import { callerTeamId, teamScopeFilter } from "../utils/teleSalesScope.js";
+import { isEmployee, hasModule, roleFamily, isAdmin as isAdminUser } from "../utils/access.js";
 import { notifyMeeting } from "../utils/meetingNotify.js";
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(String(id));
 const toObjectId = (id) => new mongoose.Types.ObjectId(String(id));
-const isAdmin = (req) => req.user?.role === "admin";
-const isStaff = (req) => req.userType === "consultant" || req.userType === "tele_sales";
+const isAdmin = (req) => isAdminUser(req.user);
+// Every member of staff logs in as an employee (legacy token types are
+// normalised to "employee" by protect).
+const isStaff = (req) => isEmployee(req);
+// The sales family used to log in as separate tele-sales agents; they keep
+// that narrower view: their team's meetings plus their own.
+const isSalesStaff = (req) => roleFamily(req.user?.role) === "sales";
 const actorName = (req) => `${req.user?.firstName ?? ""} ${req.user?.lastName ?? ""}`.trim() || "System";
 
 const toDate = (v) => {
@@ -25,10 +30,9 @@ const toDate = (v) => {
 };
 
 // ── Visibility ────────────────────────────────────────────────────────────────
-// Customers see only their own meetings. Admins (consultant or tele-sales) see
-// everything. Tele-sales staff see their team's meetings plus any they organise
-// or attend. Other consultants see meetings with no team context, their own
-// team's (sales-department consultants carry a teleSalesTeam) and their own.
+// Customers see only their own meetings. Admins see everything. Sales staff see
+// their team's meetings plus any they organise or attend. Other employees see
+// meetings with no team context, their own team's and their own.
 const visibilityFilter = (req) => {
   const { userType, user } = req;
   if (userType === "customer") return { customer: user._id };
@@ -39,7 +43,7 @@ const visibilityFilter = (req) => {
   const teamId = callerTeamId(req);
   const teamClause = teamId ? [{ team: toObjectId(teamId) }] : [];
 
-  if (userType === "tele_sales") return { $or: [...mine, ...teamClause] };
+  if (isSalesStaff(req)) return { $or: [...mine, ...teamClause] };
   return { $or: [...mine, { team: null }, ...teamClause] };
 };
 
@@ -203,40 +207,33 @@ const getMeetings = async (req, res) => {
 // @route   GET /api/meetings/people
 const getPeople = async (req, res) => {
   try {
-    const consultants = await Consultant.find({ status: "active" })
-      .select("firstName lastName email department")
+    const employees = await Consultant.find({ status: "active" })
+      .select("firstName lastName email role department teleSalesTeam")
       .populate("department", "name")
+      .populate("teleSalesTeam", "name code")
       .sort({ firstName: 1, lastName: 1 })
       .lean();
 
-    // Tele-sales agents are team-scoped for non-admin tele-sales callers.
-    const agentFilter = { status: "active" };
-    if (req.userType === "tele_sales" && !isAdmin(req)) {
-      const teamId = callerTeamId(req);
-      agentFilter.team = teamId ? toObjectId(teamId) : null;
-    }
-    const agents = await TeleSalesAgent.find(agentFilter)
-      .select("firstName lastName email team")
-      .populate("team", "name code")
-      .sort({ firstName: 1, lastName: 1 })
-      .lean();
+    // A plain sales caller only sees the sales people of their own team, as
+    // tele-sales agents did before the employee merge.
+    const ownTeam = isSalesStaff(req) && !isAdmin(req) ? callerTeamId(req) : undefined;
+    const visible = employees.filter(
+      (e) =>
+        ownTeam === undefined ||
+        roleFamily(e.role) !== "sales" ||
+        String(e.teleSalesTeam?._id ?? e.teleSalesTeam ?? "") === String(ownTeam ?? "")
+    );
 
-    const people = [
-      ...consultants.map((c) => ({
-        kind: "Consultant",
-        _id: c._id,
-        name: `${c.firstName} ${c.lastName}`.trim(),
-        email: c.email,
-        group: c.department?.name ? `Consultants · ${c.department.name}` : "Consultants",
-      })),
-      ...agents.map((a) => ({
-        kind: "TeleSalesAgent",
-        _id: a._id,
-        name: `${a.firstName} ${a.lastName}`.trim(),
-        email: a.email,
-        group: a.team?.name ? `Tele-sales · ${a.team.name}` : "Tele-sales",
-      })),
-    ];
+    const people = visible.map((e) => ({
+      kind: "Consultant",
+      _id: e._id,
+      name: `${e.firstName} ${e.lastName}`.trim(),
+      email: e.email,
+      group:
+        roleFamily(e.role) === "sales"
+          ? e.teleSalesTeam?.name ? `Tele-sales · ${e.teleSalesTeam.name}` : "Tele-sales"
+          : e.department?.name ? `Staff · ${e.department.name}` : "Staff",
+    }));
     res.status(200).json({ success: true, data: people });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching people", error: error.message });
@@ -247,8 +244,9 @@ const getPeople = async (req, res) => {
 // @route   GET /api/meetings/contacts
 const getContacts = async (req, res) => {
   try {
+    // Ticketing customers for the people who work tickets; leads below for tele-sales
     const customers =
-      req.userType === "consultant"
+      hasModule(req.user, "tickets")
         ? await Customer.find({ status: "active" })
             .select("companyName contactPerson email phone")
             .sort({ companyName: 1 })

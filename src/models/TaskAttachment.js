@@ -15,7 +15,9 @@ const taskAttachmentSchema = new mongoose.Schema(
     uploadedByUserType: {
       type: String,
       required: true,
-      enum: ["consultant", "team_member"],
+      // "employee" is the current value; the rest survive on rows written before
+      // the employee/customer split and resolve to the same model.
+      enum: ["employee", "consultant", "team_member"],
     },
     uploadedAt: { type: Date, default: Date.now },
   },
@@ -30,8 +32,8 @@ taskAttachmentSchema.virtual("uploadedBy", {
 });
 
 taskAttachmentSchema.virtual("uploadedByUserModel").get(function () {
-  if (this.uploadedByUserType === "consultant") return "Consultant";
-  if (this.uploadedByUserType === "team_member") return "TeamMember";
+  // Every uploader is an employee; old rows still say "consultant".
+  if (this.uploadedByUserType) return "Consultant";
   return null;
 });
 

@@ -10,12 +10,12 @@ import {
   getMyStats,
   updateCustomerPassword,
 } from "../controllers/customerController.js";
-import { protect, authorize, authorizeRole } from "../middleware/authMiddleware.js";
+import { protect, authorize, requireModule, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-const consultantAuth = [protect, authorize("consultant")];
-const adminAuth = [protect, authorize("consultant"), authorizeRole("admin")];
+const consultantAuth = [protect, requireModule("tickets")];
+const adminAuth = [protect, requireAdmin];
 
 /**
  * @swagger
@@ -272,12 +272,7 @@ router.route("/").get(...consultantAuth, getAllCustomers).post(...adminAuth, cre
  *       500:
  *         description: Server error
  */
-router.put(
-  "/:id/role",
-  protect,
-  authorize("consultant"),
-  setCustomerRole
-);
+router.put("/:id/role", ...adminAuth, setCustomerRole);
 
 router
   .route("/:id")

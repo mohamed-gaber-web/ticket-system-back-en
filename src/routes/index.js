@@ -4,15 +4,14 @@ import customerRoutes from "./customerRoutes.js";
 import slaRoutes from "./slaRoutes.js";
 import consultantRoutes from "./consultantRoutes.js";
 import ticketRoutes from "./ticketRoutes.js";
-import teamMemberRoutes from "./teamMemberRoutes.js";
 import ticketAssignmentRoutes from "./ticketAssignmentRoutes.js";
 import ticketCommentRoutes from "./ticketCommentRoutes.js";
 import ticketAttachmentRoutes from "./ticketAttachmentRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import ticketStatusHistoryRoutes from "./ticketStatusHistoryRoutes.js";
-import teamRoutes from "./teamRoutes.js";
 import categoryRoutes from "./categoryRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
+import { guardHrFiles } from "../controllers/employeeDocumentController.js";
 import environmentRoutes from "./environmentRoutes.js";
 import featureRoutes from "./featureRoutes.js";
 import productTypeRoutes from "./productTypeRoutes.js";
@@ -38,6 +37,7 @@ import taskRoutes from "./taskRoutes.js";
 import taskCategoryRoutes from "./taskCategoryRoutes.js";
 import taskAttachmentRoutes from "./taskAttachmentRoutes.js";
 import taskCommentRoutes from "./taskCommentRoutes.js";
+import developmentRoutes from "./developmentRoutes.js";
 import employeeRequestRoutes from "./employeeRequestRoutes.js";
 import employeeBalanceRoutes from "./employeeBalanceRoutes.js";
 import aiRoutes from "./aiRoutes.js";
@@ -70,12 +70,6 @@ router.use("/consultants", consultantRoutes);
 
 // Ticket routes
 router.use("/tickets", ticketRoutes);
-
-// Team routes
-router.use("/teams", teamRoutes);
-
-// Team Member routes
-router.use("/team-members", teamMemberRoutes);
 
 // Ticket Assignment routes
 router.use("/ticket-assignments", ticketAssignmentRoutes);
@@ -157,6 +151,9 @@ router.use("/task-categories", taskCategoryRoutes);
 router.use("/task-attachments", taskAttachmentRoutes);
 router.use("/task-comments", taskCommentRoutes);
 
+// Development module (kanban boards)
+router.use("/development", developmentRoutes);
+
 // Employee Request routes (vacation / excuse / approvals / balances)
 router.use("/employee-requests", employeeRequestRoutes);
 router.use("/employee-balances", employeeBalanceRoutes);
@@ -180,6 +177,9 @@ router.use("/sales-documents", salesDocumentRoutes);
 router.use("/message-templates", messageTemplateRoutes);
 router.use("/company-settings", companySettingsRoutes);
 router.use("/sales-assistant", salesAssistantRoutes);
+// HR documents live in the same GridFS bucket but are only ever served through
+// /consultants/:id/documents — the generic file routes refuse them.
+router.all(["/files/:id", "/files/:id/info"], guardHrFiles);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

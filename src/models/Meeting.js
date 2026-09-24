@@ -1,10 +1,12 @@
 import mongoose from "mongoose";
 
 // Internal staff who can organise or attend a meeting. `kind` drives the
-// refPath populate so one array can hold both consultants and tele-sales agents.
+// refPath populate. Every member of staff is an employee (the `Consultant`
+// model) now; "TeleSalesAgent" survives only on rows written before the
+// employee merge, so it stays valid for reading them.
 export const STAFF_MODELS = ["Consultant", "TeleSalesAgent"];
-export const STAFF_MODEL_BY_USER_TYPE = { consultant: "Consultant", tele_sales: "TeleSalesAgent" };
-export const USER_TYPE_BY_STAFF_MODEL = { Consultant: "consultant", TeleSalesAgent: "tele_sales" };
+export const STAFF_MODEL_BY_USER_TYPE = { employee: "Consultant", consultant: "Consultant", tele_sales: "TeleSalesAgent" };
+export const USER_TYPE_BY_STAFF_MODEL = { Consultant: "employee", TeleSalesAgent: "tele_sales" };
 
 export const MEETING_TYPES = ["online", "on_site", "call"];
 export const MEETING_STATUSES = ["scheduled", "completed", "cancelled", "no_show"];

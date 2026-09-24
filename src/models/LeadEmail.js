@@ -78,7 +78,10 @@ const leadEmailSchema = mongoose.Schema(
     },
     sentByType: {
       type: String,
-      enum: ["TeleSalesAgent", "Consultant"],
+      // "TeleSalesAgent" survives on old rows only; every sender is an employee now.
+      enum: ["Consultant", "TeleSalesAgent"],
+      default: "Consultant",
+      required: true,
     },
     // Snapshot of the sender so history stays readable if the agent is removed.
     sentByName: { type: String, trim: true },

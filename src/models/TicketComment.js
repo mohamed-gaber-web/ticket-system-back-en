@@ -19,7 +19,9 @@ const ticketCommentSchema = mongoose.Schema(
     commentByUserType: {
       type: String,
       required: [true, "User type is required"],
-      enum: ["customer", "consultant", "team_member"],
+      // "employee" is the current value; the rest survive on rows written before
+      // the employee/customer split and resolve to the same model.
+      enum: ["customer", "employee", "consultant", "team_member", "tele_sales"],
     },
     isInternal: {
       type: Boolean,
@@ -45,8 +47,8 @@ const ticketCommentSchema = mongoose.Schema(
 // Method to get the model name based on user type
 ticketCommentSchema.methods.getCommentByUserModel = function () {
   if (this.commentByUserType === "customer") return "Customer";
-  if (this.commentByUserType === "consultant") return "Consultant";
-  if (this.commentByUserType === "team_member") return "TeamMember";
+  // Every non-customer author is an employee; old rows still say "consultant".
+  if (this.commentByUserType) return "Consultant";
   return null;
 };
 

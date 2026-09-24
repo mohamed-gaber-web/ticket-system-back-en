@@ -12,7 +12,9 @@ const taskCommentSchema = mongoose.Schema(
     commentByUserType: {
       type: String,
       required: true,
-      enum: ["consultant", "team_member"],
+      // "employee" is the current value; the rest survive on rows written before
+      // the employee/customer split and resolve to the same model.
+      enum: ["employee", "consultant", "team_member"],
     },
     images: [
       {
@@ -35,8 +37,8 @@ taskCommentSchema.virtual("commentBy", {
 });
 
 taskCommentSchema.virtual("commentByUserModel").get(function () {
-  if (this.commentByUserType === "consultant") return "Consultant";
-  if (this.commentByUserType === "team_member") return "TeamMember";
+  // Every author is an employee; old rows still say "consultant".
+  if (this.commentByUserType) return "Consultant";
   return null;
 });
 

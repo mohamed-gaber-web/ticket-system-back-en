@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 // Internal staff collections that can submit employee requests
+// Only "Consultant" is written now; the others survive on pre-migration rows.
 const EMPLOYEE_MODELS = ["Consultant", "TeamMember", "TeleSalesAgent"];
 
 const employeeRequestSchema = mongoose.Schema(

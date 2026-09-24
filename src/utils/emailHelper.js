@@ -1,7 +1,6 @@
 import Notification from "../models/notification.js";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
-import TeamMember from "../models/TeamMember.js";
 import Ticket from "../models/Ticket.js";
 import { emitNotification } from "../socket/io.js";
 import {
@@ -292,10 +291,10 @@ export const resolveUser = async (userId, userType) => {
   switch (userType) {
     case "customer":
       return Customer.findById(userId).select("companyName contactPerson email").lean();
-    case "consultant":
+    case "employee":
+    case "consultant": // legacy value
+    case "tele_sales": // legacy value
       return Consultant.findById(userId).select("firstName lastName email").lean();
-    case "team_member":
-      return TeamMember.findById(userId).select("firstName lastName email team").lean();
     default:
       return null;
   }

@@ -2,9 +2,17 @@ import EmployeeRequest from "../models/EmployeeRequest.js";
 import EmployeeBalance from "../models/EmployeeBalance.js";
 import Consultant from "../models/Consltant.js";
 import Notification from "../models/notification.js";
-import { ensureBalance, USERTYPE_TO_MODEL } from "./employeeBalanceController.js";
+import { ensureBalance, EMPLOYEE_MODEL } from "./employeeBalanceController.js";
 import { sendVacationRequestEmail } from "../utils/emailService.js";
 import { emitNotification } from "../socket/io.js";
+import {
+  USER_TYPES,
+  isAdmin,
+  isManager,
+  isSameFamily,
+  familyRoles,
+  roleFamily,
+} from "../utils/access.js";
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "N/A");
 
@@ -20,7 +28,7 @@ const requestSummary = (request, employeeName) => {
   )}: ${request.fromTime ?? ""}–${request.toTime ?? ""}`;
 };
 
-// Create an in-app notification for every admin and push it over the socket
+// Create an in-app notification for every reviewer and push it over the socket
 // in real time so the bell/dropdown updates without a refetch.
 const notifyAdminsInApp = async (request, admins, employeeName) => {
   if (!admins.length) return;
@@ -31,7 +39,7 @@ const notifyAdminsInApp = async (request, admins, employeeName) => {
 
   const docs = admins.map((a) => ({
     userId: a._id,
-    userType: "consultant",
+    userType: USER_TYPES.EMPLOYEE,
     notificationType,
     message,
   }));
@@ -52,14 +60,23 @@ const notifyAdminsInApp = async (request, admins, employeeName) => {
   );
 };
 
-// Notify all admins that a new request needs review: an in-app notification
-// (vacation + excuse) plus an email (vacation only, existing behaviour).
-// Fire-and-forget: never blocks or fails the request creation.
+// Everyone who may review this request: every admin, plus the managers of the
+// requester's own family (a sales request reaches the sales manager, not the
+// marketing one).
+const reviewersFor = async (request) => {
+  const family = roleFamily(request.employee?.role);
+  const roles = ["admin", ...familyRoles(family).filter((r) => r.endsWith("_manager"))];
+  return Consultant.find({ role: { $in: roles }, status: "active" })
+    .select("firstName lastName email")
+    .lean();
+};
+
+// Notify every reviewer that a new request needs attention: an in-app
+// notification (vacation + excuse) plus an email (vacation only, existing
+// behaviour). Fire-and-forget: never blocks or fails the request creation.
 const notifyAdminsOfRequest = async (request) => {
   try {
-    const admins = await Consultant.find({ role: "admin", status: "active" })
-      .select("firstName lastName email")
-      .lean();
+    const admins = await reviewersFor(request);
     if (!admins.length) return;
 
     const employee = request.employee;
@@ -98,7 +115,7 @@ const notifyAdminsOfRequest = async (request) => {
 
 const populateRequest = (q) =>
   q
-    .populate("employee", "firstName lastName email")
+    .populate("employee", "firstName lastName email role")
     .populate("department", "name")
     .populate("reviewedBy", "firstName lastName email");
 
@@ -118,25 +135,35 @@ const countHours = (from, to) => {
   return (th * 60 + tm - (fh * 60 + fm)) / 60;
 };
 
-// Resolve the Department id for an employee submitting a request.
-// Only consultants carry a Department reference; other staff -> null (admin approves).
+// Snapshot of the requester's Department, for grouping on the approvals screen.
 const resolveDepartmentId = (req) => {
-  if (req.userType === "consultant" && req.user?.department) {
+  if (req.user?.department) {
     const dep = req.user.department;
     return typeof dep === "object" ? dep._id : dep;
   }
   return null;
 };
 
-// Whether the current user may approve/reject requests. Only consultant admins can approve.
-const canApprove = (req) =>
-  req.userType === "consultant" && req.user?.role === "admin";
+// May the caller approve / reject / cancel THIS request? Admins anywhere;
+// managers for the people of their own family. `request.employee` must be
+// populated with its role for the family comparison.
+const canReview = (req, request) => {
+  if (isAdmin(req.user)) return true;
+  if (!isManager(req.user)) return false;
+  return isSameFamily(req.user, request.employee);
+};
+
+// The employee ids a manager reviews: everyone in their family.
+const familyEmployeeIds = (user) =>
+  Consultant.find({ role: { $in: familyRoles(roleFamily(user.role)) } }).distinct("_id");
 
 // Apply an approved vacation to the employee's balance (once).
+const employeeIdOf = (request) => request.employee?._id ?? request.employee;
+
 const applyVacationToBalance = async (request) => {
   if (request.type !== "vacation" || request.balanceApplied) return;
   const year = new Date(request.startDate).getFullYear();
-  const balance = await ensureBalance(request.employee, request.employeeModel, year);
+  const balance = await ensureBalance(employeeIdOf(request), request.employeeModel, year);
   balance.usedVacationDays += request.days || 0;
   await balance.save();
   request.balanceApplied = true;
@@ -146,7 +173,7 @@ const applyVacationToBalance = async (request) => {
 const applyExcuseToBalance = async (request) => {
   if (request.type !== "excuse" || request.balanceApplied) return;
   const year = new Date(request.date).getFullYear();
-  const balance = await ensureBalance(request.employee, request.employeeModel, year);
+  const balance = await ensureBalance(employeeIdOf(request), request.employeeModel, year);
   balance.usedExcuseHours += request.hours || 0;
   await balance.save();
   request.balanceApplied = true;
@@ -158,7 +185,7 @@ const revertFromBalance = async (request) => {
   const refDate = request.type === "vacation" ? request.startDate : request.date;
   const year = new Date(refDate).getFullYear();
   const balance = await EmployeeBalance.findOne({
-    employee: request.employee,
+    employee: employeeIdOf(request),
     employeeModel: request.employeeModel,
     year,
   });
@@ -189,33 +216,25 @@ const getRequests = async (req, res) => {
       limit = 20,
     } = req.query;
 
-    const isAdmin = req.userType === "consultant" && req.user?.role === "admin";
+    const admin = isAdmin(req.user);
+    const manager = isManager(req.user);
     const query = {};
 
-    if (scope === "mine") {
+    if (scope === "mine" || (!admin && !manager)) {
+      // Own requests — also the fallback for anyone who cannot review.
       query.employee = req.user._id;
-      query.employeeModel = USERTYPE_TO_MODEL[req.userType];
-    } else if (scope === "approvals") {
-      // Only admins can review requests; everyone else gets an empty queue.
-      if (!isAdmin) {
-        return res.status(200).json({
-          success: true, count: 0, total: 0, page: 1, pages: 0, data: [],
-        });
-      }
+      query.employeeModel = EMPLOYEE_MODEL;
+    } else if (admin) {
+      // scope=approvals | all — an admin reviews everything
       if (department) query.department = department;
     } else {
-      // scope=all — admin only; otherwise fall back to own requests
-      if (!isAdmin) {
-        query.employee = req.user._id;
-        query.employeeModel = USERTYPE_TO_MODEL[req.userType];
-      } else if (department) {
-        query.department = department;
-      }
+      // A manager reviews their own family only
+      query.employee = { $in: await familyEmployeeIds(req.user) };
     }
 
     if (type) query.type = type;
     if (status) query.status = status;
-    if (employeeModel && isAdmin) query.employeeModel = employeeModel;
+    if (employeeModel && admin) query.employeeModel = employeeModel;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -266,13 +285,13 @@ const getRequestById = async (req, res) => {
 // @route   POST /api/employee-requests
 const createRequest = async (req, res) => {
   try {
-    const employeeModel = USERTYPE_TO_MODEL[req.userType];
-    if (!employeeModel) {
+    if (req.userType !== USER_TYPES.EMPLOYEE) {
       return res.status(403).json({
         success: false,
         message: "Only internal staff can submit employee requests",
       });
     }
+    const employeeModel = EMPLOYEE_MODEL;
 
     const { type, reason, startDate, endDate, date, fromTime, toTime } = req.body;
 
@@ -358,11 +377,11 @@ const createRequest = async (req, res) => {
 // @route   PATCH /api/employee-requests/:id/approve
 const approveRequest = async (req, res) => {
   try {
-    const request = await EmployeeRequest.findById(req.params.id);
+    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role");
     if (!request) {
       return res.status(404).json({ success: false, message: "Request not found" });
     }
-    if (!canApprove(req)) {
+    if (!canReview(req, request)) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to approve this request",
@@ -406,11 +425,11 @@ const approveRequest = async (req, res) => {
 // @route   PATCH /api/employee-requests/:id/reject
 const rejectRequest = async (req, res) => {
   try {
-    const request = await EmployeeRequest.findById(req.params.id);
+    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role");
     if (!request) {
       return res.status(404).json({ success: false, message: "Request not found" });
     }
-    if (!canApprove(req)) {
+    if (!canReview(req, request)) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to reject this request",
@@ -451,17 +470,14 @@ const rejectRequest = async (req, res) => {
 // @route   PATCH /api/employee-requests/:id/cancel
 const cancelRequest = async (req, res) => {
   try {
-    const request = await EmployeeRequest.findById(req.params.id);
+    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role");
     if (!request) {
       return res.status(404).json({ success: false, message: "Request not found" });
     }
 
-    const isOwner =
-      String(request.employee) === String(req.user._id) &&
-      request.employeeModel === USERTYPE_TO_MODEL[req.userType];
-    const isAdmin = req.userType === "consultant" && req.user?.role === "admin";
+    const isOwner = String(employeeIdOf(request)) === String(req.user._id);
 
-    if (!isOwner && !isAdmin) {
+    if (!isOwner && !canReview(req, request)) {
       return res.status(403).json({
         success: false,
         message: "You can only cancel your own requests",

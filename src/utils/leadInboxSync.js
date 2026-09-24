@@ -35,7 +35,9 @@ const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const addr = (r) => String(r?.emailAddress?.address ?? "").trim().toLowerCase();
 const addrList = (list) => (list ?? []).map(addr).filter(Boolean);
 
-const userTypeFor = (sentByType) => (sentByType === "Consultant" ? "consultant" : "tele_sales");
+// Every member of staff is an employee now (older rows may say otherwise;
+// the notification inbox and socket rooms treat those as "employee" too).
+const userTypeFor = () => "employee";
 
 // Stores a Graph attachment in GridFS and returns the LeadEmail attachment record.
 const storeAttachment = (att) =>
@@ -130,7 +132,7 @@ const fileInboundMessage = async (msg, mailbox) => {
   const recipient = answered?.sentBy
     ? { userId: answered.sentBy, userType: userTypeFor(answered.sentByType) }
     : lead.assignedTo
-      ? { userId: lead.assignedTo, userType: "tele_sales" }
+      ? { userId: lead.assignedTo, userType: "employee" }
       : null;
   if (recipient) {
     const who = lead.contactPersonName || lead.companyName || record.from;

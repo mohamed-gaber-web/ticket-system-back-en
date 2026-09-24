@@ -33,8 +33,9 @@ export const verifyToken = (token) => {
   }
 };
 
-// Send token response with cookie
-export const sendTokenResponse = async (user, statusCode, res, userType) => {
+// Send token response with cookie. `responseData` lets the caller hand over an
+// enriched plain object (e.g. with resolved modules) instead of the bare document.
+export const sendTokenResponse = async (user, statusCode, res, userType, responseData) => {
   const token = generateToken(user._id, userType);
   const refreshToken = generateRefreshToken();
 
@@ -52,9 +53,11 @@ export const sendTokenResponse = async (user, statusCode, res, userType) => {
   user.refreshToken = refreshToken;
   await user.save({ validateBeforeSave: false });
 
-  const responseUser = user.toObject ? user.toObject() : { ...user };
+  const responseUser = responseData ?? (user.toObject ? user.toObject() : { ...user });
   responseUser.password = undefined;
   responseUser.refreshToken = undefined;
+  responseUser.resetPasswordToken = undefined;
+  responseUser.resetPasswordExpire = undefined;
 
   return res.status(statusCode).cookie("token", token, options).json({
     success: true,
