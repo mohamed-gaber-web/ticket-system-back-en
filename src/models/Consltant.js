@@ -80,10 +80,24 @@ const hrSchema = new mongoose.Schema(
     bankName: { type: String, trim: true, maxlength: 150, default: null },
     bankAccount: { type: String, trim: true, maxlength: 50, default: null }, // account number or IBAN
 
-    // Social insurance
+    // Social insurance. `hasSocialInsurance` gates the three amounts: when it
+    // is false they are cleared. null = not recorded yet (files from before the
+    // flag existed — the form then infers it from the wage).
+    hasSocialInsurance: { type: Boolean, default: null },
     insuranceWage: { ...money, default: 0 },
     employeeInsuranceShare: money,
     employerInsuranceShare: money,
+
+    // Medical insurance — the coverage period only applies when covered.
+    hasMedicalInsurance: { type: Boolean, default: null },
+    medicalStartDate: { type: Date, default: null },
+    medicalEndDate: { type: Date, default: null },
+
+    // Subscriptions & company assets. The laptop's photo is an HR document of
+    // type "laptop_photo" (see EmployeeDocument.js).
+    hasCompanyLine: { type: Boolean, default: null },
+    hasLaptop: { type: Boolean, default: null },
+    uberSubscriber: { type: Boolean, default: null },
 
     notes: { type: String, trim: true, maxlength: [2000, "Notes cannot exceed 2000 characters"], default: null },
   },

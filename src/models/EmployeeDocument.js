@@ -17,6 +17,7 @@ export const EMPLOYEE_DOCUMENT_TYPES = Object.freeze([
   "insurance_record",
   "cv",
   "personal_photo",
+  "laptop_photo", // photo of the company laptop handed over (Subscriptions section)
   "other",
 ]);
 

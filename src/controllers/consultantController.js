@@ -34,7 +34,8 @@ const populateEmployee = (q, withHr = false) => {
 // Only these keys are ever written into `hr`, each coerced from what a form
 // sends ("" means "clear it"). Anything else in the payload is dropped.
 const HR_STRING_FIELDS = ["fullLegalName", "nationalId", "address", "recruiterName", "section", "bankName", "bankAccount", "notes"];
-const HR_DATE_FIELDS = ["dateOfBirth", "applicationDate", "interviewDate", "hireDate", "contractEndDate"];
+const HR_DATE_FIELDS = ["dateOfBirth", "applicationDate", "interviewDate", "hireDate", "contractEndDate", "medicalStartDate", "medicalEndDate"];
+const HR_BOOLEAN_FIELDS = ["hasSocialInsurance", "hasMedicalInsurance", "hasCompanyLine", "hasLaptop", "uberSubscriber"];
 const HR_NUMBER_FIELDS = ["contractDurationMonths", "probationPeriodMonths", "basicSalary", "grossSalary", "netSalary", "insuranceWage", "employeeInsuranceShare", "employerInsuranceShare"];
 const HR_ENUM_FIELDS = Object.keys(HR_ENUMS);
 
@@ -64,6 +65,28 @@ const sanitizeHr = (input) => {
     const n = Number(input[k]);
     if (!Number.isFinite(n)) throw new HrInputError(`Invalid number for ${k}`);
     out[k] = n;
+  }
+  for (const k of HR_BOOLEAN_FIELDS) {
+    if (!(k in input)) continue;
+    const v = input[k];
+    if (blank(v)) out[k] = null;
+    else if (v === true || v === "true") out[k] = true;
+    else if (v === false || v === "false") out[k] = false;
+    else throw new HrInputError(`Invalid value for ${k}`);
+  }
+  // A "no" wipes the fields it hides, so stale amounts or dates never linger
+  // behind a switch that says they don't apply.
+  if (out.hasSocialInsurance === false) {
+    out.insuranceWage = 0;
+    out.employeeInsuranceShare = null;
+    out.employerInsuranceShare = null;
+  }
+  if (out.hasMedicalInsurance === false) {
+    out.medicalStartDate = null;
+    out.medicalEndDate = null;
+  }
+  if (out.medicalStartDate && out.medicalEndDate && out.medicalEndDate < out.medicalStartDate) {
+    throw new HrInputError("Medical insurance end date is before its start date");
   }
   if ("directManager" in input) {
     const m = input.directManager && typeof input.directManager === "object" ? input.directManager._id : input.directManager;
