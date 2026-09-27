@@ -110,7 +110,7 @@ export const createLead = async (req, res) => {
     // Assign_To is mandatory, but only a manager/admin picks it explicitly — a
     // plain agent doesn't see the control (see LeadFormModal), so a blank value
     // from them means "assign it to me", not "leave it unassigned".
-    const managerOrAdmin = isSuperAdmin(req) || isTeamManager(req);
+    const managerOrAdmin = isCrossTeamWriter(req);
     let assignedTo = cleanStr(req.body.assignedTo);
     if (!assignedTo) {
       if (managerOrAdmin) {
