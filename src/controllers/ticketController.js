@@ -7,6 +7,7 @@ import { notifyAndEmail } from "../utils/emailHelper.js";
 import WorkingHours from "../models/WorkingHours.js";
 import Holiday from "../models/Holiday.js";
 import { getEstimationStartDate, addWorkingDays } from "../utils/estimationUtils.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 import { USER_TYPES, isEmployee, isAdmin, isCustomer } from "../utils/access.js";
 // Load working-hours config + holidays, auto-create defaults if missing
@@ -208,6 +209,7 @@ const getAllTickets = async (req, res) => {
       updatedDateTo,
       customerName,
       companyName,
+      excludeCompanyName,
       scheduledWeek,
       page = 1,
       limit = 10,
@@ -238,10 +240,24 @@ const getAllTickets = async (req, res) => {
     }
 
     if (companyName) {
-      const names = toArray(companyName);
+      const names = toArray(companyName).map((n) => new RegExp(`^${escapeRegex(n.trim())}$`, "i"));
       const matchingCustomers = await Customer.find({ companyName: { $in: names } }).select("_id").lean();
       const ids = matchingCustomers.map((c) => c._id);
       query.customer = { $in: ids };
+    }
+
+    // Leave out whole companies (e.g. our own company's internal tickets, which
+    // have their own "Internal" page). Names match case-insensitively.
+    if (excludeCompanyName) {
+      const names = toArray(excludeCompanyName).map((n) => new RegExp(`^${escapeRegex(n.trim())}$`, "i"));
+      const excluded = await Customer.find({ companyName: { $in: names } }).select("_id").lean();
+      const ids = excluded.map((c) => c._id);
+      if (ids.length) {
+        const current = query.customer;
+        if (!current) query.customer = { $nin: ids };
+        else if (typeof current === "string") query.customer = { $eq: current, $nin: ids };
+        else query.customer = { ...current, $nin: ids };
+      }
     }
 
     // A customer's fence goes on last and overrides whatever they asked for.

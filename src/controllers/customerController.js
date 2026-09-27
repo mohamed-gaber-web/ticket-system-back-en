@@ -1,4 +1,5 @@
 import Customer from "../models/Customer.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import Consultant from "../models/Consltant.js";
 import Company from "../models/Company.js";
 import Ticket from "../models/Ticket.js";
@@ -10,12 +11,21 @@ import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
 // @access  Public
 const getAllCustomers = async (req, res) => {
   try {
-    const { status, page = 1, limit = 10, search } = req.query;
+    const { status, page = 1, limit = 10, search, companyName, excludeCompanyName } = req.query;
 
     const query = {};
 
     if (status) {
       query.status = status;
+    }
+
+    // Split by company (the ticket dashboards count our own company's people
+    // apart from real customers). Names match whole and case-insensitively.
+    const exactNames = (v) => String(v).split(",").filter(Boolean).map((n) => new RegExp(`^${escapeRegex(n.trim())}$`, "i"));
+    if (companyName || excludeCompanyName) {
+      query.companyName = {};
+      if (companyName) query.companyName.$in = exactNames(companyName);
+      if (excludeCompanyName) query.companyName.$nin = exactNames(excludeCompanyName);
     }
 
     if (search) {
