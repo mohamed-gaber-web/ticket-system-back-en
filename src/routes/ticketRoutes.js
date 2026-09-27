@@ -20,6 +20,7 @@ import {
   setTicketAdminPoints,
 } from "../controllers/ticketController.js";
 import { protect, requireModule, requireAdmin, requireEmployee } from "../middleware/authMiddleware.js";
+import { trackTicketActivity } from "../utils/ticketActivity.js";
 
 const router = express.Router();
 
@@ -337,27 +338,27 @@ router.route("/").get(getAllTickets).post(createTicket);
 router
   .route("/:id")
   .get(getTicketById)
-  .put(updateTicket)
+  .put(trackTicketActivity("edited"), updateTicket)
   .delete(requireAdmin, deleteTicket);
 
 // Update ticket status
-router.patch("/:id/status", updateTicketStatus);
+router.patch("/:id/status", trackTicketActivity("status_change"), updateTicketStatus);
 router.get("/:id/pending-candidates", requireEmployee, getPendingCandidates);
 
 // Assign ticket
-router.patch("/:id/assign", staff, assignTicket);
+router.patch("/:id/assign", staff, trackTicketActivity("assignment"), assignTicket);
 
 // Accept ticket
-router.patch("/:id/accept", staff, acceptTicket);
+router.patch("/:id/accept", staff, trackTicketActivity("accepted"), acceptTicket);
 
 // Add customer feedback
-router.patch("/:id/feedback", addCustomerFeedback);
+router.patch("/:id/feedback", trackTicketActivity("feedback"), addCustomerFeedback);
 
 // Check SLA status
 router.get("/:id/sla-status", getTicketSLAStatus);
 
 // Sub-ticket routes
-router.post("/:id/sub-ticket", createSubTicket);
+router.post("/:id/sub-ticket", trackTicketActivity("sub_ticket"), createSubTicket);
 router.get("/:id/sub-tickets", getSubTickets);
 
 // Admin points override

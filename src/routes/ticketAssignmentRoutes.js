@@ -19,6 +19,7 @@ import {
 } from "../controllers/ticketAssignmentController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
+import { trackTicketActivity, fromBody, fromAssignment } from "../utils/ticketActivity.js";
 const router = express.Router();
 
 // Every route needs a signed-in user; the controllers branch on req.userType.
@@ -46,7 +47,7 @@ router.get("/ticket/:ticketId/current", getCurrentAssignmentForTicket);
 router.get("/ticket/:ticketId/history", getAssignmentHistoryForTicket);
 
 // CRUD routes
-router.route("/").get(getAllTicketAssignments).post(createTicketAssignment);
+router.route("/").get(getAllTicketAssignments).post(trackTicketActivity("assignment", fromBody), createTicketAssignment);
 
 router
   .route("/:id")
@@ -57,12 +58,12 @@ router
 // Accept assignment
 
 // Reassign ticket
-router.post("/:id/reassign", reassignTicket);
+router.post("/:id/reassign", trackTicketActivity("assignment", fromAssignment), reassignTicket);
 
 // Multi-consultant assignment routes
-router.post("/:id/assign-consultants", assignToMultipleConsultants);
-router.post("/:id/reassign-consultants", reassignConsultants);
-router.patch("/:assignmentId/consultant/:consultantId/status", updateConsultantAssignmentStatus);
+router.post("/:id/assign-consultants", trackTicketActivity("assignment", fromAssignment), assignToMultipleConsultants);
+router.post("/:id/reassign-consultants", trackTicketActivity("assignment", fromAssignment), reassignConsultants);
+router.patch("/:assignmentId/consultant/:consultantId/status", trackTicketActivity("assignment", fromAssignment), updateConsultantAssignmentStatus);
 router.delete("/:assignmentId/consultant/:consultantId", removeConsultantFromAssignment);
 
 export default router;

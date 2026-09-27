@@ -1,5 +1,18 @@
 import mongoose from "mongoose";
 
+/** What a person last did to a ticket — see utils/ticketActivity.js. */
+export const TICKET_ACTIVITY_TYPES = Object.freeze([
+  "created",
+  "edited",
+  "status_change",
+  "assignment",
+  "accepted",
+  "feedback",
+  "sub_ticket",
+  "comment",
+  "attachment",
+]);
+
 const ticketSchema = mongoose.Schema(
   {
     ticketNumber: {
@@ -94,6 +107,19 @@ const ticketSchema = mongoose.Schema(
     },
     deliveredAt: {
       type: Date,
+    },
+    // When a person last acted on the ticket and how (see utils/ticketActivity.js).
+    // The list shows how long the ticket has been idle since then. Tickets saved
+    // before these fields existed fall back to updatedAt on the client.
+    // No schema defaults on purpose: Mongoose would apply them to old tickets
+    // as they load, making every one look freshly created. New tickets get
+    // them in the pre-save hook below.
+    lastActivityAt: {
+      type: Date,
+    },
+    lastActivityType: {
+      type: String,
+      enum: TICKET_ACTIVITY_TYPES,
     },
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -283,6 +309,13 @@ ticketSchema.index({ productType: 1 });
 ticketSchema.index({ serviceType: 1 });
 ticketSchema.index({ scope: 1 });
 ticketSchema.index({ source: 1 });
+
+// A new ticket's last activity is its creation
+ticketSchema.pre("save", function () {
+  if (!this.isNew) return;
+  if (!this.lastActivityAt) this.lastActivityAt = this.createdAt ?? new Date();
+  if (!this.lastActivityType) this.lastActivityType = "created";
+});
 
 // Pre-save middleware to generate ticket number
 ticketSchema.pre("save", async function () {

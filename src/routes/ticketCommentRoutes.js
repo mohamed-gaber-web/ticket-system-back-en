@@ -12,6 +12,7 @@ import {
 } from "../controllers/ticketCommentController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
+import { trackTicketActivity, fromBody } from "../utils/ticketActivity.js";
 const router = express.Router();
 
 // Every route needs a signed-in user; the controllers branch on req.userType.
@@ -31,7 +32,7 @@ router.get("/ticket/:ticketId/internal", getInternalComments);
 router.get("/ticket/:ticketId/public", getPublicComments);
 
 // CRUD routes
-router.route("/").get(getAllComments).post(createComment);
+router.route("/").get(getAllComments).post(trackTicketActivity("comment", fromBody), createComment);
 
 router
   .route("/:id")

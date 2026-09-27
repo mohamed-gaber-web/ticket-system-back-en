@@ -13,6 +13,7 @@ import {
 } from "../controllers/ticketAttachmentController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
+import { trackTicketActivity, fromBody } from "../utils/ticketActivity.js";
 const router = express.Router();
 
 // Every route needs a signed-in user; the controllers branch on req.userType.
@@ -35,7 +36,7 @@ router.get("/ticket/:ticketId", getAttachmentsByTicket);
 router.delete("/ticket/:ticketId", deleteTicketAttachments);
 
 // CRUD routes
-router.route("/").get(getAllAttachments).post(createAttachment);
+router.route("/").get(getAllAttachments).post(trackTicketActivity("attachment", fromBody), createAttachment);
 
 router
   .route("/:id")
