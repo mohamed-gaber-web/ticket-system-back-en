@@ -33,7 +33,7 @@ const populateEmployee = (q, withHr = false) => {
 // ── HR file sanitiser ─────────────────────────────────────────────────────────
 // Only these keys are ever written into `hr`, each coerced from what a form
 // sends ("" means "clear it"). Anything else in the payload is dropped.
-const HR_STRING_FIELDS = ["fullLegalName", "nationalId", "address", "recruiterName", "section", "bankName", "bankAccount", "notes"];
+const HR_STRING_FIELDS = ["fullLegalName", "nationalId", "address", "recruiterName", "section", "bankName", "bankAccount", "companyLineNumber", "notes"];
 const HR_DATE_FIELDS = ["dateOfBirth", "applicationDate", "interviewDate", "hireDate", "contractEndDate", "medicalStartDate", "medicalEndDate"];
 const HR_BOOLEAN_FIELDS = ["hasSocialInsurance", "hasMedicalInsurance", "hasCompanyLine", "hasLaptop", "uberSubscriber"];
 const HR_NUMBER_FIELDS = ["contractDurationMonths", "probationPeriodMonths", "basicSalary", "grossSalary", "netSalary", "insuranceWage", "employeeInsuranceShare", "employerInsuranceShare"];
@@ -80,6 +80,10 @@ const sanitizeHr = (input) => {
     out.insuranceWage = 0;
     out.employeeInsuranceShare = null;
     out.employerInsuranceShare = null;
+  }
+  if (out.hasCompanyLine === false) out.companyLineNumber = null;
+  if (out.companyLineNumber && !/^\+?\d{8,15}$/.test(out.companyLineNumber.replace(/[\s-]/g, ""))) {
+    throw new HrInputError("Line number must be 8-15 digits");
   }
   if (out.hasMedicalInsurance === false) {
     out.medicalStartDate = null;

@@ -96,6 +96,7 @@ const hrSchema = new mongoose.Schema(
     // Subscriptions & company assets. The laptop's photo is an HR document of
     // type "laptop_photo" (see EmployeeDocument.js).
     hasCompanyLine: { type: Boolean, default: null },
+    companyLineNumber: { type: String, trim: true, maxlength: [20, "Line number cannot exceed 20 characters"], default: null },
     hasLaptop: { type: Boolean, default: null },
     uberSubscriber: { type: Boolean, default: null },
 
