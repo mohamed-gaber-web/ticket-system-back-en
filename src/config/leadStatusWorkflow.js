@@ -26,6 +26,7 @@ export const LEAD_STATUSES = [
   "Interested",
   "Follow-up",
   "Meeting Scheduled",
+  "Under Preparation",
   "Proposal Sent",
   "Negotiation",
   "Closed Won",
@@ -195,6 +196,19 @@ export const LEAD_STATUS_WORKFLOW = {
     fu: true,
   },
 
+  "Under Preparation": {
+    ar: "قيد التحضير",
+    color: "#6d28d9",
+    bg: "#ede9fe",
+    step: 4,
+    desc: "The proposal is being prepared for the customer.",
+    fields: [
+      { k: "readyBy", label: "Expected Ready Date", ar: "الموعد المتوقع لتجهيز العرض", type: "datetime", req: true },
+      { k: "scope", label: "Proposal Scope / Notes", ar: "نطاق العرض وملاحظات", type: "textarea" },
+    ],
+    task: (v) => ({ title: "Finish proposal", due: v.readyBy, kind: "follow" }),
+  },
+
   "Proposal Sent": {
     ar: "تم إرسال العرض",
     color: "#0891b2",
@@ -280,9 +294,10 @@ export const NEXT = {
   "No Answer": ["No Answer", "Call Back Later", "Wrong Number", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
   "Call Back Later": ["No Answer", "Call Back Later", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
   "Wrong Number": ["New Lead", "Follow-up", "Closed Lost"],
-  "Interested": ["Follow-up", "Meeting Scheduled", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
-  "Follow-up": ["Follow-up", "Meeting Scheduled", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
-  "Meeting Scheduled": ["Meeting Scheduled", "Follow-up", "Proposal Sent", "No Answer", "Closed Lost"],
+  "Interested": ["Follow-up", "Meeting Scheduled", "Under Preparation", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
+  "Follow-up": ["Follow-up", "Meeting Scheduled", "Under Preparation", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
+  "Meeting Scheduled": ["Meeting Scheduled", "Follow-up", "Under Preparation", "Proposal Sent", "No Answer", "Closed Lost"],
+  "Under Preparation": ["Proposal Sent", "Meeting Scheduled", "Follow-up", "Closed Lost"],
   "Proposal Sent": ["Negotiation", "Meeting Scheduled", "Follow-up", "Closed Won", "Closed Lost"],
   "Negotiation": ["Meeting Scheduled", "Proposal Sent", "Follow-up", "Closed Won", "Closed Lost"],
   "Closed Won": [],
