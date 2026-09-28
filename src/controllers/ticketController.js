@@ -618,6 +618,19 @@ const getTicketByNumber = async (req, res) => {
   }
 };
 
+// ── Duration rule ─────────────────────────────────────────────────────────────
+// Work is only recorded once it has been done: a ticket may sit in New or
+// Assigned without a duration, but any later status (in progress, pending,
+// delivered, tested, resolved, closed, reopened, not related…) needs the hours
+// spent on it — otherwise the hour reports count it as zero.
+const STATUSES_WITHOUT_DURATION = new Set(["new", "assigned"]);
+export const DURATION_REQUIRED_MESSAGE =
+  "Enter the ticket's duration (hours, more than 0) before moving it past Assigned.";
+const hasDuration = (v) => v !== null && v !== undefined && v !== "" && Number(v) > 0;
+/** The error for putting a ticket in `status` with `duration`, or null when allowed. */
+export const durationError = (status, duration) =>
+  status && !STATUSES_WITHOUT_DURATION.has(status) && !hasDuration(duration) ? DURATION_REQUIRED_MESSAGE : null;
+
 // @desc    Create new ticket
 // @route   POST /api/tickets
 // @access  Public
@@ -671,6 +684,12 @@ const createTicket = async (req, res) => {
         success: false,
         message: "Customer not found",
       });
+    }
+
+    // Created straight into a later status → the duration must come with it
+    const createDurationError = durationError(status || "new", isEmployee(req) ? durationHours : undefined);
+    if (createDurationError) {
+      return res.status(400).json({ success: false, message: createDurationError });
     }
 
     // Get SLA from customer if mapped
@@ -878,6 +897,17 @@ const updateTicket = async (req, res) => {
       updateData.updatedBy = actingConsultantId;
     }
 
+    const nextStatus = status || ticket.status;
+    const nextDuration = durationHours !== undefined ? durationHours : ticket.durationHours;
+    const statusChanging = Boolean(status) && status !== ticket.status;
+    const durationCleared = durationHours !== undefined && hasDuration(ticket.durationHours) && !hasDuration(durationHours);
+    if (statusChanging || durationCleared) {
+      const editDurationError = durationError(nextStatus, nextDuration);
+      if (editDurationError) {
+        return res.status(400).json({ success: false, message: editDurationError });
+      }
+    }
+
     // Update timestamps / actor based on the status transition (status is changing
     // *into* resolved/closed), not on an empty timestamp — so re-resolving/re-closing
     // re-stamps who & when. A manually supplied resolvedAt/closedAt is preserved.
@@ -1076,6 +1106,11 @@ const updateTicketStatus = async (req, res) => {
           message: "Customers can only update status to 'new' when ticket is in 'customer pending' state",
         });
       }
+    }
+
+    const statusDurationError = durationError(status, ticket.durationHours);
+    if (statusDurationError) {
+      return res.status(400).json({ success: false, message: statusDurationError });
     }
 
     const updateData = { status };
