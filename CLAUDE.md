@@ -32,8 +32,8 @@ Two kinds of people log in, and the JWT carries `userType: "employee" | "custome
 |---|---|---|
 | `admin` | all | every module, every tele-sales team, manages everyone |
 | `consultant` | `tickets` | |
-| `sales` | `telesales` | pinned to one tele-sales team (`teleSalesTeam`) |
-| `sales_manager` | `telesales` | cross-team; manages the `sales` people |
+| `sales` | `telesales` | pinned to one tele-sales team (`teleSalesTeam`); sees only the leads assigned to them |
+| `sales_manager` | `telesales` | pinned to one team (required); runs it — all its leads, import, assign, its `sales` people |
 | `marketing` | `telesales` (read-only), `tasks` | |
 | `marketing_manager` | same | manages the `marketing` people |
 | `developer` | `development` | works the boards they created or were added to |
@@ -57,15 +57,19 @@ The tele-sales module is multi-tenant. **`TeleSalesTeam` (Egypt / UAE / KSA) is 
 
 **All of it is enforced in one file — `src/utils/teleSalesScope.js`.** Never hand-roll a team or ownership check in a controller; that rule used to be copy-pasted in ~15 places, which made it luck whether a new endpoint remembered it. Use:
 
-- `teamScopeFilter(req, field = "team")` — spread into **every** list, count and aggregate. Fails closed: a caller with no team matches nothing, never everything. Returns a real `ObjectId` because `aggregate()` doesn't cast its `$match`. Pass `"teleSalesTeam"` when scoping employees.
+- `leadScopeFilter(req)` — for **every** query over `Lead`: the team boundary plus, for a plain agent, `assignedTo: self`. Spread it **last** so query params can't widen it.
+- `teamScopeFilter(req, field = "team")` — the team boundary alone, for non-lead collections (employees, call logs…). Fails closed: a caller with no team matches nothing, never everything. Returns a real `ObjectId` because `aggregate()` doesn't cast its `$match`. Pass `"teleSalesTeam"` when scoping employees.
 - `activityScopeFilter(req, ownerField)` — for the two feeds that read `CallLog`/`FollowUp` directly (`/calls/recent`, `/followups/upcoming`) rather than through a lead. Those two collections carry a **denormalised `team`** for exactly this reason; it must be copied on create and re-stamped if the lead ever moves team.
-- `canViewLead` / `canEditLead` / `canManageLead` / `canClaimLead` / `canChangeLeadTeam` — per-document decisions. Viewing is team-wide (the team shares one pipeline); writing is narrower (own + unassigned); reassigning is a manager's; moving a lead between teams is a super admin's alone.
+- `canViewLead` / `canEditLead` / `canManageLead` / `canClaimLead` / `canChangeLeadTeam` — per-document decisions. An agent sees and works only leads assigned to them (unassigned leads wait with the manager); the sales manager sees, works and reassigns everything in their team; moving a lead between teams is an admin's alone.
+- `requireLeadManager` — route guard for manager-only work (`POST /leads/import`): sales manager or admin.
 - `canManageActivity` (team-bearing docs) / `canManageLeadChild` (attachments and emails, whose team comes from the lead).
 - `resolveCreateTeam` / `resolveExistingTeam` / `assigneeTeamError` — a body-supplied team is ignored for non-admins, the destination must actually exist, and an assignee must be on the owning team.
 
 **Out-of-team requests answer 404, not 403** — a 403 confirms the record is real and lets anyone walk the id space to size another team's pipeline. A same-team-but-not-yours refusal is a 403 with a reason.
 
-Roles (`Employee.role`): `sales` sees their whole team and works their own + unassigned leads; `sales_manager` sees and writes **every** team and manages the sales roster; `marketing` / `marketing_manager` read every team but write nothing (`requireTeleSalesWrite` refuses them); `admin` does everything and alone manages the teams. Cross-team readers legitimately have no team.
+Roles (`Employee.role`): `sales` sees and works only the leads assigned to them; `sales_manager` sees and writes **their own team** only (imports, assigns, manages that team's agents) and must have a team; `marketing` / `marketing_manager` read every team but write nothing (`requireTeleSalesWrite` refuses them); `admin` does everything across teams and alone manages the teams. Cross-team readers (admin, marketing) legitimately have no team.
+
+**Lead value:** `Lead.potentialValue` (+ `valueCurrency`, `valueSource`, `valueUpdatedAt`) is the lead's single money figure. It starts as the form's Potential Value (`manual`) and is overwritten by the money field marked `leadValue` in `leadStatusWorkflow.js` when that status is reached (Quoted → Revised → Final Deal Value; `leadValueFromStatus`). `GET /leads/stats` returns `values.{open,won,lost}` totals **per currency** (unset currency reads as EGP). Existing data: `node src/scripts/backfillLeadValues.js --dry`, then without `--dry`.
 
 Security tests: `tests/teleSalesScope.test.js`.
 

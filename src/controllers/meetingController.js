@@ -8,7 +8,7 @@ import Meeting, {
 import Consultant from "../models/Consltant.js";
 import Customer from "../models/Customer.js";
 import Lead from "../models/Lead.js";
-import { callerTeamId, teamScopeFilter } from "../utils/teleSalesScope.js";
+import { callerTeamId, leadScopeFilter } from "../utils/teleSalesScope.js";
 import { isEmployee, hasModule, roleFamily, isAdmin as isAdminUser } from "../utils/access.js";
 import { notifyMeeting } from "../utils/meetingNotify.js";
 
@@ -120,7 +120,7 @@ const resolveContacts = async (req, { customer, lead }) => {
     if (!isValidId(lead)) return { error: "Invalid lead" };
     // Leads live inside a tele-sales team; the scope helper fails closed for
     // callers with no team, exactly like the leads API itself.
-    const l = await Lead.findOne({ _id: lead, ...teamScopeFilter(req) }).select("_id team").lean();
+    const l = await Lead.findOne({ _id: lead, ...leadScopeFilter(req) }).select("_id team").lean();
     if (!l) return { error: "Lead not found" };
     out.lead = l._id;
     out.team = l.team ?? null;
@@ -253,8 +253,9 @@ const getContacts = async (req, res) => {
             .lean()
         : [];
 
-    // Leads follow the tele-sales team boundary (fails closed for callers with no team).
-    const leadScope = teamScopeFilter(req);
+    // Leads follow the tele-sales scope — team boundary, and an agent's own leads
+    // only (fails closed for callers with no team).
+    const leadScope = leadScopeFilter(req);
     const leads = await Lead.find(leadScope)
       .select("companyName contactPersonName email phonePrimary status")
       .sort({ companyName: 1 })

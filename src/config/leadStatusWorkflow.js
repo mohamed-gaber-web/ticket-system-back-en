@@ -36,6 +36,17 @@ export const LEAD_STATUSES = [
 // The 7-stage pipeline shown as a progress bar. `step` below indexes into this.
 export const STEPS = ["New Lead", "Contact Attempts", "Qualified", "Meeting", "Proposal", "Negotiation", "Closed"];
 
+// ── Lead value (Lead.potentialValue) ─────────────────────────────────────────
+// Currencies a money field (and the lead's value) may carry. The status-change
+// form offers the first three; the lead form offers all of them.
+export const VALUE_CURRENCIES = ["EGP", "SAR", "AED", "USD", "EUR"];
+export const DEFAULT_VALUE_CURRENCY = "EGP";
+
+// Where the lead's value came from. A money field marked `leadValue` below
+// overwrites Lead.potentialValue when its status is reached, so the lead always
+// carries the latest figure; "manual" is the Potential Value typed on the lead form.
+export const VALUE_SOURCES = ["manual", "quoted", "revised", "final"];
+
 const MODULES = ["D365 Finance & Operations", "Business Central", "Power Platform", "MASAR Mobile App", "Support / SLA", "Licenses only"];
 
 export const LEAD_STATUS_WORKFLOW = {
@@ -217,7 +228,7 @@ export const LEAD_STATUS_WORKFLOW = {
     desc: "Technical and commercial proposal delivered, awaiting the customer decision.",
     fields: [
       { k: "file", label: "Proposal File / Link", ar: "ملف العرض أو الرابط", type: "attach", req: true },
-      { k: "value", label: "Quoted Value", ar: "القيمة المالية للعرض", type: "money", req: true },
+      { k: "value", label: "Quoted Value", ar: "القيمة المالية للعرض", type: "money", req: true, leadValue: "quoted" },
       { k: "due", label: "Decision Due Date", ar: "الموعد المتوقع لرد العميل", type: "datetime", req: true },
     ],
     task: (v) => ({ title: "Chase proposal decision", due: v.due, kind: "follow" }),
@@ -236,7 +247,7 @@ export const LEAD_STATUS_WORKFLOW = {
         k: "points", label: "Negotiation Points", ar: "النقاط الجاري التفاوض عليها", type: "chips", req: true,
         opts: ["Price", "Scope", "Payment Terms", "SLA", "Implementation timeline", "Number of licenses"],
       },
-      { k: "revised", label: "Revised Value", ar: "القيمة المالية المعدلة", type: "money" },
+      { k: "revised", label: "Revised Value", ar: "القيمة المالية المعدلة", type: "money", leadValue: "revised" },
       { k: "closeDate", label: "Expected Closing Date", ar: "التاريخ المتوقع للإغلاق", type: "datetime", req: true },
     ],
     task: (v) => ({ title: "Expected deal closing", due: v.closeDate, kind: "deal" }),
@@ -250,7 +261,7 @@ export const LEAD_STATUS_WORKFLOW = {
     step: 6,
     desc: "Contract signed and project handed over to delivery.",
     fields: [
-      { k: "final", label: "Final Deal Value", ar: "قيمة العقد النهائية", type: "money", req: true },
+      { k: "final", label: "Final Deal Value", ar: "قيمة العقد النهائية", type: "money", req: true, leadValue: "final" },
       { k: "contract", label: "Contract / PO Attachment", ar: "العقد الموقع أو أمر الشراء", type: "attach", req: true },
       {
         k: "winReason", label: "Win Reason", ar: "سبب اختيار العميل لنا", type: "select", req: true,
@@ -393,6 +404,25 @@ export const buildFieldValueMap = (statusKey, rawValues, lead) => {
   });
 
   return out;
+};
+
+/**
+ * The value this status change puts on the lead, or null when it carries none —
+ * the amount of the status's `leadValue` money field (Quoted / Revised / Final),
+ * with its currency. An empty or zero amount (Revised Value is optional) keeps
+ * whatever the lead already had.
+ */
+export const leadValueFromStatus = (statusKey, rawValues) => {
+  const config = LEAD_STATUS_WORKFLOW[statusKey];
+  const values = rawValues || {};
+  const field = (config?.fields || []).find((f) => f.type === "money" && f.leadValue);
+  if (!field) return null;
+  const amount = Number(values[field.k]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const currency = VALUE_CURRENCIES.includes(values[`${field.k}__c`])
+    ? values[`${field.k}__c`]
+    : DEFAULT_VALUE_CURRENCY;
+  return { amount, currency, source: field.leadValue };
 };
 
 const FOLLOWUP_TYPE_BY_KIND = { call: "Call", meet: "Meeting", follow: "Call", deal: "Call" };

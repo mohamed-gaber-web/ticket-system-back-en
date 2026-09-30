@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { LEAD_STATUSES } from "../config/leadStatusWorkflow.js";
+import { LEAD_STATUSES, VALUE_CURRENCIES, VALUE_SOURCES } from "../config/leadStatusWorkflow.js";
 
 // ── Spec enum value lists (see tele-sales lead field specification) ────────────
 
@@ -275,9 +275,26 @@ const leadSchema = mongoose.Schema(
       enum: ["High", "Medium", "Low"],
       default: "Medium",
     },
+    // The lead's money value — what the dashboard sums. Typed on the lead form
+    // ("manual") until the workflow captures a real figure: the Quoted Value at
+    // Proposal Sent, a Revised Value at Negotiation, the Final Deal Value at
+    // Closed Won. Each of those overwrites it, so it is always the latest figure.
     potentialValue: {
       type: Number,
       min: 0,
+    },
+    // Unset on leads valued before currencies were recorded — read as EGP, the
+    // default the status-change form has always offered.
+    valueCurrency: {
+      type: String,
+      enum: VALUE_CURRENCIES,
+    },
+    valueSource: {
+      type: String,
+      enum: VALUE_SOURCES,
+    },
+    valueUpdatedAt: {
+      type: Date,
     },
 
     // Status Pipeline — see src/config/leadStatusWorkflow.js for the full

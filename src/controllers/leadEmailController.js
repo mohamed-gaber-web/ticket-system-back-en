@@ -5,7 +5,7 @@ import { getGridFSBucket } from "../config/gridfs.js";
 import { sendCustomEmail, senderMailbox, MAX_TOTAL_ATTACHMENT_BYTES } from "../utils/emailService.js";
 import { sanitizeEmailHtml } from "../utils/htmlSanitizer.js";
 import { HR_DOCUMENT_CATEGORY } from "../models/EmployeeDocument.js";
-import { canViewLead, canEditLead, canManageLeadChild, teamScopeFilter } from "../utils/teleSalesScope.js";
+import { canViewLead, canEditLead, canManageLeadChild, leadScopeFilter } from "../utils/teleSalesScope.js";
 import { syncLeadInbox } from "../utils/leadInboxSync.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -353,7 +353,7 @@ export const syncInboxNow = async (req, res) => {
 export const getEmailInbox = async (req, res) => {
   try {
     const { filter = "all", search = "", page = 1, limit = 25 } = req.query;
-    const scope = teamScopeFilter(req);
+    const scope = leadScopeFilter(req);
     const leadMatch = { ...scope };
     if (search) {
       const rx = new RegExp(String(search).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");

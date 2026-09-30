@@ -103,7 +103,7 @@ const sanitizeHr = (input) => {
 
 /**
  * Tele-sales team rules for an employee's (resulting) role. A `sales` employee
- * must sit in a team — without one they would see no leads at all — and a team
+ * or `sales_manager` must sit in a team — without one they would see no leads at all — and a team
  * being newly chosen must exist and be active. Returns an error message or null.
  * `changed` is false when the stored team is kept as it is, so editing someone
  * else's details never fails on a team that was deactivated later.
@@ -111,7 +111,8 @@ const sanitizeHr = (input) => {
 const salesTeamProblem = async (role, team, changed = true) => {
   if (roleFamily(role) !== "sales") return null;
   const id = team && typeof team === "object" ? team._id : team;
-  if (!id) return role === "sales" ? "A sales employee must belong to a tele-sales team — choose one." : null;
+  // A sales manager runs one team, so they need one exactly like an agent.
+  if (!id) return "A sales employee or sales manager must belong to a tele-sales team — choose one.";
   if (!changed) return null;
   if (!mongoose.isValidObjectId(id)) return "Invalid tele-sales team.";
   const found = await TeleSalesTeam.findById(id).select("isActive").lean();

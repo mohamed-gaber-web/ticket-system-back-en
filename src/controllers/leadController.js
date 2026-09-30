@@ -8,7 +8,7 @@ import LeadStatusHistory from "../models/LeadStatusHistory.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import mongoose from "mongoose";
 import {
-  teamScopeFilter,
+  leadScopeFilter,
   canViewLead,
   canEditLead,
   canManageLead,
@@ -19,11 +19,17 @@ import {
   resolveExistingTeam,
   assigneeTeamError,
   isCrossTeamReader,
-  isCrossTeamWriter,
+  isLeadManager,
 } from "../utils/teleSalesScope.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
+import { DEFAULT_VALUE_CURRENCY } from "../config/leadStatusWorkflow.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
+
+/** Does this update change the lead's value (amount or currency)? */
+const valueChanged = (lead, updateData) =>
+  (updateData.potentialValue !== undefined && Number(updateData.potentialValue) !== Number(lead.potentialValue ?? NaN)) ||
+  (updateData.valueCurrency !== undefined && updateData.valueCurrency !== lead.valueCurrency);
 
 // Fields the lead form requires on both add and update. Enforced here rather than
 // as schema `required` so bulk import (which reads whatever the source file has)
@@ -110,7 +116,7 @@ export const createLead = async (req, res) => {
     // Assign_To is mandatory, but only a manager/admin picks it explicitly — a
     // plain agent doesn't see the control (see LeadFormModal), so a blank value
     // from them means "assign it to me", not "leave it unassigned".
-    const managerOrAdmin = isCrossTeamWriter(req);
+    const managerOrAdmin = isLeadManager(req);
     let assignedTo = cleanStr(req.body.assignedTo);
     if (!assignedTo) {
       if (managerOrAdmin) {
@@ -130,6 +136,10 @@ export const createLead = async (req, res) => {
       assignedTo,
       leadSourceDetail: detail.value,
       createdBy: req.user._id,
+      // Only the form's own value; the workflow alone records the others.
+      ...(Number(req.body.potentialValue) > 0
+        ? { valueSource: "manual", valueUpdatedAt: new Date() }
+        : { valueSource: undefined, valueUpdatedAt: undefined }),
     });
 
     res.status(201).json({ success: true, message: "Lead created successfully", data: lead });
@@ -153,7 +163,7 @@ const VALID_SALES_TYPES = Lead.schema.path("salesType").enumValues;
 
 // @desc    Bulk import leads (from Excel / CSV / markdown parsed on the client)
 // @route   POST /api/leads/import
-// @access  Private (tele_sales)
+// @access  Private (sales manager — into their own team — or admin; see requireLeadManager)
 export const importLeads = async (req, res) => {
   try {
     const rows = Array.isArray(req.body) ? req.body : req.body.leads;
@@ -164,8 +174,8 @@ export const importLeads = async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot import more than 5000 leads at once" });
     }
 
-    // Imported leads land in the caller's own team; only a super admin may import
-    // into a team they don't belong to, and must name it.
+    // Imported leads land in the manager's own team; only an admin may import
+    // into any team, and must name it.
     const resolved = resolveCreateTeam(req, req.body.team);
     if (resolved.error) {
       return res.status(400).json({ success: false, message: resolved.error });
@@ -178,7 +188,7 @@ export const importLeads = async (req, res) => {
     }
 
     // Optional batch-wide defaults
-    const canBulkAssign = isCrossTeamWriter(req);
+    const canBulkAssign = isLeadManager(req);
     const defaultAssignedTo =
       canBulkAssign && cleanStr(req.body.assignedTo) ? cleanStr(req.body.assignedTo) : undefined;
 
@@ -394,7 +404,7 @@ export const backfillCustomerIds = async (req, res) => {
 
 // @desc    Get all leads
 // @route   GET /api/leads
-// @access  Private (tele_sales) — super admin: all teams, everyone else: own team
+// @access  Private (tele_sales) — admin/marketing: all teams, manager: own team, agent: own leads
 export const getAllLeads = async (req, res) => {
   try {
     const {
@@ -403,18 +413,15 @@ export const getAllLeads = async (req, res) => {
       page = 1, limit = 20,
     } = req.query;
 
-    // The team boundary goes on first and is never overwritten below — a lead
-    // outside the caller's team cannot be reached through any combination of
-    // query parameters.
-    const filter = { ...teamScopeFilter(req) };
+    const filter = {};
 
     // Only cross-team readers see more than one team, so only they can narrow to one.
     if (team && isCrossTeamReader(req)) filter.team = team;
 
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
-    // Anyone on the team may filter the shared pipeline by owner; "unassigned"
-    // surfaces the pool nobody has claimed yet.
+    // A manager filters the team pipeline by owner; "unassigned" surfaces the
+    // leads still waiting to be handed out. (An agent's scope pins assignedTo.)
     if (assignedTo) filter.assignedTo = assignedTo === "unassigned" ? null : assignedTo;
     if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
     if (salesType) filter.salesType = salesType;
@@ -440,6 +447,10 @@ export const getAllLeads = async (req, res) => {
       if (from) filter.createdAt.$gte = new Date(from);
       if (to) filter.createdAt.$lte = new Date(to);
     }
+
+    // The scope goes on LAST so it overwrites any team / assignedTo the query
+    // tried to set — no combination of parameters reaches past it.
+    Object.assign(filter, leadScopeFilter(req));
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [leads, total] = await Promise.all([
@@ -471,20 +482,51 @@ export const getAllLeads = async (req, res) => {
 export const getLeadStats = async (req, res) => {
   try {
     // aggregate() does not cast its $match the way find() does, which is why
-    // teamScopeFilter hands back a real ObjectId rather than a string.
-    const matchStage = { ...teamScopeFilter(req) };
+    // leadScopeFilter hands back real ObjectIds rather than strings. An agent's
+    // dashboard therefore counts (and values) only their own leads.
+    const matchStage = { ...leadScopeFilter(req) };
 
-    const stats = await Lead.aggregate([
-      { $match: matchStage },
-      { $group: { _id: "$status", count: { $sum: 1 }, value: { $sum: "$potentialValue" } } },
-      { $sort: { _id: 1 } },
+    const [stats, valueRows] = await Promise.all([
+      Lead.aggregate([
+        { $match: matchStage },
+        { $group: { _id: "$status", count: { $sum: 1 }, value: { $sum: "$potentialValue" } } },
+        { $sort: { _id: 1 } },
+      ]),
+      // Money never adds across currencies, so values are totalled per currency
+      // and per bucket: open (still in play), won and lost.
+      Lead.aggregate([
+        { $match: { ...matchStage, potentialValue: { $gt: 0 } } },
+        {
+          $group: {
+            _id: {
+              currency: { $ifNull: ["$valueCurrency", DEFAULT_VALUE_CURRENCY] },
+              bucket: {
+                $switch: {
+                  branches: [
+                    { case: { $eq: ["$status", "Closed Won"] }, then: "won" },
+                    { case: { $eq: ["$status", "Closed Lost"] }, then: "lost" },
+                  ],
+                  default: "open",
+                },
+              },
+            },
+            total: { $sum: "$potentialValue" },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { total: -1 } },
+      ]),
     ]);
 
     const total = stats.reduce((sum, s) => sum + s.count, 0);
+    const values = { open: [], won: [], lost: [] };
+    valueRows.forEach((r) => {
+      values[r._id.bucket].push({ currency: r._id.currency, total: r.total, count: r.count });
+    });
 
     res.status(200).json({
       success: true,
-      data: { total, byStatus: stats },
+      data: { total, byStatus: stats, values },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching stats", error: error.message });
@@ -543,13 +585,9 @@ export const updateLead = async (req, res) => {
     if (!canViewLead(req, lead)) {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
-    // Visible but owned by a colleague: say so plainly, since hiding it here would
-    // only confuse someone looking at a lead they can see on their own screen.
+    // Visible but not writable (a read-only role): say so plainly.
     if (!canEditLead(req, lead)) {
-      return res.status(403).json({
-        success: false,
-        message: "This lead is assigned to another agent on your team. Ask your manager to reassign it first.",
-      });
+      return res.status(403).json({ success: false, message: "Your role cannot edit this lead." });
     }
 
     const requiredErrors = validateRequiredLeadFields(req.body, { partial: true });
@@ -562,7 +600,7 @@ export const updateLead = async (req, res) => {
     // transition rules and per-status mandatory fields.
     const allowedFields = [
       "companyName", "contactPersonName", "email", "jobTitle",
-      "industry", "leadSource", "priority", "potentialValue",
+      "industry", "leadSource", "priority", "potentialValue", "valueCurrency",
       "painPoints", "customerNeeds", "budget", "isDecisionMaker", "tags",
       // Spec fields (tele-sales lead specification)
       "salesType", "entityType", "businessClassification", "industrySector", "country",
@@ -596,6 +634,13 @@ export const updateLead = async (req, res) => {
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) updateData[field] = req.body[field];
     });
+
+    // A value typed on the form is a manual figure; it stays until the workflow
+    // records a quoted / revised / final one (see leadStatusController).
+    if (valueChanged(lead, updateData)) {
+      updateData.valueSource = "manual";
+      updateData.valueUpdatedAt = new Date();
+    }
 
     // A team move must land somewhere real, or the lead disappears from everyone.
     if (updateData.team !== undefined) {

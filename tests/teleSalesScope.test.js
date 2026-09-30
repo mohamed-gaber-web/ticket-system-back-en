@@ -8,8 +8,8 @@
  * so they need no database and no server.
  *
  * Role model under test (Employee.role):
- *   sales          → pinned to one team, writes own + unassigned
- *   sales_manager  → every team, writes everything, manages sales agents
+ *   sales          → pinned to one team, sees and writes only the leads assigned to them
+ *   sales_manager  → pinned to one team, sees and writes all of it, manages its agents
  *   marketing      → every team, READ-ONLY
  *   admin          → every team, writes everything
  *
@@ -26,7 +26,9 @@ import {
   isCrossTeamWriter,
   callerTeamId,
   documentTeamId,
+  isLeadManager,
   teamScopeFilter,
+  leadScopeFilter,
   activityScopeFilter,
   canViewLead,
   canEditLead,
@@ -97,10 +99,21 @@ describe("role predicates", () => {
   it("separates cross-team readers from cross-team writers", () => {
     assert.equal(isCrossTeamReader(req({ role: "marketing" })), true);
     assert.equal(isCrossTeamWriter(req({ role: "marketing" })), false);
-    assert.equal(isCrossTeamWriter(req({ role: "sales_manager" })), true);
     assert.equal(isCrossTeamWriter(req({ role: "admin" })), true);
     assert.equal(isCrossTeamReader(req({ role: "sales" })), false);
     assert.equal(isCrossTeamReader(req({ role: "consultant" })), false);
+  });
+
+  it("keeps a sales manager inside their team", () => {
+    assert.equal(isCrossTeamReader(req({ role: "sales_manager" })), false);
+    assert.equal(isCrossTeamWriter(req({ role: "sales_manager" })), false);
+  });
+
+  it("treats only admins and sales managers as lead managers", () => {
+    assert.equal(isLeadManager(req({ role: "admin" })), true);
+    assert.equal(isLeadManager(req({ role: "sales_manager" })), true);
+    assert.equal(isLeadManager(req({ role: "sales" })), false);
+    assert.equal(isLeadManager(req({ role: "marketing_manager" })), false);
   });
 
   it("does not treat an unknown or missing role as privileged", () => {
@@ -148,9 +161,13 @@ describe("teamScopeFilter", () => {
     assert.deepEqual(teamScopeFilter(req({ role: "admin", team: null })), {});
   });
 
-  it("does not constrain a sales manager — they run every team", () => {
-    assert.deepEqual(teamScopeFilter(req({ role: "sales_manager", team: null })), {});
-    assert.deepEqual(teamScopeFilter(req({ role: "sales_manager", team: EGYPT })), {});
+  it("pins a sales manager to their own team — Team A never sees Team B", () => {
+    const filter = teamScopeFilter(req({ role: "sales_manager", team: EGYPT }));
+    assert.equal(String(filter.team), String(EGYPT));
+  });
+
+  it("FAILS CLOSED for a team-less sales manager", () => {
+    assert.equal(matchesNothing(teamScopeFilter(req({ role: "sales_manager", team: null }))), true);
   });
 
   it("does not constrain marketing — they read every team", () => {
@@ -190,14 +207,44 @@ describe("teamScopeFilter", () => {
   });
 });
 
+describe("leadScopeFilter", () => {
+  it("shows an agent only the leads assigned to them", () => {
+    const me = oid();
+    const filter = leadScopeFilter(req({ role: "sales", team: EGYPT, id: me }));
+    assert.equal(String(filter.team), String(EGYPT));
+    assert.equal(String(filter.assignedTo), String(me));
+    // ObjectId, not string: getLeadStats feeds this straight into aggregate().
+    assert.ok(filter.assignedTo instanceof mongoose.Types.ObjectId);
+  });
+
+  it("shows a sales manager their whole team, assigned or not", () => {
+    const filter = leadScopeFilter(req({ role: "sales_manager", team: EGYPT }));
+    assert.equal(String(filter.team), String(EGYPT));
+    assert.equal(filter.assignedTo, undefined);
+  });
+
+  it("leaves admins and marketing unfiltered", () => {
+    assert.deepEqual(leadScopeFilter(req({ role: "admin", team: null })), {});
+    assert.deepEqual(leadScopeFilter(req({ role: "marketing", team: null })), {});
+  });
+
+  it("FAILS CLOSED for a team-less agent", () => {
+    assert.equal(matchesNothing(leadScopeFilter(req({ role: "sales", team: null }))), true);
+  });
+});
+
 describe("activityScopeFilter", () => {
   it("leaves a super admin unfiltered", () => {
     assert.deepEqual(activityScopeFilter(req({ role: "admin", team: null }), "calledBy"), {});
   });
 
-  it("leaves a sales manager and marketing unfiltered", () => {
-    assert.deepEqual(activityScopeFilter(req({ role: "sales_manager" }), "calledBy"), {});
+  it("leaves marketing unfiltered", () => {
     assert.deepEqual(activityScopeFilter(req({ role: "marketing" }), "calledBy"), {});
+  });
+
+  it("keeps a sales manager's feed inside their team", () => {
+    const filter = activityScopeFilter(req({ role: "sales_manager", team: EGYPT }), "calledBy");
+    assert.equal(String(filter.team), String(EGYPT));
   });
 
   it("keeps an agent's feed personal AND team-bounded", () => {
@@ -215,10 +262,19 @@ describe("activityScopeFilter", () => {
 // ── Reading a lead ────────────────────────────────────────────────────────────
 
 describe("canViewLead", () => {
-  it("lets the team see its whole pipeline, including unassigned leads", () => {
-    const r = req({ role: "sales", team: EGYPT });
+  it("shows an agent only their own leads — not a colleague's, not the unassigned pool", () => {
+    const me = oid();
+    const r = req({ role: "sales", team: EGYPT, id: me });
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: me })), true);
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: oid() })), false);
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: null })), false);
+  });
+
+  it("shows a sales manager their whole team and nothing else", () => {
+    const r = req({ role: "sales_manager", team: EGYPT });
     assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: null })), true);
     assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: oid() })), true);
+    assert.equal(canViewLead(r, lead({ team: KSA, assignedTo: oid() })), false);
   });
 
   it("REFUSES another team's lead — the core of the feature", () => {
@@ -232,8 +288,8 @@ describe("canViewLead", () => {
     assert.equal(canViewLead(req({ role: "admin", team: null }), lead({ team: null })), true);
   });
 
-  it("lets a super admin, a sales manager and marketing see every team", () => {
-    for (const role of ["admin", "sales_manager", "marketing", "marketing_manager"]) {
+  it("lets a super admin and marketing see every team", () => {
+    for (const role of ["admin", "marketing", "marketing_manager"]) {
       const r = req({ role, team: null });
       assert.equal(canViewLead(r, lead({ team: EGYPT })), true, role);
       assert.equal(canViewLead(r, lead({ team: KSA })), true, role);
@@ -256,21 +312,20 @@ describe("canEditLead", () => {
     assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: me })), true);
   });
 
-  it("lets an agent claim an unassigned lead from the team pool", () => {
+  it("stops an agent touching an unassigned lead — the manager hands those out", () => {
     const r = req({ role: "sales", team: EGYPT });
-    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: null })), true);
+    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: null })), false);
   });
 
-  it("stops an agent overwriting a colleague's lead they can see", () => {
-    // Visible (same team) but owned by someone else: viewing is shared, work is not.
+  it("stops an agent overwriting a colleague's lead", () => {
     const r = req({ role: "sales", team: EGYPT });
     assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: oid() })), false);
   });
 
-  it("lets a sales manager work anything, in any team", () => {
+  it("lets a sales manager work anything in their team, nothing outside it", () => {
     const r = req({ role: "sales_manager", team: EGYPT });
     assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: oid() })), true);
-    assert.equal(canEditLead(r, lead({ team: KSA, assignedTo: oid() })), true);
+    assert.equal(canEditLead(r, lead({ team: KSA, assignedTo: oid() })), false);
   });
 
   it("REFUSES marketing every write, even on an unassigned lead they can see", () => {
@@ -303,8 +358,9 @@ describe("canManageLead", () => {
     assert.equal(canManageLead(req({ role: "marketing_manager" }), lead({ team: EGYPT })), false);
   });
 
-  it("allows a sales manager in any team", () => {
-    assert.equal(canManageLead(req({ role: "sales_manager", team: EGYPT }), lead({ team: KSA })), true);
+  it("allows a sales manager in their own team only", () => {
+    assert.equal(canManageLead(req({ role: "sales_manager", team: EGYPT }), lead({ team: EGYPT })), true);
+    assert.equal(canManageLead(req({ role: "sales_manager", team: EGYPT }), lead({ team: KSA })), false);
   });
 
   it("allows a super admin anywhere", () => {
@@ -313,9 +369,9 @@ describe("canManageLead", () => {
 });
 
 describe("canChangeLeadTeam", () => {
-  it("is for admins and the sales manager only", () => {
+  it("is for admins only", () => {
     assert.equal(canChangeLeadTeam(req({ role: "admin" })), true);
-    assert.equal(canChangeLeadTeam(req({ role: "sales_manager" })), true);
+    assert.equal(canChangeLeadTeam(req({ role: "sales_manager" })), false);
     assert.equal(canChangeLeadTeam(req({ role: "sales" })), false);
     assert.equal(canChangeLeadTeam(req({ role: "marketing_manager" })), false);
   });
@@ -326,9 +382,10 @@ describe("canChangeLeadTeam", () => {
 describe("canManageAgent", () => {
   const agent = ({ team = EGYPT, role = "sales" } = {}) => ({ _id: oid(), teleSalesTeam: team, role });
 
-  it("lets a sales manager run the roster of every team", () => {
+  it("lets a sales manager run their own team's roster only", () => {
     assert.equal(canManageAgent(req({ role: "sales_manager", team: EGYPT }), agent({ team: EGYPT })), true);
-    assert.equal(canManageAgent(req({ role: "sales_manager", team: EGYPT }), agent({ team: KSA })), true);
+    assert.equal(canManageAgent(req({ role: "sales_manager", team: EGYPT }), agent({ team: KSA })), false);
+    assert.equal(canManageAgent(req({ role: "sales_manager", team: null }), agent({ team: EGYPT })), false);
   });
 
   it("stops a sales manager acting on an admin or another manager — no deactivating your supervisor", () => {
@@ -363,9 +420,10 @@ describe("canManageActivity", () => {
     assert.equal(canManageActivity(r, activity({ team: EGYPT }), "calledBy"), false);
   });
 
-  it("lets a sales manager edit any team's activity", () => {
+  it("lets a sales manager edit their own team's activity only", () => {
     const r = req({ role: "sales_manager", team: EGYPT });
-    assert.equal(canManageActivity(r, activity({ team: KSA }), "calledBy"), true);
+    assert.equal(canManageActivity(r, activity({ team: EGYPT }), "calledBy"), true);
+    assert.equal(canManageActivity(r, activity({ team: KSA }), "calledBy"), false);
   });
 
   it("REFUSES marketing, even as the named owner", () => {
@@ -416,12 +474,16 @@ describe("resolveCreateTeam", () => {
     assert.equal(error, READ_ONLY_MESSAGE);
   });
 
-  it("lets a super admin and a sales manager choose the team explicitly", () => {
-    for (const role of ["admin", "sales_manager"]) {
-      const { team, error } = resolveCreateTeam(req({ role, team: null }), String(KSA));
-      assert.equal(error, null, role);
-      assert.equal(String(team), String(KSA), role);
-    }
+  it("lets a super admin choose the team explicitly", () => {
+    const { team, error } = resolveCreateTeam(req({ role: "admin", team: null }), String(KSA));
+    assert.equal(error, null);
+    assert.equal(String(team), String(KSA));
+  });
+
+  it("IGNORES a team sent by a sales manager — they create in their own team", () => {
+    const { team, error } = resolveCreateTeam(req({ role: "sales_manager", team: EGYPT }), String(KSA));
+    assert.equal(error, null);
+    assert.equal(String(team), String(EGYPT));
   });
 
   it("requires a cross-team writer with no home team to name one", () => {
@@ -431,8 +493,8 @@ describe("resolveCreateTeam", () => {
     assert.equal(error, TEAM_REQUIRED_MESSAGE);
   });
 
-  it("falls back to a cross-team writer's own team when they have one", () => {
-    const { team, error } = resolveCreateTeam(req({ role: "sales_manager", team: UAE }));
+  it("falls back to an admin's own team when they have one", () => {
+    const { team, error } = resolveCreateTeam(req({ role: "admin", team: UAE }));
     assert.equal(error, null);
     assert.equal(String(team), String(UAE));
   });
@@ -446,8 +508,12 @@ describe("resolveCreateTeam", () => {
 // ── Claiming from the shared pool ─────────────────────────────────────────────
 
 describe("canClaimLead", () => {
-  it("lets an agent take an unassigned lead on their team", () => {
-    assert.equal(canClaimLead(req({ role: "sales", team: EGYPT }), lead({ team: EGYPT, assignedTo: null })), true);
+  it("stops an agent claiming from the pool — they never see unassigned leads", () => {
+    assert.equal(canClaimLead(req({ role: "sales", team: EGYPT }), lead({ team: EGYPT, assignedTo: null })), false);
+  });
+
+  it("lets a sales manager take an unassigned lead on their team", () => {
+    assert.equal(canClaimLead(req({ role: "sales_manager", team: EGYPT }), lead({ team: EGYPT, assignedTo: null })), true);
   });
 
   it("refuses a lead a colleague already holds — that is a reassignment", () => {
@@ -487,20 +553,22 @@ describe("isSelf", () => {
 describe("canManageLeadChild", () => {
   const child = (owner) => ({ uploadedBy: owner });
 
-  it("lets the uploader delete their own attachment", () => {
+  it("lets the uploader delete their own attachment on their own lead", () => {
     const me = oid();
     const r = req({ role: "sales", team: EGYPT, id: me });
-    assert.equal(canManageLeadChild(r, lead({ team: EGYPT }), child(me), "uploadedBy"), true);
+    assert.equal(canManageLeadChild(r, lead({ team: EGYPT, assignedTo: me }), child(me), "uploadedBy"), true);
   });
 
   it("stops an agent deleting a colleague's attachment", () => {
-    const r = req({ role: "sales", team: EGYPT });
-    assert.equal(canManageLeadChild(r, lead({ team: EGYPT }), child(oid()), "uploadedBy"), false);
+    const me = oid();
+    const r = req({ role: "sales", team: EGYPT, id: me });
+    assert.equal(canManageLeadChild(r, lead({ team: EGYPT, assignedTo: me }), child(oid()), "uploadedBy"), false);
   });
 
-  it("lets a sales manager delete anything on any team's leads", () => {
+  it("lets a sales manager delete anything on their own team's leads only", () => {
     const r = req({ role: "sales_manager", team: EGYPT });
-    assert.equal(canManageLeadChild(r, lead({ team: KSA }), child(oid()), "uploadedBy"), true);
+    assert.equal(canManageLeadChild(r, lead({ team: EGYPT }), child(oid()), "uploadedBy"), true);
+    assert.equal(canManageLeadChild(r, lead({ team: KSA }), child(oid()), "uploadedBy"), false);
   });
 
   it("REFUSES marketing", () => {

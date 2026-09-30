@@ -227,7 +227,9 @@ export const updateAgent = async (req, res) => {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    const allowedUpdates = ["firstName", "lastName", "phone", "status", "role", "team"];
+    // A sales manager runs one team, so only an admin moves people between teams.
+    const allowedUpdates = ["firstName", "lastName", "phone", "status", "role"];
+    if (isSuperAdmin(req)) allowedUpdates.push("team");
 
     const updateData = {};
     allowedUpdates.forEach((field) => {

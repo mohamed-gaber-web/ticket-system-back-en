@@ -9,6 +9,7 @@ import {
   validateStatusFields,
   buildFieldValueMap,
   resolveFollowUpType,
+  leadValueFromStatus,
 } from "../config/leadStatusWorkflow.js";
 import {
   canViewLead,
@@ -37,7 +38,7 @@ export const changeLeadStatus = async (req, res) => {
     if (!canEditLead(req, lead)) {
       return res.status(403).json({
         success: false,
-        message: "This lead is assigned to another agent on your team, so you cannot change its status.",
+        message: "Your role cannot change this lead's status.",
       });
     }
 
@@ -99,6 +100,16 @@ export const changeLeadStatus = async (req, res) => {
         setUpdate.assignedTo = values.owner;
       }
       if (values.sla) setUpdate.firstContactDeadline = values.sla;
+    }
+
+    // Quoted / Revised / Final Deal Value become the lead's value, so the
+    // dashboard totals follow the real figures rather than the first guess.
+    const leadValue = leadValueFromStatus(newStatus, values);
+    if (leadValue) {
+      setUpdate.potentialValue = leadValue.amount;
+      setUpdate.valueCurrency = leadValue.currency;
+      setUpdate.valueSource = leadValue.source;
+      setUpdate.valueUpdatedAt = new Date();
     }
 
     const mongoUpdate = { $set: setUpdate };

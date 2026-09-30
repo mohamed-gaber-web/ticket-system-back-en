@@ -34,7 +34,7 @@ import {
   requireAdmin,
   requireManagerOrAdmin,
 } from "../middleware/authMiddleware.js";
-import { requireTeleSalesWrite } from "../utils/teleSalesScope.js";
+import { requireTeleSalesWrite, requireLeadManager } from "../utils/teleSalesScope.js";
 
 const router = express.Router();
 
@@ -44,7 +44,8 @@ router.use(protect, requireModule("telesales"));
 
 // Lead CRUD
 router.post("/", requireTeleSalesWrite, createLead);
-router.post("/import", requireTeleSalesWrite, importLeads);
+// Importing is the sales manager's (or an admin's) job — agents only work the leads handed to them
+router.post("/import", requireLeadManager, importLeads);
 router.post("/backfill-customer-ids", requireAdmin, backfillCustomerIds);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
