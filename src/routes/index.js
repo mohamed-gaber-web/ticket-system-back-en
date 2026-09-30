@@ -7,6 +7,7 @@ import ticketRoutes from "./ticketRoutes.js";
 import ticketAssignmentRoutes from "./ticketAssignmentRoutes.js";
 import ticketCommentRoutes from "./ticketCommentRoutes.js";
 import ticketAttachmentRoutes from "./ticketAttachmentRoutes.js";
+import ticketEmailRoutes from "./ticketEmailRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import ticketStatusHistoryRoutes from "./ticketStatusHistoryRoutes.js";
 import categoryRoutes from "./categoryRoutes.js";
@@ -79,6 +80,9 @@ router.use("/ticket-comments", ticketCommentRoutes);
 
 // Ticket Attachment routes
 router.use("/ticket-attachments", ticketAttachmentRoutes);
+
+// Ticket email conversations with the customer (staff only)
+router.use("/ticket-emails", ticketEmailRoutes);
 
 // Notification routes
 router.use("/notifications", notificationRoutes);

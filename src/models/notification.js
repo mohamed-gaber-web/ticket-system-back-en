@@ -48,6 +48,7 @@ const notificationSchema = new mongoose.Schema(
         "meeting_cancelled",
         "meeting_reminder",
         "lead_email_reply",
+        "ticket_email_reply",
       ],
     },
     message: {

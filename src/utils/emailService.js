@@ -458,7 +458,7 @@ const wrapCustomBody = (bodyHtml, signature) => `<!DOCTYPE html>
  * @param {string} [params.signature]     Plain sign-off appended under a rule.
  * @param {string} [params.replyTo]       Where replies should land.
  * @param {Array<{name: string, contentType?: string, content: Buffer}>} [params.attachments]
- * @param {object} [params.logMeta]       { leadId, userId, userType } for EmailLog.
+ * @param {object} [params.logMeta]       { leadId, ticketId, userId, userType } for EmailLog.
  */
 export const sendCustomEmail = async ({
   to,
@@ -512,6 +512,7 @@ export const sendCustomEmail = async ({
       status: "sent",
       messageId: info.messageId,
       relatedLead: logMeta.leadId || undefined,
+      relatedTicket: logMeta.ticketId || undefined,
       relatedUser: logMeta.userId || undefined,
       relatedUserType: logMeta.userType || undefined,
     }).catch((err) => console.error("EmailLog save error:", err.message));
@@ -534,6 +535,7 @@ export const sendCustomEmail = async ({
       status: "failed",
       errorMessage: error.message,
       relatedLead: logMeta.leadId || undefined,
+      relatedTicket: logMeta.ticketId || undefined,
       relatedUser: logMeta.userId || undefined,
       relatedUserType: logMeta.userType || undefined,
     }).catch((err) => console.error("EmailLog save error:", err.message));

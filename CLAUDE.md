@@ -73,6 +73,12 @@ Roles (`Employee.role`): `sales` sees and works only the leads assigned to them;
 
 Security tests: `tests/teleSalesScope.test.js`.
 
+### Email conversations (leads and tickets)
+
+Two-way email with the shared mailbox (MS Graph) exists for leads (`LeadEmail`, `leadEmailController.js`, `/api/leads/:id/emails`) and for tickets (`TicketEmail`, `ticketEmailController.js`, `/api/ticket-emails/*`, staff only via `requireModule("tickets")`). Both models spread the same fields from `src/models/emailMessageFields.js`; both controllers validate/send/summarise through `src/utils/emailThread.js` (`validateAndSend`, `threadSummary`, `conversationStages` + `inboxFacet` for the inbox aggregation). Every ticket email subject is prefixed with the ticket number (`[MIN-2026-00202] …`).
+
+**One mailbox, one sync:** `src/utils/leadInboxSync.js` (`syncLeadInbox`, every 2 min, one `MailSyncState` cursor) files each inbound message under, first match wins: the ticket whose `TicketEmail.conversationId` it continues → the lead whose `LeadEmail.conversationId` it continues → the ticket whose number its subject quotes → the lead whose email sent it. Never add a second sync for the same mailbox — they would race on the cursor. Replies notify the employee who wrote last (`ticket_email_reply` / `lead_email_reply`), else the ticket's `acceptedBy` / the lead's owner.
+
 ### Development Boards (kanban)
 
 The `development` module is `DevBoard` → `DevList` (columns) → `DevCard` (+ `DevCardComment`), all under `src/controllers/development/` and one router `developmentRoutes.js` (`/api/development`). Ordering is an integer `position` per list, renumbered server-side with `bulkWrite` on every move/reorder (`PATCH /cards/:id/move { listId, position }` answers the resulting order of both lists so the client only reconciles).
