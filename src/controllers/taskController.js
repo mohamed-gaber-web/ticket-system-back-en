@@ -222,27 +222,31 @@ const getTasks = async (req, res) => {
 
     if (category) match.category = toObjectId(category);
 
-    if (startDate || endDate) {
+    const from = toDate(startDate);
+    const to = toDate(endDate);
+    if (from || to) {
       match.startDate = {};
-      if (startDate) match.startDate.$gte = new Date(startDate);
-      if (endDate) match.startDate.$lte = new Date(endDate);
+      if (from) match.startDate.$gte = from;
+      // "to" is a calendar day — include the whole of it, not just its midnight.
+      if (to) match.startDate.$lt = new Date(to.getTime() + 86400000);
     }
 
-    // When parentTask is provided fetch subtasks of that task;
-    // otherwise default to top-level tasks only (parentTask: null).
-    match.parentTask = parentTask ? toObjectId(parentTask) : null;
+    // When parentTask is provided fetch subtasks of that task. Otherwise the
+    // plain list shows top-level tasks only, but once the caller filters (my
+    // tasks, assignee, status, search…) matching subtasks are listed too —
+    // a subtask assigned to someone must not hide behind its main task.
+    const filtering = mine === "true" || category || startDate || endDate || status || assignedTo || scheduledWeek || search;
+    if (parentTask) match.parentTask = toObjectId(parentTask);
+    else if (!filtering) match.parentTask = null;
 
     if (status) match.status = status;
     if (assignedTo) match.assignedTo = toObjectId(assignedTo);
     const and = [];
     if (scheduledWeek) and.push(weekCoverFilter(parseInt(scheduledWeek)));
-    if (search) {
-      and.push({
-        $or: [
-          { name: { $regex: search, $options: "i" } },
-          { description: { $regex: search, $options: "i" } },
-        ],
-      });
+    const term = typeof search === "string" ? search.trim() : "";
+    if (term) {
+      const rx = { $regex: term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+      and.push({ $or: [{ taskNumber: rx }, { name: rx }, { description: rx }] });
     }
     if (and.length) match.$and = and;
 
@@ -261,6 +265,7 @@ const getTasks = async (req, res) => {
       ...lookupOne("consultants", "responsible", { firstName: 1, lastName: 1, email: 1 }),
       ...lookupOne("consultants", "createdBy", { firstName: 1, lastName: 1 }),
       ...lookupOne("taskcategories", "category", { name: 1 }),
+      ...lookupOne("tasks", "parentTask", { taskNumber: 1, name: 1 }),
       // Count direct subtasks for each task.
       {
         $lookup: {
