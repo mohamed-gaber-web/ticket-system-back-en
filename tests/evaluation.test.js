@@ -6,6 +6,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   categorizeTicket,
+  deliveryMoment,
+  buildTicketDetails,
   calculateTicketPerformance,
   calculateEvaluation,
 } from "../src/utils/evaluationCalculator.js";
@@ -88,25 +90,76 @@ describe("categorizeTicket", () => {
     assert.equal(categorizeTicket(ticket), null);
   });
 
-  it("does NOT count a resolved ticket that was never delivered (within its delivery date)", () => {
+  it("uses the resolved date for a ticket closed without ever being 'delivered' — NOT late", () => {
+    // Real case: resolved 8 days before the customer date, closed afterwards,
+    // never moved to "delivered" — used to count as late.
+    const ticket = makeTicket({
+      status: "closed",
+      deliveredAt: null,
+      resolvedAt: daysFromNow(-10),
+      closedAt: daysFromNow(-1),
+      deliveryEstimationDate: daysFromNow(-2),
+    });
+    assert.equal(categorizeTicket(ticket), "early");
+  });
+
+  it("counts a resolved ticket as delivered on its resolved date (even with time left)", () => {
     const ticket = makeTicket({
       status: "resolved",
       deliveredAt: null,
       resolvedAt: daysFromNow(-1),
       deliveryEstimationDate: daysFromNow(5),
     });
-    assert.equal(categorizeTicket(ticket), null);
+    assert.equal(categorizeTicket(ticket), "early");
   });
 
-  it("ignores closedAt — only the delivered moment drives the delay", () => {
+  it("falls back to closedAt when a finished ticket has no resolved date", () => {
     const ticket = makeTicket({
       status: "closed",
       deliveredAt: null,
+      resolvedAt: null,
       closedAt: daysFromNow(0),
       deliveryEstimationDate: daysFromNow(-1),
     });
-    // Not delivered, but the customer delivery date has passed → late.
     assert.equal(categorizeTicket(ticket), "late");
+  });
+
+  it("prefers the delivered moment over resolved / closed", () => {
+    const ticket = makeTicket({
+      status: "closed",
+      deliveredAt: daysFromNow(-1),
+      resolvedAt: daysFromNow(-9),
+      deliveryEstimationDate: daysFromNow(-1),
+    });
+    assert.equal(categorizeTicket(ticket), "onTime");
+  });
+
+  it("ignores an OLD resolved date on a reopened ticket — still late once past the date", () => {
+    const ticket = makeTicket({
+      status: "reopened",
+      deliveredAt: null,
+      resolvedAt: daysFromNow(-10),
+      deliveryEstimationDate: daysFromNow(-2),
+    });
+    assert.equal(categorizeTicket(ticket), "late");
+  });
+
+  it("never counts a 'not related' ticket", () => {
+    const ticket = makeTicket({
+      status: "not_related",
+      deliveredAt: null,
+      deliveryEstimationDate: daysFromNow(-5),
+    });
+    assert.equal(categorizeTicket(ticket), null);
+  });
+
+  it("reports which date was used in the ticket breakdown", () => {
+    assert.deepEqual(deliveryMoment({ status: "in_progress", resolvedAt: daysFromNow(-1) }), { date: null, via: null });
+    const [row] = buildTicketDetails([
+      makeTicket({ status: "closed", deliveredAt: null, resolvedAt: daysFromNow(-3), deliveryEstimationDate: daysFromNow(-1) }),
+    ]);
+    assert.equal(row.deliveredVia, "resolved");
+    assert.equal(row.category, "early");
   });
 
   it("returns null when a delivered ticket somehow has no deliveredAt and time remains", () => {

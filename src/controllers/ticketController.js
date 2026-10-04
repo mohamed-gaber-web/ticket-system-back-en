@@ -826,6 +826,7 @@ const updateTicket = async (req, res) => {
       durationHours,
       resolvedAt,
       closedAt,
+      deliveredAt,
       createdAt,
     } = req.body;
 
@@ -885,6 +886,9 @@ const updateTicket = async (req, res) => {
       ...(durationHours !== undefined && { durationHours }),
       ...(resolvedAt !== undefined && { resolvedAt }),
       ...(closedAt !== undefined && { closedAt }),
+      // The delivered date can be set or corrected by hand (staff only — it drives
+      // the consultant evaluation). An empty value clears it.
+      ...(deliveredAt !== undefined && isEmployee(req) && { deliveredAt: deliveredAt || null }),
     };
 
     if (customer !== undefined) {
@@ -920,7 +924,8 @@ const updateTicket = async (req, res) => {
         if (!updateData.closedAt) updateData.closedAt = new Date();
         if (actingConsultantId) updateData.closedBy = actingConsultantId;
       }
-      if (status === "delivered" && !ticket.deliveredAt) {
+      // A manually entered delivered date wins over "now"
+      if (status === "delivered" && !ticket.deliveredAt && !updateData.deliveredAt) {
         updateData.deliveredAt = new Date();
       }
     }

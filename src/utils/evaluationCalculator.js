@@ -2,25 +2,44 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 const toDay = (date) => new Date(date).setHours(0, 0, 0, 0);
 
+// Statuses that mean the consultant's work is finished. Only these may use the
+// resolved / closed date as the delivery moment — a reopened ticket's old
+// resolvedAt says nothing about when it will really be done.
+const FINISHED_STATUSES = new Set(["delivered", "resolved", "tested", "closed"]);
+
+/**
+ * When the ticket was delivered, and how we know: the moment its status was set
+ * to "delivered" (`deliveredAt`); for a finished ticket that never went through
+ * "delivered" (resolved / tested / closed directly), when it was resolved, else
+ * closed. `{ date: null, via: null }` while the work is not finished.
+ */
+export const deliveryMoment = (ticket) => {
+  if (ticket.deliveredAt) return { date: ticket.deliveredAt, via: "delivered" };
+  if (!FINISHED_STATUSES.has(ticket.status)) return { date: null, via: null };
+  if (ticket.resolvedAt) return { date: ticket.resolvedAt, via: "resolved" };
+  if (ticket.closedAt) return { date: ticket.closedAt, via: "closed" };
+  return { date: null, via: null };
+};
+
 /**
  * Categorize a single ticket as 'early', 'onTime', 'late', or null (not counted).
  *
- * Delay is measured as the customer delivery date vs. the moment the ticket's
- * status was set to "delivered" (stored as `deliveredAt`). Nothing else — a
- * ticket resolved/closed without ever being delivered has no delivery moment,
- * so it stays uncounted unless its customer delivery date has already passed.
+ * Delay is measured as the customer delivery date vs. the ticket's delivery
+ * moment (see deliveryMoment: delivered, else resolved, else closed).
  *
  * - Early  : delivered at least 1 day before the customer delivery date  → +2 pts
  * - On-Time: delivered on the customer delivery date                     → +1 pt
- * - Late   : delivered after it, OR not delivered yet but past it        → −1 pt
- * - null   : no customer delivery date, or not delivered with time still left
+ * - Late   : delivered after it, OR still not finished and past it       → −1 pt
+ * - null   : no customer delivery date, "not related", or not finished with time left
  */
 export const categorizeTicket = (ticket) => {
   const deadline = ticket.deliveryEstimationDate ?? null; // customer delivery date
   if (!deadline) return null;
+  // Not the consultant's work at all — never counted for or against them.
+  if (ticket.status === "not_related") return null;
 
   const deadlineDay = toDay(deadline);
-  const deliveredDate = ticket.deliveredAt ?? null; // when status → "delivered"
+  const deliveredDate = deliveryMoment(ticket).date;
 
   if (deliveredDate) {
     const deliveredDay = toDay(deliveredDate);
@@ -94,7 +113,7 @@ export const buildTicketDetails = (tickets) => {
   const rows = tickets.map((ticket) => {
     const category = categorizeTicket(ticket); // 'early' | 'onTime' | 'late' | null
     const deadline = ticket.deliveryEstimationDate ?? null; // customer delivery date
-    const resolvedDate = ticket.deliveredAt ?? null; // when status → "delivered"
+    const { date: resolvedDate, via: deliveredVia } = deliveryMoment(ticket);
     return {
       _id: ticket._id,
       ticketNumber: ticket.ticketNumber ?? null,
@@ -102,6 +121,8 @@ export const buildTicketDetails = (tickets) => {
       status: ticket.status,
       deadline,
       resolvedDate,
+      // 'delivered' | 'resolved' | 'closed' | null — which date resolvedDate is
+      deliveredVia,
       category,
       counted: category !== null,
       points: category ? CATEGORY_POINTS[category] : 0,
