@@ -10,6 +10,7 @@ import {
   buildFieldValueMap,
   resolveFollowUpType,
   leadValueFromStatus,
+  proposalPriceFromStatus,
 } from "../config/leadStatusWorkflow.js";
 import {
   canViewLead,
@@ -87,6 +88,16 @@ export const changeLeadStatus = async (req, res) => {
     // get a 200, and find the lead still sitting unassigned with no SLA.
     const maySetOwner =
       canManageLead(req, lead) || (canClaimLead(req, lead) && isSelf(req, values.owner));
+    // Anyone else may only keep the current owner — refuse rather than answer 200
+    // and quietly ignore a different one.
+    const currentOwner = lead.assignedTo ? String(lead.assignedTo) : null;
+    if (newStatus === "New Lead" && !maySetOwner && values.owner && String(values.owner) !== currentOwner) {
+      return res.status(403).json({
+        success: false,
+        message: "Only a sales manager can hand this lead to someone else.",
+        errors: [{ field: "owner", label: "Lead Owner / Assigned To", message: "Only a sales manager can change the owner — keep the current owner." }],
+      });
+    }
     if (newStatus === "New Lead" && maySetOwner) {
       if (values.owner) {
         const ownerError = await assigneeTeamError(lead.team, values.owner);
@@ -110,6 +121,13 @@ export const changeLeadStatus = async (req, res) => {
       setUpdate.valueCurrency = leadValue.currency;
       setUpdate.valueSource = leadValue.source;
       setUpdate.valueUpdatedAt = new Date();
+    }
+
+    const proposal = proposalPriceFromStatus(newStatus, values);
+    if (proposal) {
+      setUpdate.proposalValue = proposal.amount;
+      setUpdate.proposalCurrency = proposal.currency;
+      setUpdate.proposalUpdatedAt = new Date();
     }
 
     const mongoUpdate = { $set: setUpdate };

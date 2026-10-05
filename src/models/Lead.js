@@ -296,6 +296,20 @@ const leadSchema = mongoose.Schema(
     valueUpdatedAt: {
       type: Date,
     },
+    // The proposal price — the Quoted Value captured at "Proposal Sent". Kept
+    // apart from potentialValue, which a Revised or Final value later replaces,
+    // so the leads list can always show what the proposal quoted.
+    proposalValue: {
+      type: Number,
+      min: 0,
+    },
+    proposalCurrency: {
+      type: String,
+      enum: VALUE_CURRENCIES,
+    },
+    proposalUpdatedAt: {
+      type: Date,
+    },
 
     // Status Pipeline — see src/config/leadStatusWorkflow.js for the full
     // per-status field/transition rules this enum is validated against.

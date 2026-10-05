@@ -1,12 +1,15 @@
 import Consultant from "../models/Consltant.js";
 import {
-  teamScopeFilter,
+  agentScopeFilter,
+  isCallerTeam,
+  setEmployeeTeams,
+  sharesTeam,
+  onTeamFilter,
   canManageAgent,
   isSuperAdmin,
   isCrossTeamReader,
   resolveCreateTeam,
   resolveExistingTeam,
-  callerTeamId,
 } from "../utils/teleSalesScope.js";
 import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
@@ -31,7 +34,7 @@ const LEGACY_ROLE_MAP = { user: "sales", manager: "sales_manager" };
 const normalizeAgentRole = (role) => LEGACY_ROLE_MAP[role] ?? role;
 
 // What the roster screens read from an agent record.
-const AGENT_FIELDS = "firstName lastName email phone role status teleSalesTeam profilePicture lastLogin createdAt updatedAt";
+const AGENT_FIELDS = "firstName lastName email phone role status teleSalesTeam teleSalesTeams profilePicture lastLogin createdAt updatedAt";
 
 /** Present an employee document the way the tele-sales UI expects it. */
 const toAgent = (doc) => {
@@ -100,16 +103,17 @@ export const createAgent = async (req, res) => {
       return res.status(400).json({ success: false, message: EMAIL_TAKEN_MESSAGE });
     }
 
-    const agent = await Consultant.create({
+    const agent = new Consultant({
       firstName,
       lastName,
       email,
       password,
       phone,
       role: requestedRole,
-      teleSalesTeam: team,
       position: req.body.position || "Tele-sales Agent",
     });
+    setEmployeeTeams(agent, { teams: team ? [team] : [] });
+    await agent.save();
 
     res.status(201).json({
       success: true,
@@ -139,13 +143,18 @@ export const getAllAgents = async (req, res) => {
   try {
     const { status, role, search, team, page = 1, limit = 20 } = req.query;
 
+    // Everyone who shares a team with the caller — by home team or a ticked one.
+    // ANDed so the search's own $or below cannot replace it.
     const filter = {
-      ...teamScopeFilter(req, "teleSalesTeam"),
+      $and: [agentScopeFilter(req)],
       role: { $in: AGENT_ROLES },
     };
 
-    // Only cross-team readers span teams, so only they can narrow to one.
-    if (team && isCrossTeamReader(req)) filter.teleSalesTeam = team;
+    // Narrow to one team: any team for a cross-team reader, one of their own for
+    // anyone else.
+    if (team && (isCrossTeamReader(req) || isCallerTeam(req, team))) {
+      filter.$and.push(onTeamFilter(team));
+    }
 
     if (status) filter.status = status;
     if (role) {
@@ -167,7 +176,7 @@ export const getAllAgents = async (req, res) => {
     const [agents, total] = await Promise.all([
       Consultant.find(filter)
         .select(AGENT_FIELDS)
-        .populate("teleSalesTeam", "name code")
+        .populate("teleSalesTeam", "name code").populate("teleSalesTeams", "name code")
         .skip(skip)
         .limit(parseInt(limit))
         .sort({ createdAt: -1 }),
@@ -193,17 +202,14 @@ export const getAgentById = async (req, res) => {
   try {
     const agent = await Consultant.findOne({ _id: req.params.id, role: { $in: AGENT_ROLES } })
       .select(AGENT_FIELDS)
-      .populate("teleSalesTeam", "name code");
+      .populate("teleSalesTeam", "name code").populate("teleSalesTeams", "name code");
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
     // An agent on another team answers as if they don't exist — no confirming
     // rival headcount by walking ids.
-    const own = callerTeamId(req);
-    const agentTeam = agent.teleSalesTeam ? String(agent.teleSalesTeam._id ?? agent.teleSalesTeam) : null;
-    const sameTeam = own && agentTeam === own;
-    if (!isCrossTeamReader(req) && !sameTeam) {
+    if (!isCrossTeamReader(req) && !sharesTeam(req, agent)) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
@@ -262,20 +268,21 @@ export const updateAgent = async (req, res) => {
           message: "An agent must belong to a team. Choose one, or make the account a manager.",
         });
       }
-      updateData.teleSalesTeam = null;
+      setEmployeeTeams(agent, { home: null });
     } else if (updateData.team) {
       const existing = await resolveExistingTeam(updateData.team);
       if (existing.error) {
         return res.status(400).json({ success: false, message: existing.error });
       }
-      updateData.teleSalesTeam = existing.team;
+      // Swaps the home team and keeps any other teams the employee form ticked
+      setEmployeeTeams(agent, { home: existing.team });
     }
     delete updateData.team;
 
     // Go through save() so the role→department sync hook runs.
     Object.assign(agent, updateData);
     await agent.save();
-    await agent.populate("teleSalesTeam", "name code");
+    await agent.populate([{ path: "teleSalesTeam", select: "name code" }, { path: "teleSalesTeams", select: "name code" }]);
 
     res.status(200).json({ success: true, message: "Agent updated successfully", data: toAgent(agent) });
   } catch (error) {

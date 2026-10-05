@@ -10,8 +10,8 @@ import { ROLES, MODULES, roleFamily, FAMILY_DEPARTMENT_NAME } from "../utils/rol
  * `role` is the whole story for authorisation (see src/utils/access.js):
  *   admin              → every module, every team, manages everyone
  *   consultant         → ticketing
- *   sales              → tele-sales, inside one team (country)
- *   sales_manager      → tele-sales across every team, runs the sales people
+ *   sales              → tele-sales, inside the teams ticked on their record
+ *   sales_manager      → tele-sales in the same way, and runs those teams' sales people
  *   marketing          → tele-sales read-only across every team, plus tasks
  *   marketing_manager  → the same, and runs the marketing people
  *
@@ -178,6 +178,14 @@ const consultantSchema = mongoose.Schema(
       ref: "TeleSalesTeam",
       default: null,
     },
+    // Every tele-sales team this employee may see (the team checkboxes on the
+    // employee form): Team A only, Team B only, or both. `teleSalesTeam` above is
+    // the home team (the default owner of leads they create) and is always one
+    // of these — the pre-save hook below keeps the two in step.
+    teleSalesTeams: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "TeleSalesTeam" }],
+      default: [],
+    },
     // Anything but "active" blocks login (see protect / login).
     status: {
       type: String,
@@ -244,7 +252,20 @@ consultantSchema.index({ status: 1 });
 consultantSchema.index({ role: 1 });
 consultantSchema.index({ modules: 1 });
 consultantSchema.index({ teleSalesTeam: 1, status: 1 });
+consultantSchema.index({ teleSalesTeams: 1 });
 consultantSchema.index({ employeeCode: 1 }, { unique: true, sparse: true });
+
+// The home team is always one of the visible teams: a home team that is not in
+// the list joins it, and a list with no home team takes its first entry as home.
+consultantSchema.pre("save", function () {
+  if (!this.isModified("teleSalesTeam") && !this.isModified("teleSalesTeams")) return;
+  const ids = (this.teleSalesTeams || []).map((t) => String(t?._id ?? t)); // model can't import the scope util (cycle)
+  if (!this.teleSalesTeam && ids.length > 0) {
+    this.teleSalesTeam = this.teleSalesTeams[0];
+  } else if (this.teleSalesTeam && !ids.includes(String(this.teleSalesTeam._id ?? this.teleSalesTeam))) {
+    this.teleSalesTeams = [this.teleSalesTeam, ...(this.teleSalesTeams || [])];
+  }
+});
 
 // Hash password before saving
 consultantSchema.pre("save", async function () {

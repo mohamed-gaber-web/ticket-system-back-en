@@ -472,11 +472,13 @@ export const sendCustomEmail = async ({
   logMeta = {},
   // Graph id of the mailbox message this is a reply to (threads the mail for the lead).
   replyToGraphId = null,
+  // The mailbox to send from (salesMailbox() for leads); the support mailbox by default.
+  from = null,
 }) => {
   const toLabel = Array.isArray(to) ? to.join(", ") : to;
 
   try {
-    const senderAddress = process.env.MS_EMAIL_FROM || process.env.EMAIL_USER;
+    const senderAddress = from || process.env.MS_EMAIL_FROM || process.env.EMAIL_USER;
     if (!senderAddress) throw new Error("Email sender address missing. Set MS_EMAIL_FROM in .env");
 
     const totalBytes = attachments.reduce((sum, att) => sum + (att.content?.length || 0), 0);
@@ -990,6 +992,17 @@ export const sendSlaBreachEmail = async (ticket, assignee, variables = {}) => {
 
 export const senderMailbox = () => process.env.MS_EMAIL_FROM || process.env.EMAIL_USER || null;
 
+/**
+ * The tele-sales mailbox (sales@growpath.net): every lead email goes out from it
+ * and lead replies come back to it. Falls back to the support mailbox while
+ * MS_SALES_EMAIL_FROM is unset.
+ */
+export const salesMailbox = () => process.env.MS_SALES_EMAIL_FROM || senderMailbox();
+
+/** Every mailbox the inbox sync reads — support and sales, once each. */
+export const syncedMailboxes = () =>
+  [...new Set([senderMailbox(), salesMailbox()].filter(Boolean).map((m) => m.toLowerCase()))];
+
 const INBOX_SELECT =
   "id,internetMessageId,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,hasAttachments,isRead";
 
@@ -997,8 +1010,7 @@ const INBOX_SELECT =
  * Inbox messages received at or after `since`, oldest first. Follows paging.
  * Requires Mail.Read (application) on the sender mailbox.
  */
-export const listInboxMessagesSince = async (since, { max = 200 } = {}) => {
-  const mailbox = senderMailbox();
+export const listInboxMessagesSince = async (since, { max = 200, mailbox = senderMailbox() } = {}) => {
   if (!mailbox) throw new Error("Email sender address missing. Set MS_EMAIL_FROM in .env");
   const accessToken = await getAccessToken();
   const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}`;
@@ -1014,8 +1026,7 @@ export const listInboxMessagesSince = async (since, { max = 200 } = {}) => {
 };
 
 /** File attachments of a mailbox message as { name, contentType, size, content: Buffer }. */
-export const getMessageAttachments = async (graphMessageId) => {
-  const mailbox = senderMailbox();
+export const getMessageAttachments = async (graphMessageId, mailbox = senderMailbox()) => {
   const accessToken = await getAccessToken();
   const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(graphMessageId)}/attachments?$top=50`;
   const page = await graphJson(url, accessToken, "GET");

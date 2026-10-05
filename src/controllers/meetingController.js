@@ -8,7 +8,7 @@ import Meeting, {
 import Consultant from "../models/Consltant.js";
 import Customer from "../models/Customer.js";
 import Lead from "../models/Lead.js";
-import { callerTeamId, leadScopeFilter } from "../utils/teleSalesScope.js";
+import { callerTeamId, callerTeamIds, leadScopeFilter, employeeTeamIds } from "../utils/teleSalesScope.js";
 import { isEmployee, hasModule, roleFamily, isAdmin as isAdminUser } from "../utils/access.js";
 import { notifyMeeting } from "../utils/meetingNotify.js";
 
@@ -40,8 +40,8 @@ const visibilityFilter = (req) => {
 
   const me = user._id;
   const mine = [{ organizer: me }, { "staffAttendees.user": me }];
-  const teamId = callerTeamId(req);
-  const teamClause = teamId ? [{ team: toObjectId(teamId) }] : [];
+  const teamIds = callerTeamIds(req);
+  const teamClause = teamIds.length ? [{ team: { $in: teamIds.map(toObjectId) } }] : [];
 
   if (isSalesStaff(req)) return { $or: [...mine, ...teamClause] };
   return { $or: [...mine, { team: null }, ...teamClause] };
@@ -208,20 +208,20 @@ const getMeetings = async (req, res) => {
 const getPeople = async (req, res) => {
   try {
     const employees = await Consultant.find({ status: "active" })
-      .select("firstName lastName email role department teleSalesTeam")
+      .select("firstName lastName email role department teleSalesTeam teleSalesTeams")
       .populate("department", "name")
       .populate("teleSalesTeam", "name code")
       .sort({ firstName: 1, lastName: 1 })
       .lean();
 
-    // A plain sales caller only sees the sales people of their own team, as
-    // tele-sales agents did before the employee merge.
-    const ownTeam = isSalesStaff(req) && !isAdmin(req) ? callerTeamId(req) : undefined;
+    // A plain sales caller only sees the sales people who share one of their
+    // teams, as tele-sales agents did before the employee merge.
+    const ownTeams = isSalesStaff(req) && !isAdmin(req) ? callerTeamIds(req) : undefined;
     const visible = employees.filter(
       (e) =>
-        ownTeam === undefined ||
+        ownTeams === undefined ||
         roleFamily(e.role) !== "sales" ||
-        String(e.teleSalesTeam?._id ?? e.teleSalesTeam ?? "") === String(ownTeam ?? "")
+        employeeTeamIds(e).some((t) => ownTeams.includes(t))
     );
 
     const people = visible.map((e) => ({

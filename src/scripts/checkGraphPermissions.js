@@ -10,7 +10,7 @@
  * (on Railway: `railway run node src/scripts/checkGraphPermissions.js`)
  */
 import dotenv from "dotenv";
-import { getAccessToken, senderMailbox } from "../utils/emailService.js";
+import { getAccessToken, senderMailbox, syncedMailboxes } from "../utils/emailService.js";
 
 dotenv.config({ quiet: true });
 
@@ -30,7 +30,9 @@ const run = async () => {
   const token = await getAccessToken();
   const claims = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
   const roles = claims.roles ?? [];
-  console.log(`Mailbox : ${mailbox}`);
+  // Support (tickets) and, when MS_SALES_EMAIL_FROM is set, sales (leads).
+  const mailboxes = syncedMailboxes();
+  console.log(`Mailbox : ${mailboxes.join(", ")}`);
   console.log(`Tenant  : ${claims.tid}`);
   console.log(`App     : ${claims.appid}`);
   console.log(`Roles   : ${roles.length ? roles.join(", ") : "(none — the app has no granted application permissions)"}`);
@@ -40,12 +42,14 @@ const run = async () => {
     console.log(`${has ? "✅" : "❌"} ${role.padEnd(16)} ${why}`);
   }
 
-  const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}`;
-  const probes = [
-    ["mailbox exists (User.Read.All not needed)", `${base}?$select=id,mail`],
-    ["read inbox (Mail.Read)", `${base}/mailFolders/inbox/messages?$top=1&$select=id`],
-    ["read drafts folder (Mail.ReadWrite)", `${base}/mailFolders/drafts?$select=id`],
-  ];
+  const probes = mailboxes.flatMap((box) => {
+    const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(box)}`;
+    return [
+      [`${box} — mailbox exists`, `${base}?$select=id,mail`],
+      [`${box} — read inbox (Mail.Read)`, `${base}/mailFolders/inbox/messages?$top=1&$select=id`],
+      [`${box} — read drafts folder (Mail.ReadWrite)`, `${base}/mailFolders/drafts?$select=id`],
+    ];
+  });
   console.log("");
   for (const [label, url] of probes) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });

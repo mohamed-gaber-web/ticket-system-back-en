@@ -8,8 +8,8 @@
  * so they need no database and no server.
  *
  * Role model under test (Employee.role):
- *   sales          → pinned to one team, sees and writes only the leads assigned to them
- *   sales_manager  → pinned to one team, sees and writes all of it, manages its agents
+ *   sales          → pinned to their ticked teams, sees and writes every lead in them
+ *   sales_manager  → the same, and reassigns / deletes leads and manages its agents
  *   marketing      → every team, READ-ONLY
  *   admin          → every team, writes everything
  *
@@ -25,6 +25,7 @@ import {
   isCrossTeamReader,
   isCrossTeamWriter,
   callerTeamId,
+  callerTeamIds,
   documentTeamId,
   isLeadManager,
   teamScopeFilter,
@@ -40,6 +41,10 @@ import {
   canManageLeadChild,
   isSelf,
   resolveCreateTeam,
+  setEmployeeTeams,
+  agentScopeFilter,
+  employeeTeamIds,
+  sharesTeam,
   NO_TEAM_MESSAGE,
   TEAM_REQUIRED_MESSAGE,
   READ_ONLY_MESSAGE,
@@ -55,11 +60,13 @@ const KSA = oid();
 const UAE = oid();
 
 /** A request as authMiddleware builds it, with the team populated. */
-const req = ({ role = "sales", team = EGYPT, id = oid() } = {}) => ({
+const req = ({ role = "sales", team = EGYPT, teams = [], id = oid() } = {}) => ({
   user: {
     _id: id,
     role,
     teleSalesTeam: team ? { _id: team, name: "Team", code: "XX" } : null,
+    // The ticked teams, populated as authMiddleware delivers them
+    teleSalesTeams: teams.map((t) => ({ _id: t, name: "Team", code: "XX" })),
   },
   userType: "employee",
 });
@@ -208,13 +215,19 @@ describe("teamScopeFilter", () => {
 });
 
 describe("leadScopeFilter", () => {
-  it("shows an agent only the leads assigned to them", () => {
-    const me = oid();
-    const filter = leadScopeFilter(req({ role: "sales", team: EGYPT, id: me }));
+  it("shows an agent every lead of their team, assigned to them or not", () => {
+    const filter = leadScopeFilter(req({ role: "sales", team: EGYPT }));
     assert.equal(String(filter.team), String(EGYPT));
-    assert.equal(String(filter.assignedTo), String(me));
+    assert.equal(filter.assignedTo, undefined);
     // ObjectId, not string: getLeadStats feeds this straight into aggregate().
-    assert.ok(filter.assignedTo instanceof mongoose.Types.ObjectId);
+    assert.ok(filter.team instanceof mongoose.Types.ObjectId);
+  });
+
+  it("spans every ticked team — Team A and B — and nothing else", () => {
+    const filter = leadScopeFilter(req({ role: "sales", team: EGYPT, teams: [EGYPT, KSA] }));
+    assert.deepEqual(filter.team.$in.map(String).sort(), [String(EGYPT), String(KSA)].sort());
+    assert.ok(filter.team.$in.every((t) => t instanceof mongoose.Types.ObjectId));
+    assert.ok(!filter.team.$in.map(String).includes(String(UAE)));
   });
 
   it("shows a sales manager their whole team, assigned or not", () => {
@@ -262,12 +275,25 @@ describe("activityScopeFilter", () => {
 // ── Reading a lead ────────────────────────────────────────────────────────────
 
 describe("canViewLead", () => {
-  it("shows an agent only their own leads — not a colleague's, not the unassigned pool", () => {
+  it("shows an agent every lead of their team — theirs, a colleague's and the unassigned pool", () => {
     const me = oid();
     const r = req({ role: "sales", team: EGYPT, id: me });
     assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: me })), true);
-    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: oid() })), false);
-    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: null })), false);
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: oid() })), true);
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: null })), true);
+  });
+
+  it("shows a two-team employee both teams, and still REFUSES the third", () => {
+    const r = req({ role: "sales", team: EGYPT, teams: [EGYPT, KSA] });
+    assert.equal(canViewLead(r, lead({ team: EGYPT })), true);
+    assert.equal(canViewLead(r, lead({ team: KSA })), true);
+    assert.equal(canViewLead(r, lead({ team: UAE })), false);
+  });
+
+  it("lets a ticked team stand alone, without a home team", () => {
+    const r = req({ role: "sales", team: null, teams: [KSA] });
+    assert.equal(canViewLead(r, lead({ team: KSA })), true);
+    assert.equal(canViewLead(r, lead({ team: EGYPT })), false);
   });
 
   it("shows a sales manager their whole team and nothing else", () => {
@@ -312,14 +338,15 @@ describe("canEditLead", () => {
     assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: me })), true);
   });
 
-  it("stops an agent touching an unassigned lead — the manager hands those out", () => {
+  it("lets an agent work any lead of their team, assigned or not", () => {
     const r = req({ role: "sales", team: EGYPT });
-    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: null })), false);
+    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: null })), true);
+    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: oid() })), true);
   });
 
-  it("stops an agent overwriting a colleague's lead", () => {
+  it("stops an agent touching another team's lead", () => {
     const r = req({ role: "sales", team: EGYPT });
-    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: oid() })), false);
+    assert.equal(canEditLead(r, lead({ team: KSA, assignedTo: oid() })), false);
   });
 
   it("lets a sales manager work anything in their team, nothing outside it", () => {
@@ -337,11 +364,10 @@ describe("canEditLead", () => {
     }
   });
 
-  it("handles a populated assignedTo the same as a bare id", () => {
-    const me = oid();
-    const r = req({ role: "sales", team: EGYPT, id: me });
-    assert.equal(canEditLead(r, { team: EGYPT, assignedTo: { _id: me } }), true);
-    assert.equal(canEditLead(r, { team: EGYPT, assignedTo: { _id: oid() } }), false);
+  it("handles a populated team the same as a bare id", () => {
+    const r = req({ role: "sales", team: EGYPT });
+    assert.equal(canEditLead(r, { team: { _id: EGYPT }, assignedTo: null }), true);
+    assert.equal(canEditLead(r, { team: { _id: KSA }, assignedTo: null }), false);
   });
 });
 
@@ -508,8 +534,8 @@ describe("resolveCreateTeam", () => {
 // ── Claiming from the shared pool ─────────────────────────────────────────────
 
 describe("canClaimLead", () => {
-  it("stops an agent claiming from the pool — they never see unassigned leads", () => {
-    assert.equal(canClaimLead(req({ role: "sales", team: EGYPT }), lead({ team: EGYPT, assignedTo: null })), false);
+  it("lets an agent take an unassigned lead of their team", () => {
+    assert.equal(canClaimLead(req({ role: "sales", team: EGYPT }), lead({ team: EGYPT, assignedTo: null })), true);
   });
 
   it("lets a sales manager take an unassigned lead on their team", () => {
@@ -605,5 +631,107 @@ describe("escapeRegex", () => {
   it("handles null and undefined without throwing", () => {
     assert.equal(escapeRegex(null), "");
     assert.equal(escapeRegex(undefined), "");
+  });
+});
+
+// ── Several teams per employee ────────────────────────────────────────────────
+
+describe("callerTeamIds", () => {
+  it("unions the home team with the ticked teams, without duplicates", () => {
+    const ids = callerTeamIds(req({ team: EGYPT, teams: [EGYPT, KSA] }));
+    assert.deepEqual(ids.sort(), [String(EGYPT), String(KSA)].sort());
+  });
+
+  it("is empty for a team-less caller", () => {
+    assert.deepEqual(callerTeamIds(req({ team: null })), []);
+  });
+});
+
+describe("resolveCreateTeam with several teams", () => {
+  it("honours a chosen team that is one of the caller's", () => {
+    const { team } = resolveCreateTeam(req({ team: EGYPT, teams: [EGYPT, KSA] }), String(KSA));
+    assert.equal(String(team), String(KSA));
+  });
+
+  it("IGNORES a chosen team the caller is not on, falling back to home", () => {
+    const { team } = resolveCreateTeam(req({ team: EGYPT, teams: [EGYPT, KSA] }), String(UAE));
+    assert.equal(String(team), String(EGYPT));
+  });
+});
+
+describe("agentScopeFilter", () => {
+  it("matches people by home team or ticked team, inside the caller's teams", () => {
+    const filter = agentScopeFilter(req({ role: "sales_manager", team: EGYPT }));
+    assert.equal(filter.$or.length, 2);
+    assert.equal(String(filter.$or[0].teleSalesTeam.$in[0]), String(EGYPT));
+    assert.equal(String(filter.$or[1].teleSalesTeams.$in[0]), String(EGYPT));
+  });
+
+  it("FAILS CLOSED for a team-less caller and leaves cross-team readers open", () => {
+    assert.equal(matchesNothing(agentScopeFilter(req({ role: "sales", team: null }))), true);
+    assert.deepEqual(agentScopeFilter(req({ role: "admin", team: null })), {});
+  });
+});
+
+describe("canManageAgent with several teams", () => {
+  it("lets a two-team manager run the agents of both teams, not a third", () => {
+    const r = req({ role: "sales_manager", team: EGYPT, teams: [EGYPT, KSA] });
+    assert.equal(canManageAgent(r, { role: "sales", teleSalesTeam: KSA }), true);
+    assert.equal(canManageAgent(r, { role: "sales", teleSalesTeam: UAE }), false);
+  });
+});
+
+describe("setEmployeeTeams", () => {
+  const ids = (list) => list.map(String);
+
+  it("ticks teams and keeps the current home team when it is still ticked", () => {
+    const e = { teleSalesTeam: KSA, teleSalesTeams: [KSA] };
+    setEmployeeTeams(e, { teams: [EGYPT, KSA] });
+    assert.deepEqual(ids(e.teleSalesTeams), [String(EGYPT), String(KSA)]);
+    assert.equal(String(e.teleSalesTeam), String(KSA));
+  });
+
+  it("moves home to the first ticked team when the old home is unticked", () => {
+    const e = { teleSalesTeam: KSA, teleSalesTeams: [KSA] };
+    setEmployeeTeams(e, { teams: [UAE, EGYPT] });
+    assert.equal(String(e.teleSalesTeam), String(UAE));
+  });
+
+  it("clears both fields when nothing is ticked", () => {
+    const e = { teleSalesTeam: KSA, teleSalesTeams: [KSA] };
+    setEmployeeTeams(e, { teams: [] });
+    assert.equal(e.teleSalesTeam, null);
+    assert.deepEqual(e.teleSalesTeams, []);
+  });
+
+  it("swaps only the home team for clients that send one team, keeping the others", () => {
+    const e = { teleSalesTeam: EGYPT, teleSalesTeams: [EGYPT, KSA] };
+    setEmployeeTeams(e, { home: UAE });
+    assert.equal(String(e.teleSalesTeam), String(UAE));
+    assert.deepEqual(ids(e.teleSalesTeams).sort(), [String(UAE), String(KSA)].sort());
+  });
+
+  it("drops malformed ids", () => {
+    const e = { teleSalesTeam: null, teleSalesTeams: [] };
+    setEmployeeTeams(e, { teams: ["not-an-id", EGYPT] });
+    assert.deepEqual(ids(e.teleSalesTeams), [String(EGYPT)]);
+  });
+});
+
+describe("employeeTeamIds / sharesTeam", () => {
+  it("unions home and ticked teams, populated or bare, without duplicates", () => {
+    const ids = employeeTeamIds({ teleSalesTeam: { _id: EGYPT }, teleSalesTeams: [EGYPT, KSA] });
+    assert.deepEqual(ids.sort(), [String(EGYPT), String(KSA)].sort());
+  });
+
+  it("matches an employee who shares only a TICKED team with the caller", () => {
+    const ksaManager = req({ role: "sales_manager", team: KSA });
+    assert.equal(sharesTeam(ksaManager, { teleSalesTeam: EGYPT, teleSalesTeams: [EGYPT, KSA] }), true);
+    assert.equal(sharesTeam(ksaManager, { teleSalesTeam: EGYPT, teleSalesTeams: [EGYPT] }), false);
+  });
+
+  it("lets a manager run an agent whose ticked team is theirs (roster and management agree)", () => {
+    const ksaManager = req({ role: "sales_manager", team: KSA });
+    assert.equal(canManageAgent(ksaManager, { role: "sales", teleSalesTeam: EGYPT, teleSalesTeams: [EGYPT, KSA] }), true);
   });
 });

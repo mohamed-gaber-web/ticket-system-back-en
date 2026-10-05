@@ -6,8 +6,10 @@ import { isAdmin, roleFamily, holdsPrivilegedModule } from "./access.js";
 /**
  * The single authority for "what may this caller see and touch in tele-sales?".
  *
- * Egypt, UAE and KSA are separate tenants: an agent on one team must never read
- * or write another team's leads, calls, follow-ups, attachments or emails. That
+ * Egypt, UAE and KSA are separate tenants: someone on one team must never read
+ * or write another team's leads, calls, follow-ups, attachments or emails. An
+ * employee belongs to the teams ticked on their record (Employee.teleSalesTeams,
+ * plus the home team Employee.teleSalesTeam) — Team A only, Team B only, or both. That
  * rule used to live as a copy-pasted pair of lines in six controllers, which made
  * it a matter of luck whether a new endpoint remembered it. Every check now goes
  * through this module instead, so the boundary is enforced in exactly one place.
@@ -16,20 +18,20 @@ import { isAdmin, roleFamily, holdsPrivilegedModule } from "./access.js";
  *
  *  1. FAIL CLOSED. A caller with no team matches nothing — never everything. A
  *     misconfigured account shows an empty screen, it does not leak the database.
- *  2. AN AGENT SEES ONLY THEIR OWN LEADS. The team's pipeline is the manager's;
- *     an agent sees and works just the leads assigned to them. Unassigned leads
- *     wait with the manager, who hands them out (at import or one by one).
+ *  2. A TEAM'S DATA IS SHARED BY ITS MEMBERS. Everyone on a team — agent or
+ *     manager — sees every lead in it. What a manager has on top is managing:
+ *     reassigning and deleting leads and running the team's roster.
  *
  * Role model (Employee.role — see src/utils/access.js):
  *
- *   sales          → agent:          their own leads, inside their team
- *   sales_manager  → runs one team:  sees and writes everything in THEIR team,
- *                                    manages that team's sales people, imports leads
+ *   sales          → agent:          every lead in their teams; imports leads
+ *   sales_manager  → runs teams:     the same, and reassigns / deletes leads and
+ *                                    manages the sales people of their teams
  *   marketing(_manager) → read-only: sees every team's pipeline, writes nothing
  *   admin          → super admin:    sees and writes every team
  *
  * Anyone else who reaches the module through an admin-granted `telesales`
- * module override behaves like a `sales` agent: pinned to their own team.
+ * module override behaves like a `sales` agent: pinned to their own teams.
  */
 
 // ── Role predicates ───────────────────────────────────────────────────────────
@@ -37,7 +39,7 @@ import { isAdmin, roleFamily, holdsPrivilegedModule } from "./access.js";
 /** Works across every team with full write access. */
 export const isSuperAdmin = (req) => isAdmin(req?.user);
 
-/** Runs ONE team — every lead and agent in it, nothing outside it. */
+/** Runs their teams — every lead and agent in them, nothing outside them. */
 export const isSalesManager = (req) => req?.user?.role === "sales_manager";
 
 /** Marketing reads every team's pipeline but never touches it. */
@@ -50,13 +52,10 @@ export const isCrossTeamReader = (req) => isSuperAdmin(req) || isReadOnly(req);
 export const isCrossTeamWriter = (req) => isSuperAdmin(req);
 
 /**
- * Sees and writes every lead it can reach, not just its own: admins (every team)
- * and sales managers (their team). Also the only roles that import and assign.
+ * Manages the leads it can reach: admins (every team) and sales managers (their
+ * teams). The only roles that bulk-assign, reassign and delete leads.
  */
 export const isLeadManager = (req) => isSuperAdmin(req) || isSalesManager(req);
-
-/** A plain agent: limited to the leads assigned to them. */
-const isOwnLeadsOnly = (req) => !isCrossTeamReader(req) && !isLeadManager(req);
 
 // ── Team resolution ───────────────────────────────────────────────────────────
 
@@ -68,9 +67,10 @@ const toObjectId = (value) => {
 };
 
 /**
- * The team this caller belongs to, as a string id, or null when they have none.
- * Employees carry `teleSalesTeam` (the `team` fallback covers old fixtures and
- * the compat virtual). Either may arrive populated or as a bare ObjectId.
+ * The caller's HOME team, as a string id, or null when they have none — the
+ * default owner of what they create. Employees carry `teleSalesTeam` (the `team`
+ * fallback covers old fixtures and the compat virtual). Either may arrive
+ * populated or as a bare ObjectId.
  */
 export const callerTeamId = (req) => {
   const raw = req?.user?.teleSalesTeam ?? req?.user?.team;
@@ -78,6 +78,20 @@ export const callerTeamId = (req) => {
   const id = raw._id ?? raw;
   return id ? String(id) : null;
 };
+
+/**
+ * Every team the caller may see, as string ids: the home team plus the teams
+ * ticked on their record. Empty when they have none.
+ */
+export const callerTeamIds = (req) => {
+  const ticked = (req?.user?.teleSalesTeams ?? []).map((t) => t?._id ?? t);
+  const ids = [callerTeamId(req), ...ticked].filter(Boolean).map(String);
+  return [...new Set(ids)];
+};
+
+/** Is `teamId` one of the caller's teams? */
+export const isCallerTeam = (req, teamId) =>
+  Boolean(teamId) && callerTeamIds(req).includes(String(teamId));
 
 /** The team a stored document belongs to, as a string id, or null. */
 export const documentTeamId = (doc) => {
@@ -101,29 +115,35 @@ const MATCH_NOTHING = { _id: { $in: [] } };
  *
  *     const filter = { ...teamScopeFilter(req), status: "New Lead" };
  *
- * Returns a real ObjectId rather than a string because `aggregate()` does not
+ * Returns real ObjectIds rather than strings because `aggregate()` does not
  * cast its `$match` the way `find()` does — `getLeadStats` depends on this.
  */
 export const teamScopeFilter = (req, field = "team") => {
   if (isCrossTeamReader(req)) return {};
-  const team = toObjectId(callerTeamId(req));
-  if (!team) return MATCH_NOTHING;
-  return { [field]: team };
+  const teams = callerTeamIds(req).map(toObjectId).filter(Boolean);
+  if (teams.length === 0) return MATCH_NOTHING;
+  return { [field]: teams.length === 1 ? teams[0] : { $in: teams } };
 };
 
 /**
- * The filter for any query over the Lead collection: the team boundary plus, for
- * a plain agent, only the leads assigned to them. Use this — not teamScopeFilter —
+ * The filter for any query over the Lead collection: the caller's teams. Use this
  * for every lead list, count and aggregate, and spread it LAST so no query
  * parameter can widen it:
  *
  *     const filter = { ...fromQuery, ...leadScopeFilter(req) };
  */
-export const leadScopeFilter = (req) => {
-  const scope = teamScopeFilter(req);
-  if (scope === MATCH_NOTHING || !isOwnLeadsOnly(req)) return scope;
-  const self = toObjectId(req.user?._id);
-  return self ? { ...scope, assignedTo: self } : MATCH_NOTHING;
+export const leadScopeFilter = (req) => teamScopeFilter(req);
+
+/**
+ * The filter for the employee collection: the people who share a team with the
+ * caller, by home team or by a ticked team. Uses `$or`, so combine it with other
+ * `$or` clauses through `$and`.
+ */
+export const agentScopeFilter = (req) => {
+  if (isCrossTeamReader(req)) return {};
+  const teams = callerTeamIds(req).map(toObjectId).filter(Boolean);
+  if (teams.length === 0) return MATCH_NOTHING;
+  return { $or: [{ teleSalesTeam: { $in: teams } }, { teleSalesTeams: { $in: teams } }] };
 };
 
 /**
@@ -145,40 +165,26 @@ export const activityScopeFilter = (req, ownerField) => {
 
 // ── Per-document checks ───────────────────────────────────────────────────────
 
-/** Is this lead assigned to the caller? */
-const isAssignedToCaller = (req, lead) => {
-  const assignee = lead?.assignedTo?._id ?? lead?.assignedTo;
-  return Boolean(assignee) && String(assignee) === String(req?.user?._id);
-};
-
 /**
- * May the caller SEE this lead? Cross-team readers see everything; a sales
- * manager sees their whole team; an agent sees only the leads assigned to them —
- * a colleague's lead, or one nobody holds yet, answers as if it did not exist.
+ * May the caller SEE this lead? Cross-team readers see everything; everyone else
+ * sees every lead of their teams — another team's lead answers as if it did not
+ * exist.
  */
 export const canViewLead = (req, lead) => {
   if (isCrossTeamReader(req)) return true;
-  const team = callerTeamId(req);
-  if (!team) return false;
-  if (documentTeamId(lead) !== team) return false;
-  return isLeadManager(req) || isAssignedToCaller(req, lead);
+  return isCallerTeam(req, documentTeamId(lead));
 };
 
 /**
  * May the caller CHANGE this lead — edit its fields, move its status, log a call,
- * attach a file, email the contact? Anyone who can see it except marketing: an
- * agent only ever sees their own leads, a manager their own team's.
+ * attach a file, email the contact? Anyone who can see it except marketing.
  */
 export const canEditLead = (req, lead) => {
   if (isReadOnly(req)) return false;
   return canViewLead(req, lead);
 };
 
-/**
- * May the caller take this lead for THEMSELVES? Only one nobody holds. Agents
- * never see unassigned leads, so in practice this is a manager or an admin
- * putting their own name on one.
- */
+/** May the caller take this lead for THEMSELVES? Only one nobody holds. */
 export const canClaimLead = (req, lead) => {
   if (isReadOnly(req)) return false;
   if (!canViewLead(req, lead)) return false;
@@ -195,7 +201,7 @@ export const isSelf = (req, candidate) =>
 
 /**
  * May the caller REASSIGN this lead to a different agent, or delete it? Admins
- * anywhere; a sales manager inside their own team.
+ * anywhere; a sales manager inside their own teams.
  */
 export const canManageLead = (req, lead) =>
   Boolean(lead) && isLeadManager(req) && canViewLead(req, lead);
@@ -217,8 +223,7 @@ export const canChangeLeadTeam = (req) => isCrossTeamWriter(req);
 export const canManageActivity = (req, doc, ownerField) => {
   if (isReadOnly(req)) return false;
   if (isCrossTeamWriter(req)) return true;
-  const team = callerTeamId(req);
-  if (!team || documentTeamId(doc) !== team) return false;
+  if (!isCallerTeam(req, documentTeamId(doc))) return false;
   if (isSalesManager(req)) return true;
   const owner = doc?.[ownerField]?._id ?? doc?.[ownerField];
   return String(owner) === String(req.user._id);
@@ -253,9 +258,7 @@ export const canManageAgent = (req, agent) => {
   // An agent an admin has given HR or admin access is admin-managed
   if (holdsPrivilegedModule(agent)) return false;
   if (agent?.role !== "sales") return false;
-  const team = callerTeamId(req);
-  const agentTeam = agent?.teleSalesTeam?._id ?? agent?.teleSalesTeam;
-  return Boolean(team) && String(agentTeam ?? "") === team;
+  return sharesTeam(req, agent);
 };
 
 // ── Team assignment on create ─────────────────────────────────────────────────
@@ -272,11 +275,11 @@ export const READ_ONLY_MESSAGE =
 /**
  * Decide which team a record created by this caller belongs to.
  *
- * Agents and sales managers always create inside their own team, and a `team`
- * sent in the request body is ignored outright — otherwise an Egypt agent could
- * plant a lead in the KSA pipeline. Admins choose, and they must choose: a lead
- * created with no team would be invisible to every agent in the system.
- * Marketing never creates.
+ * Agents and sales managers create inside their own teams: a `team` sent in the
+ * request body is honoured only when it is one of them, and otherwise the home
+ * team is used — so an Egypt agent cannot plant a lead in the KSA pipeline.
+ * Admins choose, and they must choose: a lead created with no team would be
+ * invisible to every agent in the system. Marketing never creates.
  *
  * Returns `{ team, error }` — check `error` first.
  */
@@ -289,7 +292,9 @@ export const resolveCreateTeam = (req, bodyTeam) => {
     return chosen ? { team: chosen, error: null } : { team: null, error: TEAM_REQUIRED_MESSAGE };
   }
 
-  const own = toObjectId(callerTeamId(req));
+  const chosen = toObjectId(bodyTeam);
+  if (chosen && isCallerTeam(req, chosen)) return { team: chosen, error: null };
+  const own = toObjectId(callerTeamId(req) ?? callerTeamIds(req)[0]);
   return own ? { team: own, error: null } : { team: null, error: NO_TEAM_MESSAGE };
 };
 
@@ -332,23 +337,79 @@ export const assigneeTeamError = async (teamId, agentId) => {
   }
 
   const agent = await Consultant.findById(agentId)
-    .select("firstName lastName role teleSalesTeam")
+    .select("firstName lastName role teleSalesTeam teleSalesTeams")
     .lean();
   if (!agent) return "The selected agent no longer exists.";
   if (agent.role === "admin") return null;
 
-  const agentTeam = agent.teleSalesTeam ? String(agent.teleSalesTeam) : null;
-  if (agentTeam && String(teamId) === agentTeam) return null;
+  if (employeeTeamIds(agent).includes(String(teamId))) return null;
 
   const who = [agent.firstName, agent.lastName].filter(Boolean).join(" ") || "That agent";
   return `${who} is not on the team that owns this lead, so they cannot be assigned to it.`;
+};
+
+// ── Employee team assignment ──────────────────────────────────────────────────
+
+/** The distinct, well-formed ids of a list of team refs (ids or populated docs). */
+export const teamIdList = (raw) => {
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const ids = list.map((t) => toObjectId(t)).filter(Boolean).map(String);
+  return [...new Set(ids)];
+};
+
+/** Every team an employee is on — home team plus ticked teams — as string ids. */
+export const employeeTeamIds = (employee) =>
+  teamIdList([employee?.teleSalesTeam, ...(employee?.teleSalesTeams ?? [])]);
+
+/** Does this employee share at least one team with the caller? */
+export const sharesTeam = (req, employee) => employeeTeamIds(employee).some((id) => isCallerTeam(req, id));
+
+/** Mongo filter: employees whose home or ticked teams include `teamId`. */
+export const onTeamFilter = (teamId) => ({ $or: [{ teleSalesTeam: teamId }, { teleSalesTeams: teamId }] });
+
+/**
+ * Set an employee's tele-sales teams on the (unsaved) document.
+ *
+ *  - `teams` given: those become the visible teams. The home team stays when it
+ *    is still one of them, else `home` when given and ticked, else the first.
+ *  - only `home` given (older clients, the agents screen): the home team is
+ *    swapped for the new one and any other ticked teams are kept.
+ *  - an empty list or a null home clears both.
+ *
+ * Existence of the ids is the caller's check (resolveExistingTeam / the employee
+ * controller), this only keeps the two fields consistent.
+ */
+export const setEmployeeTeams = (employee, { teams, home } = {}) => {
+  const currentHome = employee.teleSalesTeam ? String(employee.teleSalesTeam._id ?? employee.teleSalesTeam) : null;
+  if (teams !== undefined) {
+    const ids = teamIdList(teams);
+    const wantedHome = home ? String(toObjectId(home) ?? "") : null;
+    const nextHome =
+      (wantedHome && ids.includes(wantedHome) && wantedHome) ||
+      (currentHome && ids.includes(currentHome) && currentHome) ||
+      ids[0] ||
+      null;
+    employee.teleSalesTeams = ids;
+    employee.teleSalesTeam = nextHome;
+    return;
+  }
+  if (home === undefined) return;
+  const nextHome = home ? String(toObjectId(home) ?? "") || null : null;
+  if (!nextHome) {
+    employee.teleSalesTeam = null;
+    employee.teleSalesTeams = [];
+    return;
+  }
+  const others = teamIdList(employee.teleSalesTeams).filter((id) => id !== currentHome && id !== nextHome);
+  employee.teleSalesTeams = [nextHome, ...others];
+  employee.teleSalesTeam = nextHome;
 };
 
 // ── Express middleware ────────────────────────────────────────────────────────
 
 export const MANAGER_ONLY_MESSAGE = "Only a sales manager or an administrator can do this.";
 
-/** 403 unless the caller is a sales manager or an admin — e.g. importing leads. */
+/** 403 unless the caller is a sales manager or an admin. */
 export const requireLeadManager = (req, res, next) => {
   if (!isLeadManager(req)) {
     return res.status(403).json({ success: false, message: MANAGER_ONLY_MESSAGE });

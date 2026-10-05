@@ -13,15 +13,17 @@ import {
   listInboxMessagesSince,
   getMessageAttachments,
   senderMailbox,
+  syncedMailboxes,
   MAX_TOTAL_ATTACHMENT_BYTES,
   isGraphAccessDenied,
   MAIL_READWRITE_MISSING,
 } from "./emailService.js";
 
-// Pulls replies out of the shared mailbox and files them under the right ticket
+// Pulls replies out of the shared mailboxes and files them under the right ticket
 // or lead, so staff see the whole exchange in the system and can answer from it.
-// One pass, one cursor: tickets and leads share the mailbox, so they must share
-// the sync (two syncs would race on the same messages).
+// Two mailboxes are read — support (tickets) and sales (leads, MS_SALES_EMAIL_FROM)
+// — in one pass with one cursor PER MAILBOX. Never add a second sync for the same
+// mailbox: two syncs would race on the same messages.
 //
 // A message is filed, first match wins, under
 //   1. the ticket whose email conversation it continues (conversationId),
@@ -31,7 +33,11 @@ import {
 //   4. the lead whose email address sent it.
 // Everything else in the inbox is ignored (left untouched in the mailbox).
 
-const SYNC_KEY = "lead-inbox";
+// The support mailbox keeps the original cursor key, so upgrading does not
+// re-read its last day; any other mailbox gets its own.
+const LEGACY_SYNC_KEY = "lead-inbox";
+const syncKeyFor = (mailbox) =>
+  mailbox === String(senderMailbox() ?? "").toLowerCase() ? LEGACY_SYNC_KEY : `inbox:${mailbox}`;
 const FIRST_RUN_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 // Re-read a small window each run; internetMessageId de-duplicates.
 const OVERLAP_MS = 5 * 60 * 1000;
@@ -62,11 +68,11 @@ const storeAttachment = (att, source) =>
   });
 
 // Downloads a message's attachments into GridFS, up to the total size limit.
-const downloadAttachments = async (msg, source) => {
+const downloadAttachments = async (msg, source, mailbox) => {
   const attachments = [];
   if (!msg.hasAttachments) return attachments;
   try {
-    const files = await getMessageAttachments(msg.id);
+    const files = await getMessageAttachments(msg.id, mailbox);
     let total = 0;
     for (const f of files) {
       total += f.content.length;
@@ -92,6 +98,7 @@ const inboundFields = (msg, mailbox, attachments, answered) => ({
   attachments,
   status: "received",
   graphMessageId: msg.id,
+  mailbox: String(mailbox ?? "").toLowerCase() || undefined,
   internetMessageId: msg.internetMessageId,
   conversationId: msg.conversationId,
   inReplyTo: answered?._id ?? null,
@@ -168,7 +175,7 @@ const fileTicketMessage = async (msg, mailbox, ticket) => {
     .sort({ createdAt: -1 })
     .lean();
 
-  const attachments = await downloadAttachments(msg, "ticket-email-inbound");
+  const attachments = await downloadAttachments(msg, "ticket-email-inbound", mailbox);
   const record = await TicketEmail.create({ ticket: ticket._id, ...inboundFields(msg, mailbox, attachments, answered) });
 
   if (answered && answered.status !== "replied") {
@@ -209,7 +216,7 @@ export const fileInboundMessage = async (msg, mailbox) => {
     .sort({ createdAt: -1 })
     .lean();
 
-  const attachments = await downloadAttachments(msg, "lead-email-inbound");
+  const attachments = await downloadAttachments(msg, "lead-email-inbound", mailbox);
   const record = await LeadEmail.create({
     lead: lead._id,
     team: lead.team ?? null,
@@ -251,20 +258,39 @@ export const syncLeadInbox = async () => {
   if (running) return { processed: 0, filed: 0, skipped: true };
   if (!senderMailbox() || !process.env.MS_CLIENT_ID) return { processed: 0, filed: 0, disabled: true };
   running = true;
-  const state = (await MailSyncState.findOne({ key: SYNC_KEY })) ?? new MailSyncState({ key: SYNC_KEY });
+  try {
+    const totals = { processed: 0, filed: 0 };
+    const errors = [];
+    for (const mailbox of syncedMailboxes()) {
+      const r = await syncMailbox(mailbox);
+      totals.processed += r.processed;
+      totals.filed += r.filed;
+      if (r.error) errors.push(`${mailbox}: ${r.error}`);
+    }
+    return errors.length ? { ...totals, error: errors.join(" | ") } : totals;
+  } finally {
+    running = false;
+  }
+};
+
+/** One pass over one mailbox, with that mailbox's own cursor. */
+const syncMailbox = async (mailbox) => {
+  const key = syncKeyFor(mailbox);
+  const state = (await MailSyncState.findOne({ key })) ?? new MailSyncState({ key });
+  // Mail between our own mailboxes (support ↔ sales) is never a customer reply.
+  const ours = new Set(syncedMailboxes());
   try {
     const since = state.lastReceivedAt
       ? new Date(state.lastReceivedAt.getTime() - OVERLAP_MS)
       : new Date(Date.now() - FIRST_RUN_LOOKBACK_MS);
-    const { mailbox, messages } = await listInboxMessagesSince(since);
-    const self = mailbox.toLowerCase();
+    const { messages } = await listInboxMessagesSince(since, { mailbox });
 
     let filed = 0;
     let newest = state.lastReceivedAt;
     for (const msg of messages) {
       const received = msg.receivedDateTime ? new Date(msg.receivedDateTime) : null;
       if (received && (!newest || received > newest)) newest = received;
-      if (!msg.internetMessageId || addr(msg.from) === self) continue;
+      if (!msg.internetMessageId || ours.has(addr(msg.from))) continue;
       if (
         (await LeadEmail.exists({ internetMessageId: msg.internetMessageId })) ||
         (await TicketEmail.exists({ internetMessageId: msg.internetMessageId }))
@@ -282,7 +308,7 @@ export const syncLeadInbox = async () => {
     state.lastError = null;
     state.processed += messages.length;
     await state.save();
-    if (filed) console.log(`📥 Lead inbox: filed ${filed} reply(ies)`);
+    if (filed) console.log(`📥 Inbox ${mailbox}: filed ${filed} reply(ies)`);
     return { processed: messages.length, filed };
   } catch (error) {
     // Reading the inbox needs Mail.Read / Mail.ReadWrite on the app registration;
@@ -291,10 +317,8 @@ export const syncLeadInbox = async () => {
     state.lastRunAt = new Date();
     state.lastError = message;
     await state.save().catch(() => {});
-    console.error("Lead inbox sync error:", message);
+    console.error(`Inbox sync error (${mailbox}):`, message);
     return { processed: 0, filed: 0, error: message };
-  } finally {
-    running = false;
   }
 };
 

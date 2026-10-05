@@ -19,6 +19,7 @@
 
 // Statuses in pipeline order (also drives the "New Lead" create-form dropdown).
 export const LEAD_STATUSES = [
+  "No Action",
   "New Lead",
   "No Answer",
   "Call Back Later",
@@ -47,9 +48,22 @@ export const DEFAULT_VALUE_CURRENCY = "EGP";
 // carries the latest figure; "manual" is the Potential Value typed on the lead form.
 export const VALUE_SOURCES = ["manual", "quoted", "revised", "final"];
 
+// The status every imported lead starts in: nobody has acted on it yet. Only an
+// import puts a lead here — no transition leads back to it.
+export const IMPORTED_LEAD_STATUS = "No Action";
+
 const MODULES = ["D365 Finance & Operations", "Business Central", "Power Platform", "MASAR Mobile App", "Support / SLA", "Licenses only"];
 
 export const LEAD_STATUS_WORKFLOW = {
+  "No Action": {
+    ar: "لم يتم اتخاذ إجراء",
+    color: "#475569",
+    bg: "#f1f5f9",
+    step: 0,
+    desc: "Imported lead — no action has been taken on it yet.",
+    fields: [],
+  },
+
   "New Lead": {
     ar: "عميل محتمل جديد",
     color: "#1d4ed8",
@@ -228,7 +242,10 @@ export const LEAD_STATUS_WORKFLOW = {
     desc: "Technical and commercial proposal delivered, awaiting the customer decision.",
     fields: [
       { k: "file", label: "Proposal File / Link", ar: "ملف العرض أو الرابط", type: "attach", req: true },
-      { k: "value", label: "Quoted Value", ar: "القيمة المالية للعرض", type: "money", req: true, leadValue: "quoted" },
+      {
+        k: "value", label: "Quoted Value", ar: "القيمة المالية للعرض", type: "money", req: true,
+        leadValue: "quoted", proposalPrice: true,
+      },
       { k: "due", label: "Decision Due Date", ar: "الموعد المتوقع لرد العميل", type: "datetime", req: true },
     ],
     task: (v) => ({ title: "Chase proposal decision", due: v.due, kind: "follow" }),
@@ -298,21 +315,24 @@ export const LEAD_STATUS_WORKFLOW = {
   },
 };
 
-// Allowed transitions from each status. Self-transitions (e.g. "No Answer" →
-// "No Answer") are intentional — they represent another logged attempt.
+// Allowed transitions from each status. Every working status lists itself first:
+// a self-transition is a quick update of the same status (another follow-up,
+// another attempt, a new meeting round, a revised quote) logged with fresh
+// details. "No Action" has nothing to update and Closed Won is final.
 export const NEXT = {
-  "New Lead": ["No Answer", "Call Back Later", "Wrong Number", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
+  "No Action": ["New Lead", "No Answer", "Call Back Later", "Wrong Number", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
+  "New Lead": ["New Lead", "No Answer", "Call Back Later", "Wrong Number", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
   "No Answer": ["No Answer", "Call Back Later", "Wrong Number", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
-  "Call Back Later": ["No Answer", "Call Back Later", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
-  "Wrong Number": ["New Lead", "Follow-up", "Closed Lost"],
-  "Interested": ["Follow-up", "Meeting Scheduled", "Under Preparation", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
+  "Call Back Later": ["Call Back Later", "No Answer", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
+  "Wrong Number": ["Wrong Number", "New Lead", "Follow-up", "Closed Lost"],
+  "Interested": ["Interested", "Follow-up", "Meeting Scheduled", "Under Preparation", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
   "Follow-up": ["Follow-up", "Meeting Scheduled", "Under Preparation", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
   "Meeting Scheduled": ["Meeting Scheduled", "Follow-up", "Under Preparation", "Proposal Sent", "No Answer", "Closed Lost"],
-  "Under Preparation": ["Proposal Sent", "Meeting Scheduled", "Follow-up", "Closed Lost"],
-  "Proposal Sent": ["Negotiation", "Meeting Scheduled", "Follow-up", "Closed Won", "Closed Lost"],
-  "Negotiation": ["Meeting Scheduled", "Proposal Sent", "Follow-up", "Closed Won", "Closed Lost"],
+  "Under Preparation": ["Under Preparation", "Proposal Sent", "Meeting Scheduled", "Follow-up", "Closed Lost"],
+  "Proposal Sent": ["Proposal Sent", "Negotiation", "Meeting Scheduled", "Follow-up", "Closed Won", "Closed Lost"],
+  "Negotiation": ["Negotiation", "Meeting Scheduled", "Proposal Sent", "Follow-up", "Closed Won", "Closed Lost"],
   "Closed Won": [],
-  "Closed Lost": ["New Lead"],
+  "Closed Lost": ["Closed Lost", "New Lead"],
 };
 
 export const isTransitionAllowed = (from, to) => Array.isArray(NEXT[from]) && NEXT[from].includes(to);
@@ -423,6 +443,25 @@ export const leadValueFromStatus = (statusKey, rawValues) => {
     ? values[`${field.k}__c`]
     : DEFAULT_VALUE_CURRENCY;
   return { amount, currency, source: field.leadValue };
+};
+
+/**
+ * The proposal price this status change records on the lead (Lead.proposalValue),
+ * or null when it carries none — the amount of the status's `proposalPrice` money
+ * field (the Quoted Value at Proposal Sent), with its currency. Unlike the lead
+ * value, a later Revised or Final value does not overwrite it.
+ */
+export const proposalPriceFromStatus = (statusKey, rawValues) => {
+  const config = LEAD_STATUS_WORKFLOW[statusKey];
+  const values = rawValues || {};
+  const field = (config?.fields || []).find((f) => f.type === "money" && f.proposalPrice);
+  if (!field) return null;
+  const amount = Number(values[field.k]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const currency = VALUE_CURRENCIES.includes(values[`${field.k}__c`])
+    ? values[`${field.k}__c`]
+    : DEFAULT_VALUE_CURRENCY;
+  return { amount, currency };
 };
 
 const FOLLOWUP_TYPE_BY_KIND = { call: "Call", meet: "Meeting", follow: "Call", deal: "Call" };

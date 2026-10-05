@@ -51,7 +51,8 @@ export const protect = async (req, res, next) => {
         .populate("department", "name")
         // Sales employees are scoped to one tele-sales team; the scope helper
         // reads it off req.user.
-        .populate("teleSalesTeam", "name code isActive");
+        .populate("teleSalesTeam", "name code isActive")
+        .populate("teleSalesTeams", "name code isActive");
     }
 
     if (!user) {

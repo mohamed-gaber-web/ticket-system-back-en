@@ -19,10 +19,11 @@ import {
   resolveExistingTeam,
   assigneeTeamError,
   isCrossTeamReader,
+  isCallerTeam,
   isLeadManager,
 } from "../utils/teleSalesScope.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
-import { DEFAULT_VALUE_CURRENCY } from "../config/leadStatusWorkflow.js";
+import { DEFAULT_VALUE_CURRENCY, IMPORTED_LEAD_STATUS } from "../config/leadStatusWorkflow.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
@@ -140,6 +141,10 @@ export const createLead = async (req, res) => {
       ...(Number(req.body.potentialValue) > 0
         ? { valueSource: "manual", valueUpdatedAt: new Date() }
         : { valueSource: undefined, valueUpdatedAt: undefined }),
+      // The proposal price is recorded by "Proposal Sent" alone, never typed in.
+      proposalValue: undefined,
+      proposalCurrency: undefined,
+      proposalUpdatedAt: undefined,
     });
 
     res.status(201).json({ success: true, message: "Lead created successfully", data: lead });
@@ -163,7 +168,7 @@ const VALID_SALES_TYPES = Lead.schema.path("salesType").enumValues;
 
 // @desc    Bulk import leads (from Excel / CSV / markdown parsed on the client)
 // @route   POST /api/leads/import
-// @access  Private (sales manager — into their own team — or admin; see requireLeadManager)
+// @access  Private (anyone who writes tele-sales — into one of their own teams; admins into any)
 export const importLeads = async (req, res) => {
   try {
     const rows = Array.isArray(req.body) ? req.body : req.body.leads;
@@ -174,8 +179,8 @@ export const importLeads = async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot import more than 5000 leads at once" });
     }
 
-    // Imported leads land in the manager's own team; only an admin may import
-    // into any team, and must name it.
+    // Imported leads land in one of the importer's own teams (the one they chose,
+    // else their home team); only an admin may import into any team.
     const resolved = resolveCreateTeam(req, req.body.team);
     if (resolved.error) {
       return res.status(400).json({ success: false, message: resolved.error });
@@ -187,10 +192,12 @@ export const importLeads = async (req, res) => {
       return res.status(400).json({ success: false, message: teamError });
     }
 
-    // Optional batch-wide defaults
+    // Optional batch-wide defaults. A manager or admin may hand the batch to
+    // anyone on the team; anyone else imports leads for themselves.
     const canBulkAssign = isLeadManager(req);
-    const defaultAssignedTo =
-      canBulkAssign && cleanStr(req.body.assignedTo) ? cleanStr(req.body.assignedTo) : undefined;
+    const defaultAssignedTo = canBulkAssign
+      ? cleanStr(req.body.assignedTo) || undefined
+      : String(req.user._id);
 
     if (defaultAssignedTo) {
       const assigneeError = await assigneeTeamError(team, defaultAssignedTo);
@@ -198,7 +205,12 @@ export const importLeads = async (req, res) => {
         return res.status(400).json({ success: false, message: assigneeError });
       }
     }
-    const defaultStatus = VALID_STATUSES.includes(req.body.status) ? req.body.status : "New Lead";
+    // Imported leads have had no action taken on them yet. Only a manager or admin
+    // may import straight into a later status (batch-wide or per row) — for anyone
+    // else that would skip the workflow's transition rules and mandatory inputs.
+    const mayPickStatus = isLeadManager(req);
+    const defaultStatus =
+      mayPickStatus && VALID_STATUSES.includes(req.body.status) ? req.body.status : IMPORTED_LEAD_STATUS;
     const defaultSource = VALID_SOURCES.includes(req.body.leadSource) ? req.body.leadSource : undefined;
     // Batch-wide originating file for auditing (spec field 13: Data_Source)
     const defaultDataSource = cleanStr(req.body.dataSource) || undefined;
@@ -254,7 +266,7 @@ export const importLeads = async (req, res) => {
         industry: cleanStr(row.industry) || undefined,
         leadSource: VALID_SOURCES.includes(row.leadSource) ? row.leadSource : defaultSource,
         priority: VALID_PRIORITIES.includes(row.priority) ? row.priority : "Medium",
-        status: VALID_STATUSES.includes(row.status) ? row.status : defaultStatus,
+        status: mayPickStatus && VALID_STATUSES.includes(row.status) ? row.status : defaultStatus,
         tags,
         team,
         createdBy: req.user._id,
@@ -404,7 +416,7 @@ export const backfillCustomerIds = async (req, res) => {
 
 // @desc    Get all leads
 // @route   GET /api/leads
-// @access  Private (tele_sales) — admin/marketing: all teams, manager: own team, agent: own leads
+// @access  Private (tele_sales) — admin/marketing: all teams, everyone else: their own teams
 export const getAllLeads = async (req, res) => {
   try {
     const {
@@ -415,13 +427,14 @@ export const getAllLeads = async (req, res) => {
 
     const filter = {};
 
-    // Only cross-team readers see more than one team, so only they can narrow to one.
-    if (team && isCrossTeamReader(req)) filter.team = team;
+    // Narrowing to one team: any team for a cross-team reader, one of their own
+    // teams for anyone else (the scope below still applies on top).
+    if (team && (isCrossTeamReader(req) || isCallerTeam(req, team))) filter.team = team;
 
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
-    // A manager filters the team pipeline by owner; "unassigned" surfaces the
-    // leads still waiting to be handed out. (An agent's scope pins assignedTo.)
+    // Filter the team pipeline by owner; "unassigned" surfaces the leads still
+    // waiting to be handed out.
     if (assignedTo) filter.assignedTo = assignedTo === "unassigned" ? null : assignedTo;
     if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
     if (salesType) filter.salesType = salesType;
@@ -448,9 +461,9 @@ export const getAllLeads = async (req, res) => {
       if (to) filter.createdAt.$lte = new Date(to);
     }
 
-    // The scope goes on LAST so it overwrites any team / assignedTo the query
-    // tried to set — no combination of parameters reaches past it.
-    Object.assign(filter, leadScopeFilter(req));
+    // The scope goes on LAST, ANDed with everything above, so no combination of
+    // parameters reaches past it (and a chosen team still narrows inside it).
+    filter.$and = [leadScopeFilter(req)];
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [leads, total] = await Promise.all([
@@ -482,8 +495,8 @@ export const getAllLeads = async (req, res) => {
 export const getLeadStats = async (req, res) => {
   try {
     // aggregate() does not cast its $match the way find() does, which is why
-    // leadScopeFilter hands back real ObjectIds rather than strings. An agent's
-    // dashboard therefore counts (and values) only their own leads.
+    // leadScopeFilter hands back real ObjectIds rather than strings. The dashboard
+    // therefore counts (and values) only the caller's teams.
     const matchStage = { ...leadScopeFilter(req) };
 
     const [stats, valueRows] = await Promise.all([

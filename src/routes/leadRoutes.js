@@ -26,6 +26,7 @@ import {
   markLeadEmailRead,
   syncInboxNow,
   getEmailInbox,
+  getLeadEmailSender,
 } from "../controllers/leadEmailController.js";
 import { getLeadCommunications } from "../controllers/salesAssistantController.js";
 import {
@@ -34,7 +35,7 @@ import {
   requireAdmin,
   requireManagerOrAdmin,
 } from "../middleware/authMiddleware.js";
-import { requireTeleSalesWrite, requireLeadManager } from "../utils/teleSalesScope.js";
+import { requireTeleSalesWrite } from "../utils/teleSalesScope.js";
 
 const router = express.Router();
 
@@ -44,13 +45,14 @@ router.use(protect, requireModule("telesales"));
 
 // Lead CRUD
 router.post("/", requireTeleSalesWrite, createLead);
-// Importing is the sales manager's (or an admin's) job — agents only work the leads handed to them
-router.post("/import", requireLeadManager, importLeads);
+// Every role that can write imports; only a manager or admin may hand the batch to someone else
+router.post("/import", requireTeleSalesWrite, importLeads);
 router.post("/backfill-customer-ids", requireAdmin, backfillCustomerIds);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
 // Email management — static paths must sit above the /:id routes.
 router.get("/emails/inbox", getEmailInbox);
+router.get("/emails/sender", getLeadEmailSender);
 router.post("/emails/sync", syncInboxNow);
 router.get("/:id", getLeadById);
 router.patch("/:id", requireTeleSalesWrite, updateLead);

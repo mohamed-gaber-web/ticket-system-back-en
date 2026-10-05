@@ -76,6 +76,10 @@ export const emailMessageFields = (modelName) => ({
   // whole exchange; `internetMessageId` de-duplicates inbox syncs.
   messageId: { type: String },
   graphMessageId: { type: String },
+  // The mailbox the message lives in (support or sales); `graphMessageId` is only
+  // valid there, so a reply goes out of the same one. Unset on older messages,
+  // which all lived in the support mailbox.
+  mailbox: { type: String, trim: true, lowercase: true },
   internetMessageId: { type: String },
   conversationId: { type: String },
   // The message this one answers (outbound reply → inbound, or inbound → outbound).

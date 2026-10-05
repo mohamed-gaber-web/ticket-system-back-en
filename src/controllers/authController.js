@@ -42,6 +42,7 @@ const populateForSession = async (user, userType) => {
     // The tele-sales team has to arrive populated, or the UI cannot name the
     // pipeline it is showing — it would only have a bare id to work with.
     if (user.teleSalesTeam) await user.populate("teleSalesTeam", "name code isActive");
+    if (user.teleSalesTeams?.length) await user.populate("teleSalesTeams", "name code isActive");
   }
   return user;
 };
@@ -216,8 +217,9 @@ export const getProfile = async (req, res) => {
     } else {
       user = await Model.findById(req.user._id)
         .populate("department", "name isActive")
-        // Sales employees are scoped to one tele-sales team.
-        .populate("teleSalesTeam", "name code isActive");
+        // Sales employees are scoped to their tele-sales teams.
+        .populate("teleSalesTeam", "name code isActive")
+        .populate("teleSalesTeams", "name code isActive");
     }
 
     res.status(200).json({
@@ -252,6 +254,7 @@ export const updateProfile = async (req, res) => {
       "modules",
       "department",
       "teleSalesTeam",
+      "teleSalesTeams",
       "company",
       // The HR file and employee code are HR's to write (consultantController),
       // never the employee's own — salary, contract, IBAN, national ID…

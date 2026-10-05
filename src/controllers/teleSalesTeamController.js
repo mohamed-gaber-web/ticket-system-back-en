@@ -3,7 +3,7 @@ import Consultant from "../models/Consltant.js";
 import Lead from "../models/Lead.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
-import { isCrossTeamReader, callerTeamId } from "../utils/teleSalesScope.js";
+import { isCrossTeamReader, callerTeamIds, isCallerTeam, onTeamFilter } from "../utils/teleSalesScope.js";
 import { canViewHr } from "../utils/access.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
@@ -59,9 +59,9 @@ export const getAllTeams = async (req, res) => {
     const filter = {};
     // HR places sales employees in any team, so it sees the whole list
     if (!isCrossTeamReader(req) && !canViewHr(req.user)) {
-      const own = callerTeamId(req);
-      if (!own) return res.status(200).json({ success: true, total: 0, data: [] });
-      filter._id = own;
+      const own = callerTeamIds(req);
+      if (own.length === 0) return res.status(200).json({ success: true, total: 0, data: [] });
+      filter._id = { $in: own };
     }
 
     if (isActive !== undefined) filter.isActive = isActive === "true";
@@ -95,12 +95,12 @@ export const getTeamById = async (req, res) => {
     // would confirm the id belongs to a real team, and the pair of responses would
     // let any tele-sales user enumerate exactly how the business is structured —
     // which is what scoping getAllTeams was meant to prevent.
-    if (!isCrossTeamReader(req) && !canViewHr(req.user) && callerTeamId(req) !== String(team._id)) {
+    if (!isCrossTeamReader(req) && !canViewHr(req.user) && !isCallerTeam(req, team._id)) {
       return res.status(404).json({ success: false, message: "Team not found" });
     }
 
     const [agentCount, leadCount] = await Promise.all([
-      Consultant.countDocuments({ teleSalesTeam: team._id }),
+      Consultant.countDocuments(onTeamFilter(team._id)),
       Lead.countDocuments({ team: team._id }),
     ]);
 
@@ -174,8 +174,9 @@ export const deleteTeam = async (req, res) => {
     // silently — their scope filter matches nothing and the Teams screen cannot
     // show an administrator why. Call logs and follow-ups can outlive their lead
     // too, so they are checked on their own.
+    // Employees count whether the team is their home team or a ticked one.
     const [agentCount, leadCount, callCount, followUpCount] = await Promise.all([
-      Consultant.countDocuments({ teleSalesTeam: team._id }),
+      Consultant.countDocuments(onTeamFilter(team._id)),
       Lead.countDocuments({ team: team._id }),
       CallLog.countDocuments({ team: team._id }),
       FollowUp.countDocuments({ team: team._id }),

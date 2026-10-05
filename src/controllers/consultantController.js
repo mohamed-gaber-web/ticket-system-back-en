@@ -5,6 +5,7 @@ import TeleSalesTeam from "../models/TeleSalesTeam.js";
 import { sendConsultantWelcomeEmail } from "../utils/emailService.js";
 import { deleteAllEmployeeDocuments } from "./employeeDocumentController.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
+import { setEmployeeTeams, employeeTeamIds, isCallerTeam } from "../utils/teleSalesScope.js";
 import {
   ROLES,
   MODULES,
@@ -23,7 +24,9 @@ const EMPLOYEE_SELECT = "-password -refreshToken -resetPasswordToken -resetPassw
 
 // `withHr` opts back into the confidential HR file (select: false on the model)
 const populateEmployee = (q, withHr = false) => {
-  q.populate("department", "name").populate("teleSalesTeam", "name code isActive");
+  q.populate("department", "name")
+    .populate("teleSalesTeam", "name code isActive")
+    .populate("teleSalesTeams", "name code isActive");
   if (withHr) {
     q.select("+hr").populate("hr.directManager", "firstName lastName email employeeCode position");
   }
@@ -103,22 +106,46 @@ const sanitizeHr = (input) => {
 
 /**
  * Tele-sales team rules for an employee's (resulting) role. A `sales` employee
- * or `sales_manager` must sit in a team — without one they would see no leads at all — and a team
- * being newly chosen must exist and be active. Returns an error message or null.
- * `changed` is false when the stored team is kept as it is, so editing someone
- * else's details never fails on a team that was deactivated later.
+ * or `sales_manager` must sit in at least one team — without one they would see
+ * no leads at all — and every team being newly ticked must exist and be active.
+ * Returns an error message or null. `added` lists only the newly ticked ids, so
+ * editing someone else's details never fails on a team deactivated later.
  */
-const salesTeamProblem = async (role, team, changed = true) => {
+const salesTeamProblem = async (role, teamIds, added = teamIds) => {
   if (roleFamily(role) !== "sales") return null;
-  const id = team && typeof team === "object" ? team._id : team;
-  // A sales manager runs one team, so they need one exactly like an agent.
-  if (!id) return "A sales employee or sales manager must belong to a tele-sales team — choose one.";
-  if (!changed) return null;
-  if (!mongoose.isValidObjectId(id)) return "Invalid tele-sales team.";
-  const found = await TeleSalesTeam.findById(id).select("isActive").lean();
-  if (!found) return "Tele-sales team not found.";
-  if (found.isActive === false) return "That tele-sales team is inactive — choose an active team.";
+  if (teamIds.length === 0) return "A sales employee or sales manager must belong to a tele-sales team — tick at least one.";
+  for (const id of added) {
+    if (!mongoose.isValidObjectId(id)) return "Invalid tele-sales team.";
+    const found = await TeleSalesTeam.findById(id).select("name isActive").lean();
+    if (!found) return "Tele-sales team not found.";
+    if (found.isActive === false) return `The tele-sales team "${found.name}" is inactive — choose an active team.`;
+  }
   return null;
+};
+
+/**
+ * The tele-sales teams a create/update asks for, applied to `target` (the
+ * employee, or a draft of it): the `teleSalesTeams` checkboxes, or the single
+ * `teleSalesTeam` older clients send. Returns every resulting team id.
+ */
+/** A malformed id anywhere in the requested teams — rejected, never silently dropped. */
+const malformedTeamId = ({ teleSalesTeams, teleSalesTeam }) => {
+  const raw = [...(Array.isArray(teleSalesTeams) ? teleSalesTeams : []), ...(teleSalesTeam ? [teleSalesTeam] : [])];
+  return raw.some((t) => !mongoose.isValidObjectId(t?._id ?? t));
+};
+
+/**
+ * Teams the actor may hand out: admins and HR any team; a sales manager only the
+ * teams they run themselves, or they could open another tenant to their agent.
+ */
+const unauthorisedTeam = (req, addedIds) =>
+  isAdmin(req.user) || canViewHr(req.user) ? false : addedIds.some((id) => !isCallerTeam(req, id));
+
+const TEAM_NOT_YOURS_MESSAGE = "You can only give an employee teams you belong to yourself.";
+
+const applyRequestedTeams = (target, { teleSalesTeams, teleSalesTeam }) => {
+  setEmployeeTeams(target, { teams: teleSalesTeams, home: teleSalesTeam });
+  return employeeTeamIds(target);
 };
 
 const badRequest = (res, message, errors) =>
@@ -172,7 +199,8 @@ const getAllConsultants = async (req, res) => {
     }
 
     if (teleSalesTeam) {
-      query.teleSalesTeam = teleSalesTeam;
+      // Home team or a ticked team
+      query.$and = [...(query.$and ?? []), { $or: [{ teleSalesTeam }, { teleSalesTeams: teleSalesTeam }] }];
     }
 
     if (search) {
@@ -267,6 +295,7 @@ const createConsultant = async (req, res) => {
       department,
       profilePicture,
       teleSalesTeam,
+      teleSalesTeams,
       modules,
       employeeCode,
     } = req.body;
@@ -287,8 +316,16 @@ const createConsultant = async (req, res) => {
       });
     }
 
-    const teamProblem = await salesTeamProblem(role, teleSalesTeam);
+    if (roleFamily(role) === "sales" && malformedTeamId({ teleSalesTeams, teleSalesTeam })) {
+      return badRequest(res, "Invalid tele-sales team.");
+    }
+    const teams = { teleSalesTeam: null, teleSalesTeams: [] };
+    const teamIds = applyRequestedTeams(teams, { teleSalesTeams, teleSalesTeam });
+    const teamProblem = await salesTeamProblem(role, teamIds);
     if (teamProblem) return badRequest(res, teamProblem);
+    if (roleFamily(role) === "sales" && unauthorisedTeam(req, teamIds)) {
+      return res.status(403).json({ success: false, message: TEAM_NOT_YOURS_MESSAGE });
+    }
 
     const consultantExists = await Consultant.findOne({ email });
     if (consultantExists || (await emailTakenElsewhere(email, Consultant))) {
@@ -314,7 +351,7 @@ const createConsultant = async (req, res) => {
       // an explicit department only applies to consultants and admins.
       ...(department && { department }),
       ...(profilePicture !== undefined && { profilePicture }),
-      ...(roleFamily(role) === "sales" && teleSalesTeam !== undefined && { teleSalesTeam: teleSalesTeam || null }),
+      ...(roleFamily(role) === "sales" && teams),
       // Module overrides are the admin's alone
       ...(isAdmin(req.user) && modules !== undefined && { modules: validModules(modules) }),
     });
@@ -368,6 +405,7 @@ const updateConsultant = async (req, res) => {
       department,
       profilePicture,
       teleSalesTeam,
+      teleSalesTeams,
       modules,
       employeeCode,
     } = req.body;
@@ -408,11 +446,18 @@ const updateConsultant = async (req, res) => {
     }
 
     const nextRole = role ?? consultant.role;
-    const currentTeam = consultant.teleSalesTeam ? String(consultant.teleSalesTeam) : null;
-    const nextTeam = teleSalesTeam !== undefined ? (teleSalesTeam || null) : currentTeam;
-    const nextTeamId = nextTeam && typeof nextTeam === "object" ? String(nextTeam._id) : nextTeam;
-    const teamProblem = await salesTeamProblem(nextRole, nextTeamId, nextTeamId !== currentTeam);
+    if (roleFamily(nextRole) === "sales" && malformedTeamId({ teleSalesTeams, teleSalesTeam })) {
+      return badRequest(res, "Invalid tele-sales team.");
+    }
+    const currentTeamIds = employeeTeamIds(consultant);
+    const teams = { teleSalesTeam: consultant.teleSalesTeam, teleSalesTeams: [...(consultant.teleSalesTeams ?? [])] };
+    const nextTeamIds = applyRequestedTeams(teams, { teleSalesTeams, teleSalesTeam });
+    const addedTeamIds = nextTeamIds.filter((id) => !currentTeamIds.includes(id));
+    const teamProblem = await salesTeamProblem(nextRole, nextTeamIds, addedTeamIds);
     if (teamProblem) return badRequest(res, teamProblem);
+    if (roleFamily(nextRole) === "sales" && unauthorisedTeam(req, addedTeamIds)) {
+      return res.status(403).json({ success: false, message: TEAM_NOT_YOURS_MESSAGE });
+    }
     const updates = {
       firstName,
       lastName,
@@ -424,10 +469,8 @@ const updateConsultant = async (req, res) => {
       ...(monthlyTargetHours !== undefined && { monthlyTargetHours: monthlyTargetHours ?? null }),
       ...(department !== undefined && { department: department || null }),
       ...(profilePicture !== undefined && { profilePicture: profilePicture || null }),
-      // The team only means something for the sales family; anyone else is cleared
-      ...(roleFamily(nextRole) === "sales"
-        ? teleSalesTeam !== undefined && { teleSalesTeam: teleSalesTeam || null }
-        : { teleSalesTeam: null }),
+      // The teams only mean something for the sales family; anyone else is cleared
+      ...(roleFamily(nextRole) === "sales" ? teams : { teleSalesTeam: null, teleSalesTeams: [] }),
       ...(isAdmin(req.user) && modules !== undefined && { modules: validModules(modules) }),
     };
     Object.keys(updates).forEach((k) => updates[k] === undefined && delete updates[k]);

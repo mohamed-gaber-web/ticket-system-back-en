@@ -100,9 +100,11 @@ export const previewOf = (html) =>
  * @param {object}  [opts.replyTo]   the stored message being answered (threads the mail)
  * @param {object}  [opts.logMeta]   { leadId?, ticketId? } for EmailLog
  * @param {(subject: string) => string} [opts.subjectFor]  last say on the subject line
+ * @param {string}  [opts.mailbox]   mailbox to send a NEW message from (default: support).
+ *                                   A reply always leaves the mailbox its thread lives in.
  * @returns {Promise<{ error: { status, message } } | { result, fields }>}
  */
-export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subjectFor } = {}) => {
+export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subjectFor, mailbox: newMailbox } = {}) => {
   const error = (status, message) => ({ error: { status, message } });
 
   const to = normaliseAddresses(req.body.to);
@@ -136,6 +138,9 @@ export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subje
     return error(400, attachmentError.message);
   }
 
+  // Graph can only answer a message from the mailbox that holds it.
+  const mailbox = (replyTo ? replyTo.mailbox || senderMailbox() : newMailbox || senderMailbox())?.toLowerCase();
+
   const identity = senderIdentity(req);
   const signature = `${identity.sentByName}${identity.sentByEmail ? ` · ${identity.sentByEmail}` : ""}`;
 
@@ -146,9 +151,10 @@ export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subje
     subject,
     bodyHtml: body,
     signature,
-    // Replies must come back to the shared mailbox so the inbox sync can file
-    // them; the employee is named in the signature instead.
-    replyTo: senderMailbox(),
+    // Replies must come back to the mailbox we sent from so the inbox sync can
+    // file them; the employee is named in the signature instead.
+    from: mailbox,
+    replyTo: mailbox,
     attachments,
     logMeta: { ...logMeta, userId: req.user._id, userType: req.userType },
     replyToGraphId: replyTo?.graphMessageId ?? null,
@@ -170,6 +176,7 @@ export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subje
       errorMessage: result.success ? undefined : result.error,
       messageId: result.messageId,
       graphMessageId: result.graphMessageId ?? undefined,
+      mailbox,
       internetMessageId: result.internetMessageId ?? undefined,
       conversationId: result.conversationId ?? replyTo?.conversationId ?? undefined,
       inReplyTo: replyTo?._id ?? null,
