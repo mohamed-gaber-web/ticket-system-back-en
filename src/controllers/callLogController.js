@@ -5,6 +5,7 @@ import {
   canEditLead,
   canManageActivity,
   activityScopeFilter,
+  ownLeadActivityFilter,
 } from "../utils/teleSalesScope.js";
 
 // @desc    Add a call log to a lead
@@ -93,7 +94,7 @@ export const getCallsByLead = async (req, res) => {
 // manager their team's, a super admin everyone's.
 export const getRecentCalls = async (req, res) => {
   try {
-    const filter = activityScopeFilter(req, "calledBy");
+    const filter = { ...activityScopeFilter(req, "calledBy"), ...(await ownLeadActivityFilter(req)) };
 
     const limit = Number(req.query.limit) || 50;
 

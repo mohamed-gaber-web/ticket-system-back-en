@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Consultant from "../models/Consltant.js";
+import { withAnyRole } from "../utils/access.js";
 import Ticket from "../models/Ticket.js";
 import Category from "../models/Category.js";
 import EmployeeEvaluation from "../models/EmployeeEvaluation.js";
@@ -217,7 +218,7 @@ export const getAllEvaluations = async (req, res) => {
 
     // Fetch all consultants + stored evals + all tickets for the month in parallel
     const [consultants, storedEvals, allTickets] = await Promise.all([
-      Consultant.find({ role: { $in: ["admin", "consultant"] } })
+      Consultant.find(withAnyRole(["admin", "consultant"]))
         .select("firstName lastName position role profilePicture")
         .lean(),
       EmployeeEvaluation.find({ year, month }).lean(),
@@ -326,7 +327,7 @@ export const getAllEvaluationsRange = async (req, res) => {
     const meetingCategoryIds = await getMeetingCategoryIds();
 
     const [consultants, storedEvals, allTickets] = await Promise.all([
-      Consultant.find({ role: { $in: ["admin", "consultant"] } })
+      Consultant.find(withAnyRole(["admin", "consultant"]))
         .select("firstName lastName position role profilePicture")
         .lean(),
       EmployeeEvaluation.find({ $or: monthPairs }).lean(),

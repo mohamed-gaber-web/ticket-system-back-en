@@ -3,9 +3,9 @@ import { LEAD_STATUSES, VALUE_CURRENCIES, VALUE_SOURCES } from "../config/leadSt
 
 // ── Spec enum value lists (see tele-sales lead field specification) ────────────
 
-// Sales_Type — where the record sits in the pipeline: an unqualified Lead, or a
-// qualified Opportunity.
-export const SALES_TYPES = ["Lead", "Opportunity"];
+// Sales_Type — the pipeline stage: raw Data (imports, nothing mandatory), a
+// qualified Lead, or an Opportunity. See src/utils/leadStages.js.
+export const SALES_TYPES = ["Data", "Lead", "Opportunity"];
 
 // Field 1: Entity_Type
 export const ENTITY_TYPES = ["Hotel", "Restaurant", "Cafe", "Factory", "Company"];
@@ -125,14 +125,14 @@ const leadSchema = mongoose.Schema(
     },
 
     // Basic Info
+    // Mandatory for Leads and Opportunities, enforced by the controller
+    // (REQUIRED_LEAD_FIELDS) — a raw Data record may lack them.
     companyName: {
       type: String,
-      required: [true, "Company name is required"],
       trim: true,
     },
     contactPersonName: {
       type: String,
-      required: [true, "Contact person name is required"],
       trim: true,
     },
     email: {
@@ -164,6 +164,11 @@ const leadSchema = mongoose.Schema(
       default: "Lead",
       trim: true,
     },
+    // Who moved the record forward, and when (POST /leads/:id/convert).
+    convertedToLeadAt: { type: Date },
+    convertedToLeadBy: { type: mongoose.Schema.Types.ObjectId, ref: "Consultant" },
+    convertedToOpportunityAt: { type: Date },
+    convertedToOpportunityBy: { type: mongoose.Schema.Types.ObjectId, ref: "Consultant" },
 
     // ── Entity Classification (spec fields 1-3) ──────────────────────────────
     // Field 1: Entity_Type
@@ -348,9 +353,36 @@ const leadSchema = mongoose.Schema(
       type: String,
       trim: true,
     },
+    // Free-text needs from before the catalog lookup — kept so old notes stay
+    // readable; the form now records needs as customerNeedProducts.
     customerNeeds: {
       type: String,
       trim: true,
+    },
+    // Customer Need — the catalog products the customer is after (multi-select
+    // lookup on Product). Carried unchanged through Data → Lead → Opportunity,
+    // since conversion only changes the stage of the same record.
+    customerNeedProducts: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
+      default: [],
+    },
+    // Existing customer: the lead comes from an account we already serve. The
+    // account is a ticketing Company and the contact one of its Customer users
+    // (who asked for it); the form copies their details onto the lead fields.
+    // Both are null when isExistingCustomer is false.
+    isExistingCustomer: {
+      type: Boolean,
+      default: false,
+    },
+    account: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+    },
+    accountContact: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      default: null,
     },
     budget: {
       type: String,
@@ -470,6 +502,9 @@ leadSchema.index({ team: 1, phonePrimary: 1 });
 leadSchema.index({ priority: 1 });
 leadSchema.index({ createdBy: 1 });
 leadSchema.index({ salesType: 1 });
+leadSchema.index({ account: 1 });
+// The three stage tabs list one stage of the caller's teams, newest first.
+leadSchema.index({ team: 1, salesType: 1, createdAt: -1 });
 leadSchema.index({ entityType: 1 });
 leadSchema.index({ industrySector: 1 });
 // Unique, but sparse so legacy leads without a customerId don't collide on null.

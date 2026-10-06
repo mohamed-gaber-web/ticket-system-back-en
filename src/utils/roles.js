@@ -60,6 +60,34 @@ export const roleFamily = (role) => {
 
 export const isManagerRole = (role) => ROLES.includes(role) && role.endsWith("_manager");
 
+/**
+ * Every role an employee holds: the primary `role` plus `extraRoles` (multi-role
+ * employees), de-duplicated, unknown values dropped. Every permission check reads
+ * this list with OR logic — holding any role grants what that role grants.
+ */
+export const rolesOf = (user) => {
+  const all = [user?.role, ...(Array.isArray(user?.extraRoles) ? user.extraRoles : [])];
+  return [...new Set(all.filter((r) => ROLES.includes(r)))];
+};
+
+/** The role families an employee belongs to, e.g. sales_manager + developer → ["sales", "developer"]. */
+export const familiesOf = (user) => [...new Set(rolesOf(user).map(roleFamily).filter(Boolean))];
+
+/** The families an employee MANAGES — only those of their `_manager` roles. */
+export const managedFamiliesOf = (user) =>
+  [...new Set(rolesOf(user).filter(isManagerRole).map(roleFamily))];
+
+/**
+ * Normalise a primary role + extra roles: unknown and duplicate values dropped,
+ * and admin — if held at all — always becomes the primary role, so every check
+ * on `role === "admin"` keeps working for a multi-role administrator.
+ */
+export const splitRoles = (primary, extras = []) => {
+  const all = [...new Set([primary, ...(extras ?? [])].filter((r) => ROLES.includes(r)))];
+  const role = all.includes("admin") ? "admin" : all[0];
+  return { role, extraRoles: all.filter((r) => r !== role) };
+};
+
 /** Every role in a family, e.g. familyRoles("sales") → ["sales", "sales_manager"]. */
 export const familyRoles = (family) => ROLES.filter((r) => roleFamily(r) === family);
 

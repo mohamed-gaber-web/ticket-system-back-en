@@ -8,8 +8,11 @@ import {
   getLeadById,
   updateLead,
   deleteLead,
+  convertLead,
 } from "../controllers/leadController.js";
 import { changeLeadStatus, getLeadStatusHistory } from "../controllers/leadStatusController.js";
+import { bulkUpdateLeads } from "../controllers/leadBulkController.js";
+import { getLeadAccounts, getLeadAccountContacts } from "../controllers/leadAccountController.js";
 import { addCall, getCallsByLead, updateCall, deleteCall } from "../controllers/callLogController.js";
 import {
   addFollowUp,
@@ -47,15 +50,23 @@ router.use(protect, requireModule("telesales"));
 router.post("/", requireTeleSalesWrite, createLead);
 // Every role that can write imports; only a manager or admin may hand the batch to someone else
 router.post("/import", requireTeleSalesWrite, importLeads);
+// Bulk edit / mass reassignment of selected records (any tab); reassigning is a manager's
+router.post("/bulk", requireTeleSalesWrite, bulkUpdateLeads);
 router.post("/backfill-customer-ids", requireAdmin, backfillCustomerIds);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
+// Existing-customer lookups for the lead form — static paths, above /:id.
+// Writers only: the contacts carry customer PII that read-only roles never need.
+router.get("/accounts", requireTeleSalesWrite, getLeadAccounts);
+router.get("/accounts/:id/contacts", requireTeleSalesWrite, getLeadAccountContacts);
 // Email management — static paths must sit above the /:id routes.
 router.get("/emails/inbox", getEmailInbox);
 router.get("/emails/sender", getLeadEmailSender);
 router.post("/emails/sync", syncInboxNow);
 router.get("/:id", getLeadById);
 router.patch("/:id", requireTeleSalesWrite, updateLead);
+// Pipeline stage: Data → Lead → Opportunity (mandatory fields checked on the way)
+router.post("/:id/convert", requireTeleSalesWrite, convertLead);
 // A team manager may delete inside their own team; the controller enforces that
 // boundary, this only keeps plain agents out.
 router.delete("/:id", requireManagerOrAdmin, requireTeleSalesWrite, deleteLead);

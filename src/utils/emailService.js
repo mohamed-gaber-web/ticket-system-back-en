@@ -216,6 +216,7 @@ const sendViaDraft = async (from, message, attachments, accessToken, { replyToGr
     if (message.ccRecipients?.length) patch.ccRecipients = message.ccRecipients;
     if (message.bccRecipients?.length) patch.bccRecipients = message.bccRecipients;
     if (message.replyTo?.length) patch.replyTo = message.replyTo;
+    if (message.from) patch.from = message.from; // replies carry the sender name too
     draft = await graphJson(`${base}/messages/${draft.id}`, accessToken, "PATCH", patch);
   } else {
     draft = await graphJson(`${base}/messages`, accessToken, "POST", message);
@@ -254,6 +255,10 @@ const sendViaMicrosoftGraph = async (from, to, subject, html, options = {}) => {
     body: { contentType: "HTML", content: html },
     toRecipients: toRecipientList(to),
   };
+
+  // An explicit display name for the sender (the sales mailbox's brand name).
+  const fromName = options.fromName ?? senderNameFor(from);
+  if (fromName) message.from = { emailAddress: { address: from, name: fromName } };
 
   const ccRecipients = toRecipientList(options.cc);
   if (ccRecipients.length) message.ccRecipients = ccRecipients;
@@ -998,6 +1003,19 @@ export const senderMailbox = () => process.env.MS_EMAIL_FROM || process.env.EMAI
  * MS_SALES_EMAIL_FROM is unset.
  */
 export const salesMailbox = () => process.env.MS_SALES_EMAIL_FROM || senderMailbox();
+
+/**
+ * The display name lead email goes out under ("Grow Path For Business
+ * Development <sales@growpath.net>"). Override with MS_SALES_EMAIL_FROM_NAME.
+ * Exchange Online may still show the mailbox's own display name from Microsoft
+ * 365, so keep that name the same in the admin center.
+ */
+export const salesMailboxName = () =>
+  (process.env.MS_SALES_EMAIL_FROM_NAME || "Grow Path For Business Development").trim();
+
+/** The display name to send under from `address`: the sales name for the sales mailbox, else none. */
+const senderNameFor = (address) =>
+  address && address.toLowerCase() === String(salesMailbox() || "").toLowerCase() ? salesMailboxName() : null;
 
 /** Every mailbox the inbox sync reads — support and sales, once each. */
 export const syncedMailboxes = () =>

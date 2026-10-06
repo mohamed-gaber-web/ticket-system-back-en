@@ -9,7 +9,7 @@ import Consultant from "../models/Consltant.js";
 import Customer from "../models/Customer.js";
 import Lead from "../models/Lead.js";
 import { callerTeamId, callerTeamIds, leadScopeFilter, employeeTeamIds } from "../utils/teleSalesScope.js";
-import { isEmployee, hasModule, roleFamily, isAdmin as isAdminUser } from "../utils/access.js";
+import { isEmployee, hasModule, familiesOf, isAdmin as isAdminUser } from "../utils/access.js";
 import { notifyMeeting } from "../utils/meetingNotify.js";
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(String(id));
@@ -20,7 +20,11 @@ const isAdmin = (req) => isAdminUser(req.user);
 const isStaff = (req) => isEmployee(req);
 // The sales family used to log in as separate tele-sales agents; they keep
 // that narrower view: their team's meetings plus their own.
-const isSalesStaff = (req) => roleFamily(req.user?.role) === "sales";
+// Someone who also holds a non-sales role gets the wider staff view (OR logic).
+const isSalesStaff = (req) => {
+  const families = familiesOf(req.user);
+  return families.length > 0 && families.every((f) => f === "sales");
+};
 const actorName = (req) => `${req.user?.firstName ?? ""} ${req.user?.lastName ?? ""}`.trim() || "System";
 
 const toDate = (v) => {
@@ -208,7 +212,7 @@ const getMeetings = async (req, res) => {
 const getPeople = async (req, res) => {
   try {
     const employees = await Consultant.find({ status: "active" })
-      .select("firstName lastName email role department teleSalesTeam teleSalesTeams")
+      .select("firstName lastName email role extraRoles department teleSalesTeam teleSalesTeams")
       .populate("department", "name")
       .populate("teleSalesTeam", "name code")
       .sort({ firstName: 1, lastName: 1 })
@@ -220,7 +224,7 @@ const getPeople = async (req, res) => {
     const visible = employees.filter(
       (e) =>
         ownTeams === undefined ||
-        roleFamily(e.role) !== "sales" ||
+        !familiesOf(e).includes("sales") ||
         employeeTeamIds(e).some((t) => ownTeams.includes(t))
     );
 
@@ -230,7 +234,7 @@ const getPeople = async (req, res) => {
       name: `${e.firstName} ${e.lastName}`.trim(),
       email: e.email,
       group:
-        roleFamily(e.role) === "sales"
+        familiesOf(e).includes("sales")
           ? e.teleSalesTeam?.name ? `Tele-sales · ${e.teleSalesTeam.name}` : "Tele-sales"
           : e.department?.name ? `Staff · ${e.department.name}` : "Staff",
     }));

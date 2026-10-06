@@ -9,6 +9,9 @@ import {
   roleFamily,
   isManagerRole,
   normalizeUserType,
+  rolesOf,
+  familiesOf,
+  managedFamiliesOf,
 } from "./roles.js";
 
 /**
@@ -18,11 +21,15 @@ import {
  * kept under that name so hundreds of `ref: "Consultant"` never had to change) and
  * CUSTOMERS. The token carries `userType`, never the collection name.
  *
- * Employees have a flat ROLE. The role decides which MODULES they see by default;
- * an admin may override the module list per employee (`modules` on the document).
- * Roles that end in `_manager` run their "family" (sales_manager → everyone whose
- * role family is `sales`): they see all of its data, assign its work, manage its
- * people and approve its requests. Only `admin` is above them.
+ * Employees hold one or more ROLES: the primary `role` plus `extraRoles`. Every
+ * check reads all of them with OR logic (rolesOf) — holding any role grants what
+ * that role grants. The roles decide which MODULES they see by default (the union
+ * of each role's defaults); an admin may override the module list per employee
+ * (`modules` on the document). Roles that end in `_manager` run their "family"
+ * (sales_manager → everyone whose roles include the `sales` family): they see all
+ * of its data, assign its work, manage its people and approve its requests — and
+ * only that family's, never a family they merely belong to. Only `admin` is above
+ * them.
  *
  * Nothing in here reads Department names. Departments are a lookup for tasks and
  * requests; authorisation is a function of the role alone, so renaming a
@@ -46,18 +53,38 @@ export {
   familyRoles,
   FAMILY_DEPARTMENT_NAME,
   normalizeUserType,
+  rolesOf,
+  familiesOf,
+  managedFamiliesOf,
+  splitRoles,
 } from "./roles.js";
 
 // ── Role predicates ───────────────────────────────────────────────────────────
 
-export const isAdmin = (user) => user?.role === "admin";
-export const isManager = (user) => isManagerRole(user?.role);
+export const isAdmin = (user) => rolesOf(user).includes("admin");
+export const isManager = (user) => rolesOf(user).some(isManagerRole);
 export const isManagerOrAdmin = (user) => isAdmin(user) || isManager(user);
+export const hasRole = (user, ...roles) => rolesOf(user).some((r) => roles.includes(r));
 
-/** Do these two employees belong to the same role family? */
+/** Do these two employees share a role family? */
 export const isSameFamily = (a, b) => {
-  const fa = roleFamily(a?.role);
-  return Boolean(fa) && fa === roleFamily(b?.role);
+  const fb = familiesOf(b);
+  return familiesOf(a).some((f) => fb.includes(f));
+};
+
+/** Does `actor` manage a family `target` belongs to (via one of actor's `_manager` roles)? */
+export const managesFamilyOf = (actor, target) => {
+  const ft = familiesOf(target);
+  return managedFamiliesOf(actor).some((f) => ft.includes(f));
+};
+
+/** Mongo filter: employees holding any of these roles, as primary or extra role. */
+export const withAnyRole = (roles) => ({ $or: [{ role: { $in: roles } }, { extraRoles: { $in: roles } }] });
+
+/** Every department an employee is filed under (primary + extra), as id strings. */
+export const departmentsOf = (user) => {
+  const all = [user?.department, ...(Array.isArray(user?.departments) ? user.departments : [])];
+  return [...new Set(all.filter(Boolean).map((d) => String(d?._id ?? d)))];
 };
 
 // ── User type ─────────────────────────────────────────────────────────────────
@@ -87,11 +114,13 @@ export const modelForUserType = (type) => {
  * their role's defaults otherwise. Customers have no modules.
  */
 export const effectiveModules = (user) => {
-  if (!user?.role) return [];
-  if (isAdmin(user)) return [...MODULES];
+  const roles = rolesOf(user);
+  if (roles.length === 0) return [];
+  if (roles.includes("admin")) return [...MODULES];
   const explicit = Array.isArray(user.modules) ? user.modules.filter((m) => MODULES.includes(m)) : [];
   if (explicit.length) return explicit;
-  return [...(ROLE_DEFAULT_MODULES[user.role] ?? [])];
+  // Several roles: the union of what each one opens.
+  return [...new Set(roles.flatMap((r) => ROLE_DEFAULT_MODULES[r] ?? []))];
 };
 
 export const hasModule = (user, module) => effectiveModules(user).includes(module);
@@ -138,7 +167,7 @@ export const canManageEmployee = (actor, target) => {
   if (isHr(actor) && target?.role && !isAdmin(target) && String(target._id) !== String(actor._id)) return true;
   if (!isManager(actor)) return false;
   if (!target?.role || isManagerOrAdmin(target)) return false;
-  return isSameFamily(actor, target);
+  return managesFamilyOf(actor, target);
 };
 
 /**
@@ -148,7 +177,7 @@ export const canManageEmployee = (actor, target) => {
 export const canViewEmployee = (actor, target) => {
   if (canViewHr(actor)) return true;
   if (actor?._id && String(actor._id) === String(target?._id)) return true;
-  return isManager(actor) && isSameFamily(actor, target);
+  return managesFamilyOf(actor, target);
 };
 
 /**
@@ -160,7 +189,7 @@ export const assignableRoles = (actor) => {
   if (isAdmin(actor)) return [...ROLES];
   if (isHr(actor)) return ROLES.filter((r) => r !== "admin");
   if (!isManager(actor)) return [];
-  return [roleFamily(actor.role)];
+  return managedFamiliesOf(actor);
 };
 
 // ── Cross-collection e-mail uniqueness ────────────────────────────────────────
