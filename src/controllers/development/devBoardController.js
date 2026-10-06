@@ -2,7 +2,9 @@ import DevBoard from "../../models/DevBoard.js";
 import DevList from "../../models/DevList.js";
 import DevCard from "../../models/DevCard.js";
 import DevCardComment from "../../models/DevCardComment.js";
-import { boardScopeFilter } from "../../utils/developmentScope.js";
+import Department from "../../models/Department.js";
+import { boardScopeFilter, canSeeAllBoards } from "../../utils/developmentScope.js";
+import { importTicketsForBoard } from "../../utils/devTicketSync.js";
 import { escapeRegex } from "../../utils/escapeRegex.js";
 import {
   PERSON_FIELDS,
@@ -15,13 +17,21 @@ import {
   loadBoardInScope,
   requireBoardAdmin,
   validDevelopers,
+  forbidden,
 } from "./shared.js";
 
 const populateBoard = (q) =>
-  q.populate("createdBy", PERSON_FIELDS).populate("members", PERSON_FIELDS);
+  q
+    .populate("createdBy", PERSON_FIELDS)
+    .populate("members", PERSON_FIELDS)
+    .populate("ticketRule.department", "name")
+    .populate("ticketRule.employee", "firstName lastName email");
 
 const populateCard = (q) =>
-  q.populate("assignedTo", PERSON_FIELDS).populate("createdBy", "firstName lastName");
+  q
+    .populate("assignedTo", PERSON_FIELDS)
+    .populate("createdBy", "firstName lastName")
+    .populate("ticket", "ticketNumber subject status");
 
 // @desc    Boards the caller may see
 // @route   GET /api/development/boards?archived=false&search=
@@ -168,6 +178,57 @@ const setMembers = async (req, res) => {
   }
 };
 
+export const TICKET_RULE_MESSAGE = "Only admins and the development manager can link tickets to a board.";
+
+// @desc    Link tickets to the board: tickets of a department assigned to an
+//          employee get a card here. Setting it imports the matching open
+//          tickets; `null` (or no department/employee) removes the rule and
+//          leaves existing cards alone.
+// @route   PUT /api/development/boards/:id/ticket-rule   { department, employee, list? } | { ticketRule: null }
+const setTicketRule = async (req, res) => {
+  try {
+    const board = await loadBoardInScope(req, req.params.id);
+    if (!board) return notFound(res);
+    // Pulls ticketing data onto the board, so only people who see every board decide it
+    if (!canSeeAllBoards(req.user)) return forbidden(res, TICKET_RULE_MESSAGE);
+
+    const { department, employee, list } = req.body ?? {};
+    if (req.body?.ticketRule === null || (!department && !employee)) {
+      board.ticketRule = null;
+      await board.save();
+      return ok(res, { board: await populateBoard(DevBoard.findById(board._id)), imported: 0 }, "Ticket link removed");
+    }
+
+    if (!isValidId(department) || !(await Department.exists({ _id: department }))) {
+      return badRequest(res, "Choose an existing department");
+    }
+    const { ids, invalid } = await validDevelopers([employee]);
+    if (!ids.length || invalid.length) {
+      return badRequest(res, "The employee must be active and able to open the development module");
+    }
+    let listId = null;
+    if (list) {
+      if (!isValidId(list) || !(await DevList.exists({ _id: list, board: board._id }))) {
+        return badRequest(res, "The column must be a list on this board");
+      }
+      listId = list;
+    } else if (!(await DevList.exists({ board: board._id }))) {
+      return badRequest(res, "Add a column to the board first — linked tickets land in it");
+    }
+
+    board.ticketRule = { department, employee: ids[0], list: listId, setBy: req.user._id };
+    await board.save();
+    const imported = await importTicketsForBoard(board);
+    ok(
+      res,
+      { board: await populateBoard(DevBoard.findById(board._id)), imported },
+      imported ? `Ticket link saved — ${imported} open ticket${imported === 1 ? "" : "s"} added` : "Ticket link saved",
+    );
+  } catch (error) {
+    fail(res, error, "Error saving the ticket link");
+  }
+};
+
 // @desc    Add a label to the board
 // @route   POST /api/development/boards/:id/labels
 const addLabel = async (req, res) => {
@@ -234,6 +295,7 @@ export {
   updateBoard,
   deleteBoard,
   setMembers,
+  setTicketRule,
   addLabel,
   updateLabel,
   deleteLabel,
