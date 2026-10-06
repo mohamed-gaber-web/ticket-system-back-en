@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { isAdmin, isManager, roleFamily } from "./access.js";
+import { isAdmin, hasRole } from "./access.js";
 
 /**
  * The single authority for "what may this caller see and touch on the
@@ -34,8 +34,7 @@ const callerId = (user) => idOf(user?._id ?? user);
 // ── Role predicates ───────────────────────────────────────────────────────────
 
 /** Sees and shapes every board: admins and the development manager. */
-export const canSeeAllBoards = (user) =>
-  isAdmin(user) || (isManager(user) && roleFamily(user?.role) === "developer");
+export const canSeeAllBoards = (user) => isAdmin(user) || hasRole(user, "developer_manager");
 
 // ── Board membership ──────────────────────────────────────────────────────────
 

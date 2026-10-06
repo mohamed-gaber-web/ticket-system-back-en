@@ -5,6 +5,7 @@ import {
   canEditLead,
   canManageActivity,
   activityScopeFilter,
+  ownLeadActivityFilter,
 } from "../utils/teleSalesScope.js";
 
 // Recalculate nextFollowUpDate on a lead. Exported so leadStatusController can
@@ -162,6 +163,7 @@ export const getUpcomingFollowUps = async (req, res) => {
 
     const filter = {
       ...activityScopeFilter(req, "createdBy"),
+      ...(await ownLeadActivityFilter(req)),
       status: "Pending",
       reminderDate: { $gte: now, $lte: in7Days },
     };

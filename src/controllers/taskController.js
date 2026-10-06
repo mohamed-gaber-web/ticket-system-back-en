@@ -2,7 +2,8 @@ import mongoose from "mongoose";
 import Task from "../models/Task.js";
 import { getWeekNumber } from "../utils/weekUtils.js";
 
-import { isAdmin, isManager } from "../utils/access.js";
+import { isAdmin, departmentsOf, managedFamiliesOf, isManagerRole, FAMILY_DEPARTMENT_NAME } from "../utils/access.js";
+import Department from "../models/Department.js";
 // Whitelist of sortable fields → actual document path used by the aggregation $sort.
 // Guards against injection and lets the client sort on populated names + computed delay.
 const SORT_FIELDS = {
@@ -25,21 +26,32 @@ const SORT_FIELDS = {
 
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
 
+/** The caller's primary department, as an ObjectId (or null). */
 const callerDepartmentId = (req) => {
   const dept = req.user?.department;
   if (!dept) return null;
   return toObjectId(typeof dept === "object" ? dept._id : dept);
 };
 
+/** Every department the caller is filed under — primary and extra — as id strings. */
+const callerDepartmentIds = (req) => departmentsOf(req.user);
+
+/** Is this task in one of the caller's departments? */
+const inCallerDepartments = (req, task) =>
+  callerDepartmentIds(req).includes(String(task?.department?._id ?? task?.department));
+
 /**
  * The department boundary every task query starts from. Admins see every
- * department (and may narrow to one); everyone else is pinned to their own — a
- * marketing employee with no department sees nothing, never everything.
+ * department (and may narrow to one); everyone else sees the tasks of ANY of
+ * their departments (OR), and may narrow to one of them — an employee with no
+ * department sees nothing, never everything.
  */
 const departmentScope = (req, requested) => {
   if (isAdmin(req.user)) return requested ? { department: toObjectId(requested) } : {};
-  const own = callerDepartmentId(req);
-  return own ? { department: own } : { _id: { $in: [] } };
+  const own = callerDepartmentIds(req);
+  if (own.length === 0) return { _id: { $in: [] } };
+  if (requested && own.includes(String(requested))) return { department: toObjectId(requested) };
+  return { department: { $in: own.map(toObjectId) } };
 };
 
 /** Is this employee named on the task — assignee, responsible, or creator? */
@@ -51,15 +63,35 @@ const isTaskOwner = (req, task) => {
 };
 
 /**
- * May the caller change or delete this task? Admins anything; a manager
- * anything in their own department; a plain employee only tasks they are named
- * on. The department check runs first so an out-of-department id answers 404.
+ * The departments where the caller has MANAGER rights over tasks: their primary
+ * department when their primary role is a manager role, plus the department of
+ * each family they manage (Sales, Marketing). A manager role never lends rights
+ * over a department that merely came with another role. Cached per request.
  */
-const canWriteTask = (req, task) => {
+const managedDepartmentIds = async (req) => {
+  if (req._managedDepartmentIds) return req._managedDepartmentIds;
+  const ids = new Set();
+  if (isManagerRole(req.user?.role) && req.user?.department) ids.add(String(req.user.department._id ?? req.user.department));
+  const names = managedFamiliesOf(req.user).map((f) => FAMILY_DEPARTMENT_NAME[f]).filter(Boolean);
+  if (names.length) {
+    const depts = await Department.find({ name: { $in: names.map((n) => new RegExp(`^${n}$`, "i")) } }).select("_id").lean();
+    depts.forEach((d) => ids.add(String(d._id)));
+  }
+  req._managedDepartmentIds = [...ids];
+  return req._managedDepartmentIds;
+};
+
+/**
+ * May the caller change or delete this task? Admins anything; a manager
+ * anything in a department they manage; anyone else only tasks of their
+ * departments they are named on. The department check runs first so an
+ * out-of-department id answers 404.
+ */
+const canWriteTask = async (req, task) => {
   if (isAdmin(req.user)) return true;
-  const own = callerDepartmentId(req);
-  if (!own || String(task.department?._id ?? task.department) !== String(own)) return false;
-  if (isManager(req.user)) return true;
+  if (!inCallerDepartments(req, task)) return false;
+  const dept = String(task.department?._id ?? task.department);
+  if ((await managedDepartmentIds(req)).includes(dept)) return true;
   return isTaskOwner(req, task);
 };
 
@@ -336,9 +368,7 @@ const getTaskById = async (req, res) => {
     const task = await populateTask(Task.findById(req.params.id));
 
     // Reading follows the same department boundary as the list
-    const own = callerDepartmentId(req);
-    const inScope =
-      task && (isAdmin(req.user) || (own && String(task.department?._id ?? task.department) === String(own)));
+    const inScope = task && (isAdmin(req.user) || inCallerDepartments(req, task));
     if (!inScope) {
       return res.status(404).json({ success: false, message: "Task not found" });
     }
@@ -355,8 +385,12 @@ const createTask = async (req, res) => {
   try {
     const { name, description, category, startDate, endDate, assignedTo, responsible, duration, status, parentTask } = req.body;
 
-    // Only an admin files a task under another department
-    const department = isAdmin(req.user) ? req.body.department : callerDepartmentId(req);
+    // Only an admin files a task under any department; anyone else under one of
+    // theirs (the one they picked, else their primary department).
+    const picked = req.body.department ? String(req.body.department) : null;
+    const department = isAdmin(req.user)
+      ? req.body.department
+      : picked && callerDepartmentIds(req).includes(picked) ? picked : callerDepartmentId(req);
 
     // Weeks are always derived from the dates (the client shows the same values read-only).
     const body = { ...req.body, department, status: status || "pending", ...weeksFromDates(startDate, endDate) };
@@ -416,7 +450,7 @@ const updateTask = async (req, res) => {
     const { name, description, department, category, startDate, endDate, assignedTo, responsible, duration, status, parentTask, postpone } = req.body;
 
     const existing = await Task.findById(req.params.id);
-    if (!existing || !canWriteTask(req, existing)) {
+    if (!existing || !(await canWriteTask(req, existing))) {
       return res.status(404).json({ success: false, message: "Task not found" });
     }
 
@@ -865,7 +899,7 @@ const getTaskReport = async (req, res) => {
 const deleteTask = async (req, res) => {
   try {
     const task = await Task.findById(req.params.id);
-    if (!task || !canWriteTask(req, task)) {
+    if (!task || !(await canWriteTask(req, task))) {
       return res.status(404).json({ success: false, message: "Task not found" });
     }
     // Cascade-delete all subtasks belonging to this task

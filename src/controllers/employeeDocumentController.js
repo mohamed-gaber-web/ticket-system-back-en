@@ -76,7 +76,7 @@ const notFound = (res, what = "Employee") => res.status(404).json({ success: fal
 const loadEmployee = async (req, { write = false } = {}) => {
   if (!canViewHr(req.user) || !mongoose.isValidObjectId(req.params.id)) return null;
   // `modules` is needed by canManageEmployee's privileged-account check
-  const employee = await Consultant.findById(req.params.id).select("role modules firstName lastName");
+  const employee = await Consultant.findById(req.params.id).select("role extraRoles modules firstName lastName");
   if (!employee) return null;
   if (write && !canManageEmployee(req.user, employee)) return null;
   return employee;

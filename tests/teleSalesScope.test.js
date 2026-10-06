@@ -215,12 +215,15 @@ describe("teamScopeFilter", () => {
 });
 
 describe("leadScopeFilter", () => {
-  it("shows an agent every lead of their team, assigned to them or not", () => {
-    const filter = leadScopeFilter(req({ role: "sales", team: EGYPT }));
+  it("shows an agent only the leads of their team assigned to them", () => {
+    const me = oid();
+    const filter = leadScopeFilter(req({ role: "sales", team: EGYPT, id: me }));
     assert.equal(String(filter.team), String(EGYPT));
-    assert.equal(filter.assignedTo, undefined);
+    assert.equal(String(filter.assignedTo), String(me));
     // ObjectId, not string: getLeadStats feeds this straight into aggregate().
     assert.ok(filter.team instanceof mongoose.Types.ObjectId);
+    assert.ok(filter.assignedTo instanceof mongoose.Types.ObjectId);
+    assert.equal(filter.$or, undefined);
   });
 
   it("spans every ticked team — Team A and B — and nothing else", () => {
@@ -275,25 +278,28 @@ describe("activityScopeFilter", () => {
 // ── Reading a lead ────────────────────────────────────────────────────────────
 
 describe("canViewLead", () => {
-  it("shows an agent every lead of their team — theirs, a colleague's and the unassigned pool", () => {
+  it("shows an agent only their own leads — never a colleague's or the unassigned pool", () => {
     const me = oid();
     const r = req({ role: "sales", team: EGYPT, id: me });
     assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: me })), true);
-    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: oid() })), true);
-    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: null })), true);
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: { _id: me } })), true);
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: oid() })), false);
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: null })), false);
   });
 
-  it("shows a two-team employee both teams, and still REFUSES the third", () => {
-    const r = req({ role: "sales", team: EGYPT, teams: [EGYPT, KSA] });
-    assert.equal(canViewLead(r, lead({ team: EGYPT })), true);
-    assert.equal(canViewLead(r, lead({ team: KSA })), true);
-    assert.equal(canViewLead(r, lead({ team: UAE })), false);
+  it("shows a two-team employee their leads in both teams, and still REFUSES the third", () => {
+    const me = oid();
+    const r = req({ role: "sales", team: EGYPT, teams: [EGYPT, KSA], id: me });
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: me })), true);
+    assert.equal(canViewLead(r, lead({ team: KSA, assignedTo: me })), true);
+    assert.equal(canViewLead(r, lead({ team: UAE, assignedTo: me })), false);
   });
 
   it("lets a ticked team stand alone, without a home team", () => {
-    const r = req({ role: "sales", team: null, teams: [KSA] });
-    assert.equal(canViewLead(r, lead({ team: KSA })), true);
-    assert.equal(canViewLead(r, lead({ team: EGYPT })), false);
+    const me = oid();
+    const r = req({ role: "sales", team: null, teams: [KSA], id: me });
+    assert.equal(canViewLead(r, lead({ team: KSA, assignedTo: me })), true);
+    assert.equal(canViewLead(r, lead({ team: EGYPT, assignedTo: me })), false);
   });
 
   it("shows a sales manager their whole team and nothing else", () => {
@@ -338,10 +344,10 @@ describe("canEditLead", () => {
     assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: me })), true);
   });
 
-  it("lets an agent work any lead of their team, assigned or not", () => {
+  it("stops an agent touching a colleague's lead or the unassigned pool", () => {
     const r = req({ role: "sales", team: EGYPT });
-    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: null })), true);
-    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: oid() })), true);
+    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: null })), false);
+    assert.equal(canEditLead(r, lead({ team: EGYPT, assignedTo: oid() })), false);
   });
 
   it("stops an agent touching another team's lead", () => {
@@ -365,9 +371,10 @@ describe("canEditLead", () => {
   });
 
   it("handles a populated team the same as a bare id", () => {
-    const r = req({ role: "sales", team: EGYPT });
-    assert.equal(canEditLead(r, { team: { _id: EGYPT }, assignedTo: null }), true);
-    assert.equal(canEditLead(r, { team: { _id: KSA }, assignedTo: null }), false);
+    const me = oid();
+    const r = req({ role: "sales", team: EGYPT, id: me });
+    assert.equal(canEditLead(r, { team: { _id: EGYPT }, assignedTo: me }), true);
+    assert.equal(canEditLead(r, { team: { _id: KSA }, assignedTo: me }), false);
   });
 });
 
@@ -534,8 +541,8 @@ describe("resolveCreateTeam", () => {
 // ── Claiming from the shared pool ─────────────────────────────────────────────
 
 describe("canClaimLead", () => {
-  it("lets an agent take an unassigned lead of their team", () => {
-    assert.equal(canClaimLead(req({ role: "sales", team: EGYPT }), lead({ team: EGYPT, assignedTo: null })), true);
+  it("gives an agent no unassigned lead to take — they never see the pool", () => {
+    assert.equal(canClaimLead(req({ role: "sales", team: EGYPT }), lead({ team: EGYPT, assignedTo: null })), false);
   });
 
   it("lets a sales manager take an unassigned lead on their team", () => {

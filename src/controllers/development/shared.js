@@ -62,7 +62,7 @@ export const requireBoardAdmin = (req, res, board) => {
 export const validDevelopers = async (ids = []) => {
   const wanted = [...new Set((ids ?? []).map(String).filter(isValidId))];
   if (!wanted.length) return { ids: [], invalid: [] };
-  const people = await Consultant.find({ _id: { $in: wanted }, status: "active" }).select("role modules");
+  const people = await Consultant.find({ _id: { $in: wanted }, status: "active" }).select("role extraRoles modules");
   const okIds = people.filter((p) => hasModule(p, "development")).map((p) => String(p._id));
   const invalid = wanted.filter((id) => !okIds.includes(id));
   return { ids: okIds, invalid };

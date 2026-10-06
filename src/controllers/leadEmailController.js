@@ -2,7 +2,7 @@ import Lead from "../models/Lead.js";
 import LeadEmail from "../models/LeadEmail.js";
 import { canViewLead, canEditLead, canManageLeadChild, leadScopeFilter } from "../utils/teleSalesScope.js";
 import { syncLeadInbox } from "../utils/leadInboxSync.js";
-import { salesMailbox } from "../utils/emailService.js";
+import { salesMailbox, salesMailboxName } from "../utils/emailService.js";
 import {
   validateAndSend,
   threadSummary,
@@ -21,7 +21,7 @@ import {
 // @route   GET /api/leads/emails/sender
 // @access  Private (tele-sales)
 export const getLeadEmailSender = (req, res) =>
-  res.status(200).json({ success: true, data: { mailbox: salesMailbox() } });
+  res.status(200).json({ success: true, data: { mailbox: salesMailbox(), name: salesMailboxName() } });
 
 export const sendAndRecord = async (req, lead, replyTo = null) => {
   const fail = (status, message, extra = {}) => ({ status, body: { success: false, message, ...extra } });

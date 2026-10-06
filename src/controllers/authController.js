@@ -39,6 +39,7 @@ const findAccountByEmail = async (email, requestedType, select = "") => {
 const populateForSession = async (user, userType) => {
   if (userType === USER_TYPES.EMPLOYEE) {
     if (user.department) await user.populate("department", "name isActive");
+    if (user.departments?.length) await user.populate("departments", "name isActive");
     // The tele-sales team has to arrive populated, or the UI cannot name the
     // pipeline it is showing — it would only have a bare id to work with.
     if (user.teleSalesTeam) await user.populate("teleSalesTeam", "name code isActive");
@@ -217,6 +218,7 @@ export const getProfile = async (req, res) => {
     } else {
       user = await Model.findById(req.user._id)
         .populate("department", "name isActive")
+        .populate("departments", "name isActive")
         // Sales employees are scoped to their tele-sales teams.
         .populate("teleSalesTeam", "name code isActive")
         .populate("teleSalesTeams", "name code isActive");
@@ -249,10 +251,12 @@ export const updateProfile = async (req, res) => {
       "password",
       "email",
       "role",
+      "extraRoles",
       "status",
       "refreshToken",
       "modules",
       "department",
+      "departments",
       "teleSalesTeam",
       "teleSalesTeams",
       "company",

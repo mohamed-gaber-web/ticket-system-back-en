@@ -11,7 +11,7 @@ import {
   resolveCreateTeam,
   resolveExistingTeam,
 } from "../utils/teleSalesScope.js";
-import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
+import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE, withAnyRole } from "../utils/access.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import { deleteAllEmployeeDocuments } from "./employeeDocumentController.js";
 
@@ -34,7 +34,7 @@ const LEGACY_ROLE_MAP = { user: "sales", manager: "sales_manager" };
 const normalizeAgentRole = (role) => LEGACY_ROLE_MAP[role] ?? role;
 
 // What the roster screens read from an agent record.
-const AGENT_FIELDS = "firstName lastName email phone role status teleSalesTeam teleSalesTeams profilePicture lastLogin createdAt updatedAt";
+const AGENT_FIELDS = "firstName lastName email phone role extraRoles status teleSalesTeam teleSalesTeams profilePicture lastLogin createdAt updatedAt";
 
 /** Present an employee document the way the tele-sales UI expects it. */
 const toAgent = (doc) => {
@@ -143,17 +143,22 @@ export const getAllAgents = async (req, res) => {
   try {
     const { status, role, search, team, page = 1, limit = 20 } = req.query;
 
-    // Everyone who shares a team with the caller — by home team or a ticked one.
-    // ANDed so the search's own $or below cannot replace it.
+    // The sales employees (Sales or Sales Manager role, as primary or extra role)
+    // who share a team with the caller — by home team or a ticked one. Nobody
+    // else is an agent: not admins, marketing, or other staff with a tele-sales
+    // module override. ANDed so the search's own $or below cannot replace it.
     const filter = {
-      $and: [agentScopeFilter(req)],
-      role: { $in: AGENT_ROLES },
+      $and: [
+        agentScopeFilter(req),
+        withAnyRole(AGENT_ROLES),
+      ],
     };
 
-    // Narrow to one team: any team for a cross-team reader, one of their own for
-    // anyone else.
-    if (team && (isCrossTeamReader(req) || isCallerTeam(req, team))) {
-      filter.$and.push(onTeamFilter(team));
+    // Narrow to one team (the Team → Agent lookups on the lead form, import and
+    // filters): any team for a cross-team reader, one of their own for anyone
+    // else. A team the caller isn't on matches nobody — never the whole roster.
+    if (team) {
+      filter.$and.push(isCrossTeamReader(req) || isCallerTeam(req, team) ? onTeamFilter(team) : { _id: { $in: [] } });
     }
 
     if (status) filter.status = status;

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
-import { ROLES, MODULES, roleFamily, FAMILY_DEPARTMENT_NAME } from "../utils/roles.js";
+import { ROLES, MODULES, roleFamily, FAMILY_DEPARTMENT_NAME, splitRoles, rolesOf } from "../utils/roles.js";
 
 /**
  * The EMPLOYEE record — every member of staff, whatever they do. The model keeps
@@ -159,6 +159,13 @@ const consultantSchema = mongoose.Schema(
       enum: ROLES,
       default: "consultant",
     },
+    // Roles held besides the primary `role` (multi-role employees). Permission
+    // checks OR across all of them (rolesOf in roles.js); admin, when held, is
+    // always the primary role.
+    extraRoles: {
+      type: [{ type: String, enum: ROLES }],
+      default: [],
+    },
     // Admin-set override of the role's default modules. Empty → defaults apply.
     modules: {
       type: [{ type: String, enum: MODULES }],
@@ -168,6 +175,12 @@ const consultantSchema = mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Department",
       default: null,
+    },
+    // Departments besides the primary `department`. The modules that group by
+    // Department (tasks) read all of them with OR logic — see departmentsOf.
+    departments: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Department" }],
+      default: [],
     },
     // Which tele-sales team (country) a `sales` employee works inside. Admins,
     // sales managers and marketing read across every team and ignore it. A sales
@@ -250,6 +263,8 @@ consultantSchema.virtual("team").get(function () {
 // Index for faster queries
 consultantSchema.index({ status: 1 });
 consultantSchema.index({ role: 1 });
+consultantSchema.index({ extraRoles: 1 });
+consultantSchema.index({ departments: 1 });
 consultantSchema.index({ modules: 1 });
 consultantSchema.index({ teleSalesTeam: 1, status: 1 });
 consultantSchema.index({ teleSalesTeams: 1 });
@@ -274,17 +289,74 @@ consultantSchema.pre("save", async function () {
   this.password = await bcrypt.hash(this.password, 12);
 });
 
-// Keep `department` in step with the role for the families that own one, so the
-// tasks and requests modules (which group by Department) never see a sales person
-// filed under Marketing because someone forgot to change the dropdown.
+// One clean role list: no duplicates, admin always primary, extras never repeat it.
+consultantSchema.pre("save", function () {
+  if (!this.isModified("role") && !this.isModified("extraRoles")) return;
+  const { role, extraRoles } = splitRoles(this.role, this.extraRoles);
+  if (role) this.role = role;
+  this.extraRoles = extraRoles;
+});
+
+// Keep the departments in step with the roles for the families that own one, so
+// the tasks and requests modules (which group by Department) never see a sales
+// person filed under Marketing because someone forgot to change the dropdown.
+// The primary role's family department is the primary department; any other
+// role's family department joins `departments`.
 consultantSchema.pre("save", async function () {
-  if (!this.isModified("role") && this.department) return;
-  const deptName = FAMILY_DEPARTMENT_NAME[roleFamily(this.role)];
-  if (!deptName) return;
-  const Department = mongoose.model("Department");
-  let dept = await Department.findOne({ name: new RegExp(`^${deptName}$`, "i") }).select("_id");
-  if (!dept) dept = await Department.create({ name: deptName });
-  this.department = dept._id;
+  const rolesChanged = this.isModified("role") || this.isModified("extraRoles");
+  if (rolesChanged || !this.department) {
+    const Department = mongoose.model("Department");
+    const familyDept = async (role) => {
+      const deptName = FAMILY_DEPARTMENT_NAME[roleFamily(role)];
+      if (!deptName) return null;
+      let dept = await Department.findOne({ name: new RegExp(`^${deptName}$`, "i") }).select("_id");
+      if (!dept) dept = await Department.create({ name: deptName });
+      return dept._id;
+    };
+    const primary = await familyDept(this.role);
+    if (primary && (rolesChanged || !this.department)) {
+      // A department picked in this same save is kept as an extra one; a stale
+      // one left over from the previous role is replaced, as before.
+      const picked = this.isNew || this.isModified("department") || this.isModified("departments");
+      const previous = this.department;
+      this.department = primary;
+      if (picked && previous && String(previous._id ?? previous) !== String(primary)) {
+        this.departments = [previous, ...(this.departments || [])];
+      }
+    }
+    if (rolesChanged) {
+      // A family department whose family is no longer held leaves with the role —
+      // from the extra departments and from the primary slot alike (the next
+      // extra department, if any, becomes primary).
+      const held = new Set(rolesOf(this).map(roleFamily));
+      for (const [family, deptName] of Object.entries(FAMILY_DEPARTMENT_NAME)) {
+        if (held.has(family)) continue;
+        const dept = await Department.findOne({ name: new RegExp(`^${deptName}$`, "i") }).select("_id");
+        if (!dept) continue;
+        const stale = (d) => String(d?._id ?? d) === String(dept._id);
+        this.departments = (this.departments || []).filter((d) => !stale(d));
+        if (this.department && stale(this.department)) {
+          this.department = this.departments.length ? this.departments[0] : null;
+          this.departments = this.departments.slice(1);
+        }
+      }
+      for (const role of rolesOf(this).filter((r) => r !== this.role)) {
+        const id = await familyDept(role);
+        if (id) this.departments = [...(this.departments || []), id];
+      }
+    }
+  }
+  // De-duplicated, and never repeating the primary department.
+  if (this.isModified("departments") || this.isModified("department")) {
+    const primaryId = this.department ? String(this.department._id ?? this.department) : null;
+    const seen = new Set(primaryId ? [primaryId] : []);
+    this.departments = (this.departments || []).filter((d) => {
+      const id = String(d?._id ?? d);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
 });
 
 // Method to compare passwords

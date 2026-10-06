@@ -9,9 +9,11 @@ import {
   USER_TYPES,
   isAdmin,
   isManager,
-  isSameFamily,
   familyRoles,
-  roleFamily,
+  familiesOf,
+  managedFamiliesOf,
+  managesFamilyOf,
+  withAnyRole,
 } from "../utils/access.js";
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "N/A");
@@ -60,13 +62,12 @@ const notifyAdminsInApp = async (request, admins, employeeName) => {
   );
 };
 
-// Everyone who may review this request: every admin, plus the managers of the
-// requester's own family (a sales request reaches the sales manager, not the
-// marketing one).
+// Everyone who may review this request: every admin, plus the managers of each
+// of the requester's families (a sales request reaches the sales manager, not
+// the marketing one; a sales + developer employee reaches both managers).
 const reviewersFor = async (request) => {
-  const family = roleFamily(request.employee?.role);
-  const roles = ["admin", ...familyRoles(family).filter((r) => r.endsWith("_manager"))];
-  return Consultant.find({ role: { $in: roles }, status: "active" })
+  const managerRoles = familiesOf(request.employee).flatMap((f) => familyRoles(f).filter((r) => r.endsWith("_manager")));
+  return Consultant.find({ ...withAnyRole(["admin", ...managerRoles]), status: "active" })
     .select("firstName lastName email")
     .lean();
 };
@@ -115,7 +116,7 @@ const notifyAdminsOfRequest = async (request) => {
 
 const populateRequest = (q) =>
   q
-    .populate("employee", "firstName lastName email role")
+    .populate("employee", "firstName lastName email role extraRoles")
     .populate("department", "name")
     .populate("reviewedBy", "firstName lastName email");
 
@@ -145,17 +146,16 @@ const resolveDepartmentId = (req) => {
 };
 
 // May the caller approve / reject / cancel THIS request? Admins anywhere;
-// managers for the people of their own family. `request.employee` must be
-// populated with its role for the family comparison.
+// managers for the people of a family they manage. `request.employee` must be
+// populated with its roles for the family comparison.
 const canReview = (req, request) => {
   if (isAdmin(req.user)) return true;
-  if (!isManager(req.user)) return false;
-  return isSameFamily(req.user, request.employee);
+  return managesFamilyOf(req.user, request.employee);
 };
 
-// The employee ids a manager reviews: everyone in their family.
+// The employee ids a manager reviews: everyone in the families they manage.
 const familyEmployeeIds = (user) =>
-  Consultant.find({ role: { $in: familyRoles(roleFamily(user.role)) } }).distinct("_id");
+  Consultant.find(withAnyRole(managedFamiliesOf(user).flatMap(familyRoles))).distinct("_id");
 
 // Apply an approved vacation to the employee's balance (once).
 const employeeIdOf = (request) => request.employee?._id ?? request.employee;
@@ -377,7 +377,7 @@ const createRequest = async (req, res) => {
 // @route   PATCH /api/employee-requests/:id/approve
 const approveRequest = async (req, res) => {
   try {
-    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role");
+    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role extraRoles");
     if (!request) {
       return res.status(404).json({ success: false, message: "Request not found" });
     }
@@ -425,7 +425,7 @@ const approveRequest = async (req, res) => {
 // @route   PATCH /api/employee-requests/:id/reject
 const rejectRequest = async (req, res) => {
   try {
-    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role");
+    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role extraRoles");
     if (!request) {
       return res.status(404).json({ success: false, message: "Request not found" });
     }
@@ -470,7 +470,7 @@ const rejectRequest = async (req, res) => {
 // @route   PATCH /api/employee-requests/:id/cancel
 const cancelRequest = async (req, res) => {
   try {
-    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role");
+    const request = await EmployeeRequest.findById(req.params.id).populate("employee", "role extraRoles");
     if (!request) {
       return res.status(404).json({ success: false, message: "Request not found" });
     }

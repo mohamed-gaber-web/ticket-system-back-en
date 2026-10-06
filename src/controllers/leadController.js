@@ -1,5 +1,8 @@
 import Lead, { normalizeEgyptPhone, PHONE_INTL_REGEX, LEAD_SOURCE_DETAILS, isValidUrl } from "../models/Lead.js";
 import IndustrySector from "../models/IndustrySector.js";
+import Product from "../models/Product.js";
+import Company from "../models/Company.js";
+import Customer from "../models/Customer.js";
 import CallLog from "../models/CallLog.js";
 import FollowUp from "../models/FollowUp.js";
 import LeadAttachment from "../models/LeadAttachment.js";
@@ -24,6 +27,14 @@ import {
 } from "../utils/teleSalesScope.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import { DEFAULT_VALUE_CURRENCY, IMPORTED_LEAD_STATUS } from "../config/leadStatusWorkflow.js";
+import {
+  REQUIRED_LEAD_FIELDS,
+  NEXT_STAGE,
+  stageOf,
+  stageFilter,
+  missingLeadFields,
+  hasIdentity,
+} from "../utils/leadStages.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
@@ -32,23 +43,76 @@ const valueChanged = (lead, updateData) =>
   (updateData.potentialValue !== undefined && Number(updateData.potentialValue) !== Number(lead.potentialValue ?? NaN)) ||
   (updateData.valueCurrency !== undefined && updateData.valueCurrency !== lead.valueCurrency);
 
-// Fields the lead form requires on both add and update. Enforced here rather than
-// as schema `required` so bulk import (which reads whatever the source file has)
-// keeps working — see importLeads.
-const REQUIRED_LEAD_FIELDS = [
-  { field: "companyName", label: "Company name" },
-  { field: "contactPersonName", label: "Contact person" },
-  { field: "phonePrimary", label: "Phone (primary)" },
-  { field: "email", label: "Email" },
-  { field: "website", label: "Website" },
-  { field: "leadSource", label: "Lead source" },
-  { field: "entityType", label: "Entity type" },
-  { field: "industrySector", label: "Industry sector" },
-  { field: "businessClassification", label: "Business classification" },
-];
+// Enum fields a Data record may leave empty. A form sends "" for "not chosen",
+// which the schema enum would reject, so it is stored as null instead.
+const OPTIONAL_ENUM_FIELDS = ["leadSource", "entityType", "priority", "valueCurrency"];
+const blankEnumsToNull = (data) => {
+  OPTIONAL_ENUM_FIELDS.forEach((f) => {
+    if (data[f] !== undefined && !cleanStr(data[f])) data[f] = null;
+  });
+  return data;
+};
+
+const IDENTITY_MESSAGE = "Enter at least a company, contact person, phone or email.";
+
+// What a lead shows of each Customer Need product.
+const NEED_PRODUCT_FIELDS = "name sku category status";
+// What a lead shows of its existing-customer contact (never login data).
+export const ACCOUNT_CONTACT_FIELDS = "contactPerson companyName email phone address city country";
+
+const ACCOUNT_KEYS = ["isExistingCustomer", "account", "accountContact"];
 
 /**
- * Validate the mandatory lead-form fields.
+ * The existing-customer link a create/update asks for. "No" clears the account
+ * and contact; "Yes" needs a real company, and a contact (optional) must be one
+ * of that company's people. Returns { set } (nothing to change when the request
+ * doesn't touch these fields), or { error }.
+ */
+const resolveAccountLink = async (body, current = {}) => {
+  if (!ACCOUNT_KEYS.some((k) => body[k] !== undefined)) return { set: {} };
+  const flag = body.isExistingCustomer !== undefined ? body.isExistingCustomer : current.isExistingCustomer;
+  const existing = flag === true || flag === "true";
+  if (!existing) return { set: { isExistingCustomer: false, account: null, accountContact: null } };
+
+  const account = cleanStr(body.account !== undefined ? body.account?._id ?? body.account : current.account);
+  if (!account) return { error: "Choose the existing customer's company." };
+  if (!mongoose.isValidObjectId(account) || !(await Company.exists({ _id: account }))) {
+    return { error: "The selected company does not exist." };
+  }
+
+  const contact = cleanStr(body.accountContact !== undefined ? body.accountContact?._id ?? body.accountContact : current.accountContact);
+  if (contact) {
+    if (!mongoose.isValidObjectId(contact) || !(await Customer.exists({ _id: contact, company: account }))) {
+      return { error: "The selected contact does not belong to that company." };
+    }
+  }
+  return { set: { isExistingCustomer: true, account, accountContact: contact || null } };
+};
+
+/**
+ * Validate the Customer Need products a create/update asks for: well-formed ids,
+ * de-duplicated, each a real catalog product. A product newly added must be
+ * active; one the lead already carries may stay after it is archived, so saving
+ * an old lead never fails on a catalog change. Returns { ids } or { error }.
+ */
+const resolveNeedProducts = async (raw, current = []) => {
+  if (raw === null || raw === "") return { ids: [] };
+  if (!Array.isArray(raw)) return { error: "Customer need must be a list of products." };
+  const ids = [...new Set(raw.map((p) => String(p?._id ?? p)))];
+  if (ids.some((id) => !mongoose.isValidObjectId(id))) return { error: "Invalid product in customer need." };
+  if (ids.length > 50) return { error: "Choose at most 50 products as customer need." };
+  if (ids.length === 0) return { ids };
+  const found = await Product.find({ _id: { $in: ids } }).select("name status").lean();
+  if (found.length !== ids.length) return { error: "A selected product no longer exists in the catalog." };
+  const kept = new Set(current.map(String));
+  const archived = found.find((p) => p.status !== "active" && !kept.has(String(p._id)));
+  if (archived) return { error: `"${archived.name}" is archived — choose an active product.` };
+  return { ids };
+};
+
+/**
+ * Validate the mandatory lead-form fields (REQUIRED_LEAD_FIELDS — Leads and
+ * Opportunities only; a Data record has none).
  * On create every field must be present; on update ({ partial: true }) only the
  * fields actually sent are checked, so a PATCH of one field isn't forced to
  * resend the rest — but any of them sent blank is still rejected.
@@ -74,7 +138,7 @@ const validateRequiredLeadFields = (body, { partial = false } = {}) => {
  * `source` is the effective source after the update, so a PATCH that changes only
  * one of the two is still checked against the other's stored value.
  */
-const resolveLeadSourceDetail = (source, rawDetail) => {
+export const resolveLeadSourceDetail = (source, rawDetail) => {
   const spec = LEAD_SOURCE_DETAILS[source];
   if (!spec) return { value: "", errors: [] };
 
@@ -91,12 +155,25 @@ const resolveLeadSourceDetail = (source, rawDetail) => {
 // @access  Private (tele_sales)
 export const createLead = async (req, res) => {
   try {
-    const requiredErrors = validateRequiredLeadFields(req.body);
-    if (requiredErrors.length > 0) {
-      return res.status(400).json({ success: false, message: "Validation error", errors: requiredErrors });
+    // A record starts either as raw Data (nothing mandatory) or as a Lead (every
+    // mandatory field). An Opportunity only ever comes from converting a Lead.
+    const isData = req.body.salesType === "Data";
+    if (isData) {
+      if (!hasIdentity(req.body)) {
+        return res.status(400).json({ success: false, message: "Validation error", errors: [IDENTITY_MESSAGE] });
+      }
+    } else {
+      const requiredErrors = validateRequiredLeadFields(req.body);
+      if (requiredErrors.length > 0) {
+        return res.status(400).json({ success: false, message: "Validation error", errors: requiredErrors });
+      }
     }
 
-    const detail = resolveLeadSourceDetail(req.body.leadSource, req.body.leadSourceDetail);
+    // Data keeps whatever detail was typed; the source's rule is checked when the
+    // record is converted to a Lead.
+    const detail = isData
+      ? { value: cleanStr(req.body.leadSourceDetail) || undefined, errors: [] }
+      : resolveLeadSourceDetail(req.body.leadSource, req.body.leadSourceDetail);
     if (detail.errors.length > 0) {
       return res.status(400).json({ success: false, message: "Validation error", errors: detail.errors });
     }
@@ -114,29 +191,54 @@ export const createLead = async (req, res) => {
       return res.status(400).json({ success: false, message: teamError });
     }
 
-    // Assign_To is mandatory, but only a manager/admin picks it explicitly — a
-    // plain agent doesn't see the control (see LeadFormModal), so a blank value
-    // from them means "assign it to me", not "leave it unassigned".
+    // Assign_To is mandatory on a Lead, but only a manager/admin picks it
+    // explicitly — a plain agent doesn't see the control (see LeadFormModal), so a
+    // blank value from them means "assign it to me". A manager may leave a Data
+    // record unassigned, in the pool they hand out later.
     const managerOrAdmin = isLeadManager(req);
     let assignedTo = cleanStr(req.body.assignedTo);
     if (!assignedTo) {
-      if (managerOrAdmin) {
+      if (!managerOrAdmin) {
+        assignedTo = String(req.user._id);
+      } else if (!isData) {
         return res.status(400).json({ success: false, message: "Validation error", errors: ["Assign to is required"] });
       }
-      assignedTo = String(req.user._id);
     }
 
-    const assigneeError = await assigneeTeamError(team, assignedTo);
-    if (assigneeError) {
-      return res.status(400).json({ success: false, message: assigneeError });
+    if (assignedTo) {
+      const assigneeError = await assigneeTeamError(team, assignedTo);
+      if (assigneeError) {
+        return res.status(400).json({ success: false, message: assigneeError });
+      }
+    }
+
+    const needs = await resolveNeedProducts(req.body.customerNeedProducts ?? []);
+    if (needs.error) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: [needs.error] });
+    }
+    const accountLink = await resolveAccountLink(req.body);
+    if (accountLink.error) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: [accountLink.error] });
     }
 
     const lead = await Lead.create({
-      ...req.body,
+      ...blankEnumsToNull({ ...req.body }),
+      customerNeedProducts: needs.ids,
+      isExistingCustomer: false,
+      account: null,
+      accountContact: null,
+      ...accountLink.set,
+      salesType: isData ? "Data" : "Lead",
+      // Raw data has had nothing done with it yet, like an imported row.
+      ...(isData && { status: IMPORTED_LEAD_STATUS }),
       team,
-      assignedTo,
+      assignedTo: assignedTo || undefined,
       leadSourceDetail: detail.value,
       createdBy: req.user._id,
+      convertedToLeadAt: undefined,
+      convertedToLeadBy: undefined,
+      convertedToOpportunityAt: undefined,
+      convertedToOpportunityBy: undefined,
       // Only the form's own value; the workflow alone records the others.
       ...(Number(req.body.potentialValue) > 0
         ? { valueSource: "manual", valueUpdatedAt: new Date() }
@@ -158,15 +260,15 @@ export const createLead = async (req, res) => {
 };
 
 const EMAIL_REGEX = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
-const VALID_STATUSES = Lead.schema.path("status").enumValues;
 const VALID_SOURCES = Lead.schema.path("leadSource").enumValues;
 const VALID_PRIORITIES = Lead.schema.path("priority").enumValues;
 const VALID_ENTITY_TYPES = Lead.schema.path("entityType").enumValues;
-const VALID_SALES_TYPES = Lead.schema.path("salesType").enumValues;
 // Industry sectors are an admin-managed lookup (not a schema enum), so the valid
 // set is loaded from the IndustrySector collection at import time — see importLeads.
 
-// @desc    Bulk import leads (from Excel / CSV / markdown parsed on the client)
+// @desc    Bulk import leads (from Excel / CSV / markdown parsed on the client).
+//          Every imported row lands in the Data stage, and nothing on a row is
+//          mandatory beyond something to identify it by.
 // @route   POST /api/leads/import
 // @access  Private (anyone who writes tele-sales — into one of their own teams; admins into any)
 export const importLeads = async (req, res) => {
@@ -208,9 +310,10 @@ export const importLeads = async (req, res) => {
     // Imported leads have had no action taken on them yet. Only a manager or admin
     // may import straight into a later status (batch-wide or per row) — for anyone
     // else that would skip the workflow's transition rules and mandatory inputs.
-    const mayPickStatus = isLeadManager(req);
-    const defaultStatus =
-      mayPickStatus && VALID_STATUSES.includes(req.body.status) ? req.body.status : IMPORTED_LEAD_STATUS;
+    // Imports land in Data, and raw data has had nothing done with it: every row
+    // starts in "No Action" (the same rule as Add Data), whatever the file or the
+    // batch options say — a later status only comes through the workflow.
+    const defaultStatus = IMPORTED_LEAD_STATUS;
     const defaultSource = VALID_SOURCES.includes(req.body.leadSource) ? req.body.leadSource : undefined;
     // Batch-wide originating file for auditing (spec field 13: Data_Source)
     const defaultDataSource = cleanStr(req.body.dataSource) || undefined;
@@ -235,43 +338,44 @@ export const importLeads = async (req, res) => {
       const phoneSecondary = cleanStr(row.phoneSecondary ?? row.phone2 ?? row.mobile2);
       const phoneOther = cleanStr(row.phoneOther);
 
-      if (!contactPersonName) {
-        errors.push({ row: rowNum, reason: "Missing contact person name" });
+      const email = cleanStr(row.email);
+      const companyName = cleanStr(row.companyName);
+
+      // Raw data may be incomplete, but a row with nothing to identify it is junk.
+      if (!hasIdentity({ companyName, contactPersonName, phonePrimary: primaryNorm, phoneSecondary, phoneOther, email })) {
+        errors.push({ row: rowNum, reason: "Empty row — no company, contact, phone or email" });
         return;
       }
 
-      // A lead needs at least one reachable number; the primary is the identity.
-      const dedupKey = primaryNorm || normalizeEgyptPhone(phoneSecondary) || phoneOther;
-      if (!dedupKey) {
-        errors.push({ row: rowNum, reason: "Missing phone number" });
-        return;
-      }
+      // The primary phone is the identity used to spot duplicates; rows without
+      // any number can't be de-duplicated and are simply kept.
+      const dedupKey = primaryNorm || normalizeEgyptPhone(phoneSecondary) || phoneOther || null;
 
       // Duplicate detection within the batch (by primary phone identity)
-      if (skipDuplicates && seenInBatch.has(dedupKey)) {
+      if (dedupKey && skipDuplicates && seenInBatch.has(dedupKey)) {
         errors.push({ row: rowNum, reason: "Duplicate phone within file", duplicate: true });
         return;
       }
-      seenInBatch.add(dedupKey);
+      if (dedupKey) seenInBatch.add(dedupKey);
 
-      const email = cleanStr(row.email);
       const tags = Array.isArray(row.tags) ? row.tags.map(cleanStr).filter(Boolean) : [];
       const department = cleanStr(row.department);
       if (department) tags.push(department);
 
       const doc = {
-        companyName: cleanStr(row.companyName) || contactPersonName, // company is required; fall back to contact
-        contactPersonName,
+        companyName: companyName || contactPersonName || undefined,
+        contactPersonName: contactPersonName || undefined,
         jobTitle: cleanStr(row.jobTitle) || undefined,
         industry: cleanStr(row.industry) || undefined,
         leadSource: VALID_SOURCES.includes(row.leadSource) ? row.leadSource : defaultSource,
         priority: VALID_PRIORITIES.includes(row.priority) ? row.priority : "Medium",
-        status: mayPickStatus && VALID_STATUSES.includes(row.status) ? row.status : defaultStatus,
+        status: defaultStatus,
         tags,
         team,
         createdBy: req.user._id,
         // ── Spec fields ──────────────────────────────────────────────────────
-        salesType: VALID_SALES_TYPES.includes(row.salesType) ? row.salesType : undefined,
+        // Imports are the Data tab's alone: whatever the file says, rows start as raw data.
+        salesType: "Data",
         entityType: VALID_ENTITY_TYPES.includes(row.entityType) ? row.entityType : undefined,
         businessClassification: cleanStr(row.businessClassification) || undefined,
         industrySector: VALID_INDUSTRY_SECTORS.has(row.industrySector) ? row.industrySector : undefined,
@@ -304,13 +408,13 @@ export const importLeads = async (req, res) => {
     let toInsert = candidates;
     let dbDuplicates = 0;
     if (skipDuplicates && candidates.length > 0) {
-      const allKeys = [...new Set(candidates.map((c) => c.dedupKey))];
+      const allKeys = [...new Set(candidates.map((c) => c.dedupKey).filter(Boolean))];
       const existing = await Lead.find({ team, phonePrimary: { $in: allKeys } })
         .select("phonePrimary")
         .lean();
       const existingNumbers = new Set(existing.map((l) => l.phonePrimary));
       toInsert = candidates.filter((c) => {
-        const dup = existingNumbers.has(c.dedupKey);
+        const dup = Boolean(c.dedupKey) && existingNumbers.has(c.dedupKey);
         if (dup) {
           dbDuplicates += 1;
           errors.push({ row: c.rowNum, reason: "Phone already exists in this team", duplicate: true });
@@ -437,7 +541,7 @@ export const getAllLeads = async (req, res) => {
     // waiting to be handed out.
     if (assignedTo) filter.assignedTo = assignedTo === "unassigned" ? null : assignedTo;
     if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
-    if (salesType) filter.salesType = salesType;
+    if (salesType) filter.salesType = stageFilter(salesType);
     if (entityType) filter.entityType = entityType;
     if (industrySector) filter.industrySector = industrySector;
     if (country) filter.country = country;
@@ -496,10 +600,15 @@ export const getLeadStats = async (req, res) => {
   try {
     // aggregate() does not cast its $match the way find() does, which is why
     // leadScopeFilter hands back real ObjectIds rather than strings. The dashboard
-    // therefore counts (and values) only the caller's teams.
-    const matchStage = { ...leadScopeFilter(req) };
+    // therefore counts (and values) only what the caller may see. `salesType`
+    // narrows the status and value figures to one stage; `byStage` always counts
+    // all three.
+    const scope = { ...leadScopeFilter(req) };
+    const matchStage = req.query.salesType
+      ? { ...scope, salesType: stageFilter(req.query.salesType) }
+      : scope;
 
-    const [stats, valueRows] = await Promise.all([
+    const [stats, valueRows, stageRows] = await Promise.all([
       Lead.aggregate([
         { $match: matchStage },
         { $group: { _id: "$status", count: { $sum: 1 }, value: { $sum: "$potentialValue" } } },
@@ -529,7 +638,14 @@ export const getLeadStats = async (req, res) => {
         },
         { $sort: { total: -1 } },
       ]),
+      Lead.aggregate([
+        { $match: scope },
+        { $group: { _id: { $ifNull: ["$salesType", "Lead"] }, count: { $sum: 1 } } },
+      ]),
     ]);
+
+    const byStage = { Data: 0, Lead: 0, Opportunity: 0 };
+    stageRows.forEach((r) => { byStage[r._id] = (byStage[r._id] ?? 0) + r.count; });
 
     const total = stats.reduce((sum, s) => sum + s.count, 0);
     const values = { open: [], won: [], lost: [] };
@@ -539,7 +655,7 @@ export const getLeadStats = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: { total, byStatus: stats, values },
+      data: { total, byStatus: stats, values, byStage },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching stats", error: error.message });
@@ -555,6 +671,9 @@ export const getLeadById = async (req, res) => {
       .populate("assignedTo", "firstName lastName email phone")
       .populate("createdBy", "firstName lastName")
       .populate("team", "name code")
+      .populate("customerNeedProducts", NEED_PRODUCT_FIELDS)
+      .populate("account", "name")
+      .populate("accountContact", ACCOUNT_CONTACT_FIELDS)
       .populate({
         path: "callLogs",
         populate: { path: "calledBy", select: "firstName lastName" },
@@ -603,20 +722,25 @@ export const updateLead = async (req, res) => {
       return res.status(403).json({ success: false, message: "Your role cannot edit this lead." });
     }
 
-    const requiredErrors = validateRequiredLeadFields(req.body, { partial: true });
-    if (requiredErrors.length > 0) {
-      return res.status(400).json({ success: false, message: "Validation error", errors: requiredErrors });
+    // A Data record has no mandatory fields; Leads and Opportunities keep theirs.
+    const isData = stageOf(lead) === "Data";
+    if (!isData) {
+      const requiredErrors = validateRequiredLeadFields(req.body, { partial: true });
+      if (requiredErrors.length > 0) {
+        return res.status(400).json({ success: false, message: "Validation error", errors: requiredErrors });
+      }
     }
 
     // "status" is intentionally excluded — status changes go exclusively through
     // POST /api/leads/:id/status (see leadStatusController.js), which enforces
-    // transition rules and per-status mandatory fields.
+    // transition rules and per-status mandatory fields. So is "salesType": the stage
+    // only moves forward through POST /api/leads/:id/convert.
     const allowedFields = [
       "companyName", "contactPersonName", "email", "jobTitle",
       "industry", "leadSource", "priority", "potentialValue", "valueCurrency",
-      "painPoints", "customerNeeds", "budget", "isDecisionMaker", "tags",
+      "painPoints", "customerNeeds", "customerNeedProducts", "budget", "isDecisionMaker", "tags",
       // Spec fields (tele-sales lead specification)
-      "salesType", "entityType", "businessClassification", "industrySector", "country",
+      "entityType", "businessClassification", "industrySector", "country",
       "fullAddress", "phonePrimary", "phoneSecondary",
       "phoneOther", "website", "dataSource",
     ];
@@ -647,6 +771,22 @@ export const updateLead = async (req, res) => {
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) updateData[field] = req.body[field];
     });
+    blankEnumsToNull(updateData);
+    const accountLink = await resolveAccountLink(req.body, lead);
+    if (accountLink.error) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: [accountLink.error] });
+    }
+    Object.assign(updateData, accountLink.set);
+    if (updateData.customerNeedProducts !== undefined) {
+      const needs = await resolveNeedProducts(updateData.customerNeedProducts, lead.customerNeedProducts);
+      if (needs.error) {
+        return res.status(400).json({ success: false, message: "Validation error", errors: [needs.error] });
+      }
+      updateData.customerNeedProducts = needs.ids;
+    }
+    if (isData && !hasIdentity({ ...lead.toObject(), ...updateData })) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: [IDENTITY_MESSAGE] });
+    }
 
     // A value typed on the form is a manual figure; it stays until the workflow
     // records a quoted / revised / final one (see leadStatusController).
@@ -698,7 +838,9 @@ export const updateLead = async (req, res) => {
     if (req.body.leadSource !== undefined || req.body.leadSourceDetail !== undefined) {
       const source = req.body.leadSource !== undefined ? req.body.leadSource : lead.leadSource;
       const raw = req.body.leadSourceDetail !== undefined ? req.body.leadSourceDetail : lead.leadSourceDetail;
-      const detail = resolveLeadSourceDetail(source, raw);
+      const detail = isData
+        ? { value: cleanStr(raw), errors: [] }
+        : resolveLeadSourceDetail(source, raw);
       if (detail.errors.length > 0) {
         return res.status(400).json({ success: false, message: "Validation error", errors: detail.errors });
       }
@@ -710,7 +852,10 @@ export const updateLead = async (req, res) => {
       runValidators: true,
     })
       .populate("assignedTo", "firstName lastName email")
-      .populate("team", "name code");
+      .populate("team", "name code")
+      .populate("customerNeedProducts", NEED_PRODUCT_FIELDS)
+      .populate("account", "name")
+      .populate("accountContact", ACCOUNT_CONTACT_FIELDS);
 
     // A lead's call logs and reminders carry their own copy of the team so the
     // activity feeds can filter without joining back to Lead. When the lead moves,
@@ -738,6 +883,63 @@ export const updateLead = async (req, res) => {
       return res.status(400).json({ success: false, message: "Validation error", errors: messages });
     }
     res.status(500).json({ success: false, message: "Error updating lead", error: error.message });
+  }
+};
+
+// @desc    Move a record one stage forward: Data → Lead, or Lead → Opportunity
+// @route   POST /api/leads/:id/convert  { to: "Lead" | "Opportunity" }
+// @access  Private (whoever may edit the record: its owner, their manager, an admin)
+export const convertLead = async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || !canViewLead(req, lead)) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+    if (!canEditLead(req, lead)) {
+      return res.status(403).json({ success: false, message: "Your role cannot convert this record." });
+    }
+
+    const from = stageOf(lead);
+    const to = req.body?.to;
+    if (!to || NEXT_STAGE[from] !== to) {
+      return res.status(400).json({
+        success: false,
+        message: NEXT_STAGE[from]
+          ? `This record is in ${from}; it can only be converted to ${NEXT_STAGE[from]}.`
+          : "An Opportunity is the last stage.",
+      });
+    }
+    if (to === "Opportunity" && lead.status === "Closed Lost") {
+      return res.status(400).json({ success: false, message: "A Closed Lost lead cannot become an opportunity." });
+    }
+
+    // Both conversions need a fully qualified record — an Opportunity is a Lead
+    // that has moved on, so it never has less than one.
+    const missing = missingLeadFields(lead);
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Complete the mandatory fields first: ${missing.join(", ")}.`,
+        errors: missing.map((label) => `${label} is required`),
+        missing,
+      });
+    }
+
+    const now = new Date();
+    const update = to === "Lead"
+      ? { salesType: "Lead", convertedToLeadAt: now, convertedToLeadBy: req.user._id }
+      : { salesType: "Opportunity", convertedToOpportunityAt: now, convertedToOpportunityBy: req.user._id };
+
+    const updated = await Lead.findByIdAndUpdate(lead._id, update, { new: true, runValidators: true })
+      .populate("assignedTo", "firstName lastName email")
+      .populate("team", "name code")
+      .populate("customerNeedProducts", NEED_PRODUCT_FIELDS)
+      .populate("account", "name")
+      .populate("accountContact", ACCOUNT_CONTACT_FIELDS);
+
+    res.status(200).json({ success: true, message: `Converted to ${to === "Lead" ? "a Lead" : "an Opportunity"}`, data: updated });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error converting record", error: error.message });
   }
 };
 

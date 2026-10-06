@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
-import { USER_TYPES, normalizeUserType } from "../utils/access.js";
+import { USER_TYPES, normalizeUserType, rolesOf } from "../utils/access.js";
 
 // The role/module/manager decisions all live in access.js; re-exported here so a
 // route file needs one import for everything auth-related.
@@ -101,7 +101,7 @@ export const authorize = (...userTypes) => {
 // Authorize specific roles within user types
 export const authorizeRole = (...roles) => {
   return (req, res, next) => {
-    if (!req.user.role || !roles.includes(req.user.role)) {
+    if (!rolesOf(req.user).some((r) => roles.includes(r))) {
       return res.status(403).json({
         success: false,
         message: `Role '${req.user.role}' is not authorized to access this route`,
