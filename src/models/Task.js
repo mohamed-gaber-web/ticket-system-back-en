@@ -1,5 +1,33 @@
 import mongoose from "mongoose";
 
+// One entry per time the task was postponed. Append-only history — each
+// postponement moves the task's endDate to `date`; `previousEndDate` keeps
+// the end date it replaced.
+const postponementSchema = mongoose.Schema(
+  {
+    date: {
+      type: Date,
+      required: [true, "Postponing date is required"],
+    },
+    previousEndDate: {
+      type: Date,
+      default: null,
+    },
+    comment: {
+      type: String,
+      required: [true, "Postponing comment is required"],
+      trim: true,
+      maxlength: [1000, "Postponing comment cannot exceed 1000 characters"],
+    },
+    postponedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+      default: null,
+    },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } }
+);
+
 const taskSchema = mongoose.Schema(
   {
     taskNumber: {
@@ -85,6 +113,10 @@ const taskSchema = mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Task",
       default: null,
+    },
+    postponements: {
+      type: [postponementSchema],
+      default: [],
     },
   },
   {
