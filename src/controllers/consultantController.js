@@ -15,6 +15,7 @@ import {
   familyRoles,
   canManageEmployee,
   canViewHr,
+  canViewEmployee,
   assignableRoles,
   emailTakenElsewhere,
   EMAIL_TAKEN_MESSAGE,
@@ -252,7 +253,8 @@ const getConsultantById = async (req, res) => {
         select: "title status priority createdAt",
       });
 
-    if (!consultant) {
+    // Out of scope answers 404 like a missing id, so ids can't be probed
+    if (!consultant || !canViewEmployee(req.user, consultant)) {
       return res.status(404).json({
         success: false,
         message: "Consultant not found",
@@ -655,8 +657,8 @@ const getConsultantTotalHours = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const consultant = await Consultant.findById(id).select("_id");
-    if (!consultant) {
+    const consultant = await Consultant.findById(id).select("_id role");
+    if (!consultant || !canViewEmployee(req.user, consultant)) {
       return res.status(404).json({ success: false, message: "Consultant not found" });
     }
 
@@ -709,8 +711,8 @@ const getConsultantMonthlyHours = async (req, res) => {
     const year = parseInt(req.query.year) || now.getFullYear();
     const month = req.query.month !== undefined ? parseInt(req.query.month) : now.getMonth();
 
-    const consultant = await Consultant.findById(id).select("_id");
-    if (!consultant) {
+    const consultant = await Consultant.findById(id).select("_id role");
+    if (!consultant || !canViewEmployee(req.user, consultant)) {
       return res.status(404).json({ success: false, message: "Consultant not found" });
     }
 

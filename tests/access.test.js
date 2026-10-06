@@ -26,6 +26,7 @@ import {
   requireManagerOrAdmin,
   requireEmployeeManager,
   canViewHr,
+  canViewEmployee,
   holdsPrivilegedModule,
 } from "../src/utils/access.js";
 
@@ -272,5 +273,30 @@ describe("privileged accounts (hr / admin module holders)", () => {
     assert.equal(canManageEmployee(hr, salesWithHr), false);
     assert.equal(canManageEmployee(hr, consultantWithAdmin), false);
     assert.equal(canManageEmployee(user("admin"), salesWithHr), true);
+  });
+});
+
+describe("canViewEmployee", () => {
+  const sm = user("sales_manager", { _id: "sm" });
+  const hr = user("consultant", { _id: "hr", modules: ["tickets", "hr"] });
+
+  it("admins and HR open anyone's record", () => {
+    for (const role of ROLES) {
+      assert.equal(canViewEmployee(user("admin", { _id: "a" }), user(role, { _id: "x" })), true, role);
+      assert.equal(canViewEmployee(hr, user(role, { _id: "x" })), true, role);
+    }
+  });
+
+  it("everyone opens their own record", () => {
+    for (const role of ROLES) assert.equal(canViewEmployee(user(role, { _id: "me" }), user(role, { _id: "me" })), true, role);
+  });
+
+  it("a manager opens only their own family; a plain employee no one else", () => {
+    assert.equal(canViewEmployee(sm, user("sales", { _id: "s1" })), true);
+    assert.equal(canViewEmployee(sm, user("consultant", { _id: "c1" })), false);
+    assert.equal(canViewEmployee(sm, user("developer", { _id: "d1" })), false);
+    assert.equal(canViewEmployee(sm, user("admin", { _id: "a1" })), false);
+    assert.equal(canViewEmployee(user("sales", { _id: "s2" }), user("sales", { _id: "s1" })), false);
+    assert.equal(canViewEmployee(user("consultant", { _id: "c2" }), user("consultant", { _id: "c1" })), false);
   });
 });

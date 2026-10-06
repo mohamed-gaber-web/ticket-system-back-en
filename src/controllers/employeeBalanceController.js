@@ -1,6 +1,5 @@
 import EmployeeBalance from "../models/EmployeeBalance.js";
-import Consultant from "../models/Consltant.js";
-import { USER_TYPES, isAdmin, isManager, familyRoles, roleFamily } from "../utils/access.js";
+import { USER_TYPES, canViewHr } from "../utils/access.js";
 
 // Every employee lives in one collection now; the polymorphic refPath is kept
 // only so rows written before the merge still resolve.
@@ -18,24 +17,16 @@ export const ensureBalance = async (employee, employeeModel, year) => {
   return balance;
 };
 
-// @desc    Get balances (admins: all; managers: their family; staff: only their own)
+// @desc    Get balances (admins and HR: all; everyone else: only their own)
 // @route   GET /api/employee-balances
 const getBalances = async (req, res) => {
   try {
     const { year, employee, employeeModel } = req.query;
     const query = {};
 
-    if (isAdmin(req.user)) {
+    if (canViewHr(req.user)) {
       if (employee) query.employee = employee;
       if (employeeModel) query.employeeModel = employeeModel;
-    } else if (isManager(req.user)) {
-      // A manager sees the balances of everyone in their family
-      const ids = await Consultant.find({
-        role: { $in: familyRoles(roleFamily(req.user.role)) },
-      }).distinct("_id");
-      query.employee = employee && ids.some((id) => String(id) === String(employee))
-        ? employee
-        : { $in: ids };
     } else {
       // Everyone else can only see their own balance
       query.employee = req.user._id;

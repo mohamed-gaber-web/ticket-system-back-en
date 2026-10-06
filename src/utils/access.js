@@ -142,6 +142,16 @@ export const canManageEmployee = (actor, target) => {
 };
 
 /**
+ * May `actor` open `target`'s employee record (profile, hours)? Admins and HR see
+ * everyone; anyone else only themselves, and a manager also their own family.
+ */
+export const canViewEmployee = (actor, target) => {
+  if (canViewHr(actor)) return true;
+  if (actor?._id && String(actor._id) === String(target?._id)) return true;
+  return isManager(actor) && isSameFamily(actor, target);
+};
+
+/**
  * The roles `actor` may hand out when creating or editing an employee. Admins may
  * assign any role; HR any role but admin; a manager only the plain role of their
  * own family.

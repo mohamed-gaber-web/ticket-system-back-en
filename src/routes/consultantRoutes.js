@@ -17,16 +17,16 @@ import {
   downloadEmployeeDocument,
   deleteEmployeeDocument,
 } from "../controllers/employeeDocumentController.js";
-import { protect, requireEmployee, requireAdmin, requireEmployeeManager } from "../middleware/authMiddleware.js";
+import { protect, requireEmployee, requireAdmin, requireModule } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Reading the roster is open to every employee (pickers need names); the
-// confidential HR file on each record is only returned to admins and HR. Writing
-// is for admins, HR and managers; the controller confines a manager to their own
-// family via canManageEmployee. Deleting stays admin-only.
+// Reading the roster is open to every employee (pickers need names); a single
+// record and its hours only to admins, HR, the employee and their family manager
+// (canViewEmployee), and the confidential HR file only to admins and HR. Writing
+// employees is the HR module's (admins always have it). Deleting stays admin-only.
 const consultantAuth = [protect, requireEmployee];
-const managerAuth = [protect, requireEmployeeManager];
+const managerAuth = [protect, requireModule("hr")];
 const adminAuth = [protect, requireAdmin];
 
 /**
