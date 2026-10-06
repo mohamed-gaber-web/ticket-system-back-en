@@ -20,7 +20,7 @@ import {
   setTicketAdminPoints,
 } from "../controllers/ticketController.js";
 import { protect, requireModule, requireAdmin, requireEmployee } from "../middleware/authMiddleware.js";
-import { trackTicketActivity } from "../utils/ticketActivity.js";
+import { trackTicketActivity, fromResponse } from "../utils/ticketActivity.js";
 
 const router = express.Router();
 
@@ -333,7 +333,7 @@ router.get("/number/:ticketNumber", getTicketByNumber);
  *       500:
  *         description: Server error
  */
-router.route("/").get(getAllTickets).post(createTicket);
+router.route("/").get(getAllTickets).post(trackTicketActivity("created", fromResponse), createTicket);
 
 router
   .route("/:id")

@@ -8,6 +8,7 @@ import {
   updateBoard,
   deleteBoard,
   setMembers,
+  setTicketRule,
   addLabel,
   updateLabel,
   deleteLabel,
@@ -53,6 +54,7 @@ router.get("/boards/:id", ...dev, getBoard);
 router.patch("/boards/:id", ...dev, updateBoard);
 router.delete("/boards/:id", ...dev, deleteBoard);
 router.put("/boards/:id/members", ...dev, setMembers);
+router.put("/boards/:id/ticket-rule", ...dev, setTicketRule);
 router.post("/boards/:id/labels", ...dev, addLabel);
 router.patch("/boards/:id/labels/:labelId", ...dev, updateLabel);
 router.delete("/boards/:id/labels/:labelId", ...dev, deleteLabel);

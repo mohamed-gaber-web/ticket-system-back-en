@@ -311,7 +311,23 @@ const populateTask = (queryOrDoc) =>
     .populate("createdBy", "firstName lastName")
     .populate("department", "name")
     .populate("category", "name")
-    .populate("parentTask", "taskNumber name startDate endDate");
+    .populate("parentTask", "taskNumber name startDate endDate")
+    .populate("postponements.postponedBy", "firstName lastName");
+
+// Validates an optional `postpone: { date, comment }` payload sent with an update.
+// Returns { error } or { entry } (entry is null when nothing was sent).
+const parsePostponement = (postpone) => {
+  if (postpone === undefined || postpone === null) return { entry: null };
+  if (typeof postpone !== "object") return { error: "Invalid postponement" };
+  const date = toDate(postpone.date);
+  const comment = typeof postpone.comment === "string" ? postpone.comment.trim() : "";
+  const errors = [];
+  if (!date) errors.push("Postponing date is required");
+  if (!comment) errors.push("Postponing comment is required");
+  else if (comment.length > 1000) errors.push("Postponing comment cannot exceed 1000 characters");
+  if (errors.length) return { error: errors };
+  return { entry: { date, comment } };
+};
 
 // @desc    Get single task
 // @route   GET /api/tasks/:id
@@ -397,7 +413,7 @@ const createTask = async (req, res) => {
 // @route   PATCH /api/tasks/:id
 const updateTask = async (req, res) => {
   try {
-    const { name, description, department, category, startDate, endDate, assignedTo, responsible, duration, status, parentTask } = req.body;
+    const { name, description, department, category, startDate, endDate, assignedTo, responsible, duration, status, parentTask, postpone } = req.body;
 
     const existing = await Task.findById(req.params.id);
     if (!existing || !canWriteTask(req, existing)) {
@@ -412,9 +428,25 @@ const updateTask = async (req, res) => {
       return res.status(400).json({ success: false, message: "Validation error", errors });
     }
 
+    // Optional postponement - appended to the task's history, never replaces it.
+    // The postponing date becomes the task's new end date (weeks, delay and the
+    // subtask window checks below all follow it).
+    const { entry: postponement, error: postponeError } = parsePostponement(postpone);
+    if (postponeError) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: [].concat(postponeError) });
+    }
+    if (postponement && existing.endDate && postponement.date <= existing.endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: [`Postponing date must be after the current end date (${fmtDay(existing.endDate)})`],
+      });
+    }
+    const endInput = postponement ? postponement.date : endDate;
+
     // Effective values after the update, used for the date-window checks.
     const start = startDate !== undefined ? toDate(startDate) : existing.startDate;
-    const end = endDate !== undefined ? toDate(endDate) : existing.endDate;
+    const end = endInput !== undefined ? toDate(endInput) : existing.endDate;
     if (!start || !end) {
       return res.status(400).json({ success: false, message: "Validation error", errors: ["Invalid start or end date"] });
     }
@@ -434,7 +466,7 @@ const updateTask = async (req, res) => {
     }
 
     // A main task's window must still contain all of its subtasks.
-    if (!effectiveParent && (startDate !== undefined || endDate !== undefined)) {
+    if (!effectiveParent && (startDate !== undefined || endInput !== undefined)) {
       const outside = await subtasksOutsideRange(existing._id, start, end);
       if (outside.length) {
         const names = outside.slice(0, 3).map((t) => t.taskNumber || t.name).join(", ");
@@ -455,10 +487,10 @@ const updateTask = async (req, res) => {
     if (department !== undefined && isAdmin(req.user)) updateData.department = department;
     if (category !== undefined) updateData.category = category;
     if (startDate !== undefined) updateData.startDate = start;
-    if (endDate !== undefined) updateData.endDate = end;
+    if (endInput !== undefined) updateData.endDate = end;
     if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
     if (responsible !== undefined) updateData.responsible = responsible;
-    if (startDate !== undefined || endDate !== undefined || existing.endWeek == null) {
+    if (startDate !== undefined || endInput !== undefined || existing.endWeek == null) {
       Object.assign(updateData, weeksFromDates(start, end));
     }
     if (duration !== undefined) updateData.duration = duration;
@@ -471,6 +503,11 @@ const updateTask = async (req, res) => {
       } else if (status !== "done") {
         updateData.completedAt = null;
       }
+    }
+    if (postponement) {
+      updateData.$push = {
+        postponements: { ...postponement, previousEndDate: existing.endDate ?? null, postponedBy: req.user?._id || null },
+      };
     }
 
     const updated = await populateTask(
@@ -654,6 +691,44 @@ const consultantNameExpr = {
   $trim: { input: { $concat: [{ $ifNull: ["$ref.firstName", ""] }, " ", { $ifNull: ["$ref.lastName", ""] }] } },
 };
 
+// Aggregation stages that replace each postponement's `postponedBy` id with
+// { _id, firstName, lastName } - the shape .populate() gives single-task reads.
+const populatePostponers = [
+  {
+    $lookup: {
+      from: "consultants",
+      localField: "postponements.postponedBy",
+      foreignField: "_id",
+      as: "_postponers",
+      pipeline: [{ $project: { firstName: 1, lastName: 1 } }],
+    },
+  },
+  {
+    $addFields: {
+      postponements: {
+        $map: {
+          input: { $ifNull: ["$postponements", []] },
+          as: "p",
+          in: {
+            $mergeObjects: [
+              "$$p",
+              {
+                postponedBy: {
+                  $arrayElemAt: [
+                    { $filter: { input: "$_postponers", as: "c", cond: { $eq: ["$$c._id", "$$p.postponedBy"] } } },
+                    0,
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+  { $project: { _postponers: 0 } },
+];
+
 // Hard cap on the detail rows returned to the client (exports are done client-side).
 const REPORT_ROW_LIMIT = 5000;
 
@@ -707,6 +782,8 @@ const getTaskReport = async (req, res) => {
                 delayed: { $sum: { $cond: [{ $gt: ["$delayDays", 0] }, 1, 0] } },
                 totalDelayDays: { $sum: "$delayDays" },
                 totalDuration: { $sum: { $ifNull: ["$duration", 0] } },
+                postponedTasks: { $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ["$postponements", []] } }, 0] }, 1, 0] } },
+                totalPostponements: { $sum: { $size: { $ifNull: ["$postponements", []] } } },
               },
             },
           ],
@@ -728,6 +805,7 @@ const getTaskReport = async (req, res) => {
             ...lookupOne("consultants", "assignedTo", { firstName: 1, lastName: 1, email: 1 }),
             ...lookupOne("consultants", "responsible", { firstName: 1, lastName: 1, email: 1 }),
             ...lookupOne("tasks", "parentTask", { taskNumber: 1, name: 1, startDate: 1, endDate: 1 }),
+            ...populatePostponers,
           ],
         },
       },
@@ -736,6 +814,7 @@ const getTaskReport = async (req, res) => {
     const t = facet.totals[0] ?? {
       total: 0, mainTasks: 0, subTasks: 0, pending: 0, inProgress: 0, done: 0,
       overdue: 0, doneLate: 0, delayed: 0, totalDelayDays: 0, totalDuration: 0,
+      postponedTasks: 0, totalPostponements: 0,
     };
     const completionRate = t.total > 0 ? Math.round((t.done / t.total) * 100) : 0;
     const onTimeRate = t.done > 0 ? Math.round(((t.done - t.doneLate) / t.done) * 100) : 0;
@@ -759,6 +838,8 @@ const getTaskReport = async (req, res) => {
           onTimeRate,
           avgDelayDays,
           totalDuration: Math.round(t.totalDuration * 10) / 10,
+          postponedTasks: t.postponedTasks,
+          totalPostponements: t.totalPostponements,
         },
         byStatus: [
           { status: "pending", count: t.pending },

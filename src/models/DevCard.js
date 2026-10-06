@@ -62,6 +62,8 @@ const devCardSchema = mongoose.Schema(
       required: true,
     },
     completedAt: { type: Date, default: null },
+    // The ticket this card was created from by the board's ticket rule, if any
+    ticket: { type: mongoose.Schema.Types.ObjectId, ref: "Ticket", default: null },
   },
   { timestamps: true }
 );
@@ -69,6 +71,8 @@ const devCardSchema = mongoose.Schema(
 devCardSchema.index({ board: 1, list: 1, position: 1 });
 devCardSchema.index({ assignedTo: 1 });
 devCardSchema.index({ dueDate: 1 });
+// One card per ticket per board, however often the ticket is re-assigned
+devCardSchema.index({ board: 1, ticket: 1 }, { unique: true, partialFilterExpression: { ticket: { $type: "objectId" } } });
 
 const DevCard = mongoose.model("DevCard", devCardSchema);
 export default DevCard;
