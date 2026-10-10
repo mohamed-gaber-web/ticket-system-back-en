@@ -39,6 +39,13 @@ const followUpSchema = mongoose.Schema(
       ref: "TeleSalesTeam",
       default: null,
     },
+    // The status update that created this reminder automatically, so editing that
+    // update moves the reminder instead of adding a second one.
+    statusHistory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LeadStatusHistory",
+      default: null,
+    },
   },
   {
     timestamps: true,

@@ -23,6 +23,14 @@ export const stageOf = (lead) => lead?.salesType || "Lead";
 /** The Mongo filter for one stage; "Lead" also matches legacy records with no salesType. */
 export const stageFilter = (stage) => (stage === "Lead" ? { $in: ["Lead", null] } : stage);
 
+/**
+ * What a stage's tab lists. An Opportunity was a Lead first and stays visible on
+ * the Leads tab as well — it is one record, shown in both. Use stageFilter where
+ * the exact stage matters (scripts, conversion).
+ */
+export const viewStageFilter = (stage) =>
+  stage === "Lead" ? { $in: ["Lead", "Opportunity", null] } : stageFilter(stage);
+
 // Fields a Lead (and an Opportunity) must have. Enforced in the controller on the
 // lead form and on conversion, never as schema `required`, so Data records and
 // bulk imports may be incomplete.

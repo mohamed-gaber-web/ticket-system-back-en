@@ -11,6 +11,7 @@ import {
   NEXT_STAGE,
   stageOf,
   stageFilter,
+  viewStageFilter,
   missingLeadFields,
   hasIdentity,
 } from "../src/utils/leadStages.js";
@@ -41,6 +42,12 @@ describe("stages", () => {
     assert.equal(stageOf({ salesType: "Data" }), "Data");
     assert.deepEqual(stageFilter("Lead"), { $in: ["Lead", null] });
     assert.equal(stageFilter("Data"), "Data");
+  });
+
+  it("keeps Opportunities on the Leads tab as well as their own", () => {
+    assert.deepEqual(viewStageFilter("Lead"), { $in: ["Lead", "Opportunity", null] });
+    assert.equal(viewStageFilter("Opportunity"), "Opportunity");
+    assert.equal(viewStageFilter("Data"), "Data");
   });
 });
 

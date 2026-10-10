@@ -40,6 +40,14 @@ const leadStatusHistorySchema = mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    // Set when the entry's details were corrected in place (Quick Update → Edit
+    // on the current status) instead of logging a new update.
+    editedAt: { type: Date, default: null },
+    editedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+      default: null,
+    },
   },
   {
     timestamps: true,

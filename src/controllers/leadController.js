@@ -31,7 +31,7 @@ import {
   REQUIRED_LEAD_FIELDS,
   NEXT_STAGE,
   stageOf,
-  stageFilter,
+  viewStageFilter,
   missingLeadFields,
   hasIdentity,
 } from "../utils/leadStages.js";
@@ -541,7 +541,7 @@ export const getAllLeads = async (req, res) => {
     // waiting to be handed out.
     if (assignedTo) filter.assignedTo = assignedTo === "unassigned" ? null : assignedTo;
     if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
-    if (salesType) filter.salesType = stageFilter(salesType);
+    if (salesType) filter.salesType = viewStageFilter(salesType);
     if (entityType) filter.entityType = entityType;
     if (industrySector) filter.industrySector = industrySector;
     if (country) filter.country = country;
@@ -575,6 +575,7 @@ export const getAllLeads = async (req, res) => {
         .populate("assignedTo", "firstName lastName email")
         .populate("createdBy", "firstName lastName")
         .populate("team", "name code")
+        .populate("customerNeedProducts", "name")
         .skip(skip)
         .limit(parseInt(limit))
         .sort({ createdAt: -1 }),
@@ -601,11 +602,11 @@ export const getLeadStats = async (req, res) => {
     // aggregate() does not cast its $match the way find() does, which is why
     // leadScopeFilter hands back real ObjectIds rather than strings. The dashboard
     // therefore counts (and values) only what the caller may see. `salesType`
-    // narrows the status and value figures to one stage; `byStage` always counts
-    // all three.
+    // narrows the status and value figures to one tab (Leads includes
+    // Opportunities); `byStage` always counts all three tabs.
     const scope = { ...leadScopeFilter(req) };
     const matchStage = req.query.salesType
-      ? { ...scope, salesType: stageFilter(req.query.salesType) }
+      ? { ...scope, salesType: viewStageFilter(req.query.salesType) }
       : scope;
 
     const [stats, valueRows, stageRows] = await Promise.all([
@@ -646,6 +647,8 @@ export const getLeadStats = async (req, res) => {
 
     const byStage = { Data: 0, Lead: 0, Opportunity: 0 };
     stageRows.forEach((r) => { byStage[r._id] = (byStage[r._id] ?? 0) + r.count; });
+    // The Leads tab lists Opportunities too (viewStageFilter), so its count does.
+    byStage.Lead += byStage.Opportunity;
 
     const total = stats.reduce((sum, s) => sum + s.count, 0);
     const values = { open: [], won: [], lost: [] };

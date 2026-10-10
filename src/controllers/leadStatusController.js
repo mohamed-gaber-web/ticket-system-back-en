@@ -28,11 +28,26 @@ import {
  * already checked the lead is visible and editable. Shared by the single-lead
  * endpoint and the bulk update, so both follow exactly the same rules.
  *
- * Returns { ok: true, lead, historyEntry, followUp } or
+ * With `amendLast`, the current status's last update is corrected in place
+ * instead: same status only, the newest history entry is rewritten (not added),
+ * counters are not bumped again and its reminder is moved rather than duplicated.
+ *
+ * Returns { ok: true, lead, historyEntry, followUp, amended } or
  *         { ok: false, code, message, errors?, allowed? }.
  */
-export const applyStatusChange = async (req, lead, newStatus, values = {}) => {
+export const applyStatusChange = async (req, lead, newStatus, values = {}, { amendLast = false } = {}) => {
   if (!newStatus) return { ok: false, code: 400, message: "newStatus is required" };
+
+  let amendEntry = null;
+  if (amendLast) {
+    if (newStatus !== lead.status) {
+      return { ok: false, code: 400, message: "Only the current status's last update can be edited." };
+    }
+    amendEntry = await LeadStatusHistory.findOne({ lead: lead._id }).sort({ changedAt: -1 });
+    if (!amendEntry || amendEntry.newStatus !== newStatus) {
+      return { ok: false, code: 409, message: `There is no "${newStatus}" update to edit — log a new one instead.` };
+    }
+  }
 
   if (!LEAD_STATUS_WORKFLOW[lead.status]) {
     return {
@@ -54,10 +69,14 @@ export const applyStatusChange = async (req, lead, newStatus, values = {}) => {
     };
   }
 
-  const { valid, errors } = validateStatusFields(newStatus, values, lead);
+  // An edit describes the same attempt / meeting round it was logged as, so the
+  // auto-numbered fields read the counters from before that update bumped them.
+  const basis = amendEntry && statusConfig.increments ? countersBefore(lead, statusConfig.increments) : lead;
+
+  const { valid, errors } = validateStatusFields(newStatus, values, basis);
   if (!valid) return { ok: false, code: 400, message: "Validation error", errors };
 
-  const fieldValues = buildFieldValueMap(newStatus, values, lead);
+  const fieldValues = buildFieldValueMap(newStatus, values, basis);
 
   const setUpdate = { status: newStatus };
   // "New Lead" carries an owner. Only a manager may hand the lead to someone
@@ -107,7 +126,8 @@ export const applyStatusChange = async (req, lead, newStatus, values = {}) => {
   }
 
   const mongoUpdate = { $set: setUpdate };
-  if (statusConfig.increments) mongoUpdate.$inc = statusConfig.increments;
+  // An edit corrects the last attempt / meeting round, it is not another one.
+  if (statusConfig.increments && !amendEntry) mongoUpdate.$inc = statusConfig.increments;
 
   const oldStatus = lead.status;
   const updatedLead = await Lead.findByIdAndUpdate(lead._id, mongoUpdate, {
@@ -115,33 +135,78 @@ export const applyStatusChange = async (req, lead, newStatus, values = {}) => {
     runValidators: true,
   }).populate("assignedTo", "firstName lastName email");
 
-  const historyEntry = await LeadStatusHistory.createEntry(
-    lead._id,
-    oldStatus,
-    newStatus,
-    req.user._id,
-    req.userType,
-    fieldValues
-  );
+  let historyEntry;
+  if (amendEntry) {
+    amendEntry.fieldValues = fieldValues;
+    amendEntry.markModified("fieldValues");
+    amendEntry.editedAt = new Date();
+    amendEntry.editedBy = req.user._id;
+    historyEntry = await amendEntry.save();
+  } else {
+    historyEntry = await LeadStatusHistory.createEntry(
+      lead._id,
+      oldStatus,
+      newStatus,
+      req.user._id,
+      req.userType,
+      fieldValues
+    );
+  }
 
-  // Statuses with a dated next step create their reminder automatically.
+  // Statuses with a dated next step create their reminder automatically; an
+  // edit moves the reminder its update created instead of adding another.
   let followUp = null;
   if (statusConfig.task) {
     const t = statusConfig.task(fieldValues);
     if (t && t.due) {
-      followUp = await FollowUp.create({
-        lead: lead._id,
+      const reminder = {
         reminderDate: t.due,
         followUpType: resolveFollowUpType(newStatus, t.kind, fieldValues),
         notes: t.title,
-        createdBy: req.user._id,
-        team: lead.team,
-      });
+      };
+      const existing = amendEntry ? await reminderOfEntry(amendEntry, t.title) : null;
+      if (existing) {
+        if (existing.status === "Pending") {
+          Object.assign(existing, reminder);
+          followUp = await existing.save();
+        }
+      } else {
+        followUp = await FollowUp.create({
+          ...reminder,
+          lead: lead._id,
+          createdBy: req.user._id,
+          team: lead.team,
+          statusHistory: historyEntry._id,
+        });
+      }
       await syncNextFollowUpDate(lead._id);
     }
   }
 
-  return { ok: true, lead: updatedLead, historyEntry, followUp };
+  return { ok: true, lead: updatedLead, historyEntry, followUp, amended: !!amendEntry };
+};
+
+/** A plain copy of `lead` with each incremented counter taken back one step. */
+const countersBefore = (lead, increments) => {
+  const copy = lead.toObject();
+  Object.entries(increments).forEach(([k, n]) => { copy[k] = Math.max(0, (copy[k] || 0) - n); });
+  return copy;
+};
+
+/**
+ * The reminder a history entry created. Newer ones carry the link; older ones are
+ * matched by lead, title and creation within a minute of the entry.
+ */
+const reminderOfEntry = async (entry, title) => {
+  const linked = await FollowUp.findOne({ statusHistory: entry._id });
+  if (linked) return linked;
+  const at = new Date(entry.createdAt || entry.changedAt).getTime();
+  return FollowUp.findOne({
+    lead: entry.lead,
+    notes: title,
+    statusHistory: null,
+    createdAt: { $gte: new Date(at - 60000), $lte: new Date(at + 60000) },
+  });
 };
 
 // @desc    Change a lead's status through the validated workflow (transition
@@ -162,8 +227,8 @@ export const changeLeadStatus = async (req, res) => {
       });
     }
 
-    const { newStatus, values = {} } = req.body;
-    const result = await applyStatusChange(req, lead, newStatus, values);
+    const { newStatus, values = {}, amendLast = false } = req.body;
+    const result = await applyStatusChange(req, lead, newStatus, values, { amendLast: amendLast === true });
     if (!result.ok) {
       const { code, ok, ...body } = result; // eslint-disable-line no-unused-vars
       return res.status(code).json({ success: false, ...body });
@@ -173,9 +238,11 @@ export const changeLeadStatus = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: result.followUp
-        ? `Status updated to "${newStatus}" — reminder created automatically.`
-        : `Status updated to "${newStatus}".`,
+      message: result.amended
+        ? `Last "${newStatus}" update edited.`
+        : result.followUp
+          ? `Status updated to "${newStatus}" — reminder created automatically.`
+          : `Status updated to "${newStatus}".`,
       data: { lead: result.lead, historyEntry: populatedHistory, followUp: result.followUp },
     });
   } catch (error) {
@@ -201,10 +268,9 @@ export const getLeadStatusHistory = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    const history = await LeadStatusHistory.getLeadHistory(req.params.id).populate(
-      "changedBy",
-      "firstName lastName email"
-    );
+    const history = await LeadStatusHistory.getLeadHistory(req.params.id)
+      .populate("changedBy", "firstName lastName email")
+      .populate("editedBy", "firstName lastName");
 
     res.status(200).json({ success: true, total: history.length, data: history });
   } catch (error) {
