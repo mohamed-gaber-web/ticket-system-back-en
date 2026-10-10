@@ -143,6 +143,14 @@ export const canViewHr = (actor) => isAdmin(actor) || isHr(actor);
 /** Anyone who may open the employee create/edit screens at all. */
 export const canManageEmployees = (actor) => isManagerOrAdmin(actor) || isHr(actor);
 
+/**
+ * Marketing module: who runs its shared settings (the email campaign's daily
+ * send, deleting imported contacts, other people's surveys). Admins and the
+ * marketing manager; everyone else with the module works the data.
+ */
+export const canManageMarketing = (actor) =>
+  isAdmin(actor) || managedFamiliesOf(actor).includes("marketing");
+
 /** Modules that open other people's data — holding one makes an account admin-managed. */
 export const PRIVILEGED_MODULES = Object.freeze(["admin", "hr"]);
 
@@ -231,6 +239,11 @@ export const requireEmployeeManager = (req, res, next) =>
   isEmployee(req) && canManageEmployees(req.user)
     ? next()
     : forbid(res, "Manager, HR or administrator access required.");
+
+export const requireMarketingManager = (req, res, next) =>
+  isEmployee(req) && canManageMarketing(req.user)
+    ? next()
+    : forbid(res, "Marketing manager or administrator access required.");
 
 /** Pass when the employee may open ANY of the named modules. */
 export const requireModule = (...modules) => (req, res, next) => {

@@ -109,8 +109,8 @@ describe("effectiveModules", () => {
     assert.deepEqual(effectiveModules(user("consultant")), ["tickets"]);
     assert.deepEqual(effectiveModules(user("sales")), ["telesales"]);
     assert.deepEqual(effectiveModules(user("sales_manager")), ["telesales"]);
-    assert.deepEqual(effectiveModules(user("marketing")), ["telesales", "tasks"]);
-    assert.deepEqual(effectiveModules(user("marketing_manager")), ["telesales", "tasks"]);
+    assert.deepEqual(effectiveModules(user("marketing")), ["telesales", "tasks", "marketing"]);
+    assert.deepEqual(effectiveModules(user("marketing_manager")), ["telesales", "tasks", "marketing"]);
     assert.deepEqual(effectiveModules(user("developer")), ["development"]);
     assert.deepEqual(effectiveModules(user("developer_manager")), ["development"]);
   });

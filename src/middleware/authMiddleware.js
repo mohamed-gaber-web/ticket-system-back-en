@@ -12,6 +12,7 @@ export {
   requireManagerOrAdmin,
   requireEmployeeManager,
   requireModule,
+  requireMarketingManager,
 } from "../utils/access.js";
 
 // Protect routes - verify JWT token

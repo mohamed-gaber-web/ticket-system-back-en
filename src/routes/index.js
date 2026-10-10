@@ -50,6 +50,7 @@ import salesDocumentRoutes from "./salesDocumentRoutes.js";
 import messageTemplateRoutes from "./messageTemplateRoutes.js";
 import companySettingsRoutes from "./companySettingsRoutes.js";
 import salesAssistantRoutes from "./salesAssistantRoutes.js";
+import marketingRoutes from "./marketingRoutes.js";
 
 const router = express.Router();
 
@@ -181,6 +182,9 @@ router.use("/sales-documents", salesDocumentRoutes);
 router.use("/message-templates", messageTemplateRoutes);
 router.use("/company-settings", companySettingsRoutes);
 router.use("/sales-assistant", salesAssistantRoutes);
+
+// Marketing: CSP surveys and the email campaign
+router.use("/marketing", marketingRoutes);
 // HR documents live in the same GridFS bucket but are only ever served through
 // /consultants/:id/documents — the generic file routes refuse them.
 router.all(["/files/:id", "/files/:id/info"], guardHrFiles);
