@@ -3,6 +3,13 @@ import Task from "../models/Task.js";
 import { getWeekNumber } from "../utils/weekUtils.js";
 
 import { isAdmin, departmentsOf, managedFamiliesOf, isManagerRole, FAMILY_DEPARTMENT_NAME } from "../utils/access.js";
+import { zonedClock } from "../utils/zonedClock.js";
+import {
+  taskDigestTimeZone,
+  taskWeekRange,
+  loadWeeklyTasks,
+  taskDelay,
+} from "../utils/weeklyTaskDigest.js";
 import Department from "../models/Department.js";
 // Whitelist of sortable fields → actual document path used by the aggregation $sort.
 // Guards against injection and lets the client sort on populated names + computed delay.
@@ -912,3 +919,38 @@ const deleteTask = async (req, res) => {
 };
 
 export { getTasks, getTaskStats, getTaskReport, getTaskById, createTask, updateTask, deleteTask };
+
+
+// GET /tasks/weekly-digest/preview (admin) — who would receive this week's
+// Sunday reminder and which tasks it lists. Sends nothing.
+export const previewWeeklyDigest = async (_req, res) => {
+  try {
+    const { day } = zonedClock(new Date(), taskDigestTimeZone());
+    const range = taskWeekRange(day);
+    const groups = await loadWeeklyTasks(range.weekEnd);
+    res.json({
+      success: true,
+      data: {
+        weekStart: range.weekStart,
+        weekEnd: range.weekEnd,
+        recipients: groups.map(({ person, tasks }) => ({
+          _id: person._id,
+          name: [person.firstName, person.lastName].filter(Boolean).join(" "),
+          email: person.email,
+          tasks: tasks.map((t) => ({
+            _id: t._id,
+            taskNumber: t.taskNumber,
+            name: t.name,
+            startDate: t.startDate,
+            endDate: t.endDate,
+            status: t.status,
+            ...taskDelay(t, range.today),
+          })),
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("Weekly digest preview error:", error);
+    res.status(500).json({ success: false, message: "Failed to build the weekly reminder preview" });
+  }
+};

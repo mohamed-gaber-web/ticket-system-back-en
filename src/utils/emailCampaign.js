@@ -22,6 +22,7 @@ import { renderForChannel, findTemplateForPurpose, findDocumentForType } from ".
 import { loadAttachments } from "./emailThread.js";
 import { sendCustomEmail, salesMailbox } from "./emailService.js";
 import { escapeRegex } from "./escapeRegex.js";
+import { zonedClock } from "./zonedClock.js";
 
 export const MAX_IMPORT_ROWS = 5000;
 
@@ -34,21 +35,7 @@ export const campaignTimeZone = () => process.env.MARKETING_CAMPAIGN_TZ || "Afri
  * The calendar day ("YYYY-MM-DD") and hour (0–23) of `date` in the campaign
  * time zone.
  */
-export const campaignClock = (date = new Date(), timeZone = campaignTimeZone()) => {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(date)
-      .map((p) => [p.type, p.value])
-  );
-  return { day: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) };
-};
+export const campaignClock = (date = new Date(), timeZone = campaignTimeZone()) => zonedClock(date, timeZone);
 
 /** Clean a list of send hours: whole 0–23, unique, sorted. Throws on bad input. */
 export const cleanSendHours = (raw) => {

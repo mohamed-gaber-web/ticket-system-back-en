@@ -12,6 +12,7 @@ import { startWorkingHoursCron } from "./src/utils/workingHoursCron.js";
 import { startMeetingReminderCron } from "./src/utils/meetingReminderCron.js";
 import { startLeadInboxCron } from "./src/utils/leadInboxSync.js";
 import { startEmailCampaignCron } from "./src/utils/emailCampaign.js";
+import { startWeeklyTaskDigestCron } from "./src/utils/weeklyTaskDigest.js";
 import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
 import { seedIndustrySectors } from "./src/utils/seedIndustrySectors.js";
 import { seedCountries } from "./src/utils/seedCountries.js";
@@ -180,6 +181,9 @@ const startServer = async () => {
 
       // Marketing email campaign — on hold unless MARKETING_CAMPAIGN_AUTOSEND=true
       startEmailCampaignCron();
+
+      // Weekly task reminder e-mail — Sundays 10:00 Cairo time
+      startWeeklyTaskDigestCron();
     });
   } catch (error) {
     console.error("Failed to start server:", error);
