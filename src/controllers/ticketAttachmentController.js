@@ -1,5 +1,6 @@
 import TicketAttachment from "../models/TicketAttachment.js";
 import Ticket from "../models/Ticket.js";
+import { rndHiddenFrom, ticketIdHiddenFrom } from "../utils/ticketVisibility.js";
 import mongoose from "mongoose";
 import { getGridFSBucket } from "../config/gridfs.js";
 
@@ -83,7 +84,7 @@ const getAttachmentById = async (req, res) => {
         select: "firstName lastName email companyName contactPerson",
       });
 
-    if (!attachment) {
+    if (!attachment || (await ticketIdHiddenFrom(req, attachment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Attachment not found",
@@ -119,7 +120,7 @@ const getAttachmentsByTicket = async (req, res) => {
 
     // Verify ticket exists
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
+    if (!ticket || (await rndHiddenFrom(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -183,7 +184,7 @@ const createAttachment = async (req, res) => {
 
     // Verify ticket exists
     const ticketExists = await Ticket.findById(ticket);
-    if (!ticketExists) {
+    if (!ticketExists || (await rndHiddenFrom(req, ticketExists))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -239,7 +240,7 @@ const updateAttachment = async (req, res) => {
 
     let attachment = await TicketAttachment.findById(req.params.id);
 
-    if (!attachment) {
+    if (!attachment || (await ticketIdHiddenFrom(req, attachment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Attachment not found",
@@ -303,7 +304,7 @@ const deleteAttachment = async (req, res) => {
   try {
     const attachment = await TicketAttachment.findById(req.params.id);
 
-    if (!attachment) {
+    if (!attachment || (await ticketIdHiddenFrom(req, attachment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Attachment not found",
@@ -504,7 +505,7 @@ const deleteTicketAttachments = async (req, res) => {
 
     // Verify ticket exists
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
+    if (!ticket || (await rndHiddenFrom(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",

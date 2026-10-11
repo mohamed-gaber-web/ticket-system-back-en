@@ -1,5 +1,6 @@
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
+import TicketSettings from "../models/TicketSettings.js";
 import {
   USER_TYPES,
   LEGACY_EMPLOYEE_TYPES,
@@ -85,6 +86,47 @@ export const withAnyRole = (roles) => ({ $or: [{ role: { $in: roles } }, { extra
 export const departmentsOf = (user) => {
   const all = [user?.department, ...(Array.isArray(user?.departments) ? user.departments : [])];
   return [...new Set(all.filter(Boolean).map((d) => String(d?._id ?? d)))];
+};
+
+// ── R&D tickets ───────────────────────────────────────────────────────────────
+
+/**
+ * R&D tickets are visible to admins and to the employees of ONE department,
+ * chosen by an admin in TicketSettings — matched by department id, never by
+ * name. With no department configured only admins see them; customers never do.
+ * The setting is cached briefly; the settings PUT primes the cache.
+ */
+const RND_CACHE_MS = 30_000;
+let rndDepartmentCache = null; // { id: string | null, at: number }
+
+export const primeRndDepartmentCache = (departmentId) => {
+  rndDepartmentCache = { id: departmentId ? String(departmentId) : null, at: Date.now() };
+};
+
+export const invalidateRndDepartmentCache = () => {
+  rndDepartmentCache = null;
+};
+
+/** The configured R&D department id (string) or null. */
+export const rndDepartmentId = async () => {
+  if (rndDepartmentCache && Date.now() - rndDepartmentCache.at < RND_CACHE_MS) return rndDepartmentCache.id;
+  const settings = await TicketSettings.findOne().select("rndDepartment").lean();
+  primeRndDepartmentCache(settings?.rndDepartment ?? null);
+  return rndDepartmentCache.id;
+};
+
+/** Pure form of canSeeRnd for a known R&D department id. */
+export const canSeeRndWith = (user, departmentId) => {
+  if (isAdmin(user)) return true;
+  if (!departmentId || rolesOf(user).length === 0) return false; // customers hold no employee role
+  return departmentsOf(user).includes(String(departmentId));
+};
+
+/** May this caller see R&D tickets? Admins always; else members of the configured department. */
+export const canSeeRnd = async (user) => {
+  if (isAdmin(user)) return true;
+  if (rolesOf(user).length === 0) return false;
+  return canSeeRndWith(user, await rndDepartmentId());
 };
 
 // ── User type ─────────────────────────────────────────────────────────────────

@@ -9,7 +9,19 @@ import Holiday from "../models/Holiday.js";
 import { getEstimationStartDate, addWorkingDays } from "../utils/estimationUtils.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
-import { USER_TYPES, isEmployee, isAdmin, isCustomer } from "../utils/access.js";
+import { USER_TYPES, isEmployee, isAdmin, isCustomer, canSeeRnd } from "../utils/access.js";
+import {
+  isCustomerTicket,
+  isRndTicket,
+  customerTicketFilter,
+  ticketTypeFilter,
+  resolveTicketType,
+  RND_FORBIDDEN_MESSAGE,
+  CUSTOMER_REQUIRED_MESSAGE,
+  FEEDBACK_CUSTOMER_ONLY_MESSAGE,
+  INVALID_TICKET_TYPE_MESSAGE,
+} from "../utils/ticketTypes.js";
+import { rndHiddenFrom, rndScopeFilter } from "../utils/ticketVisibility.js";
 // Load working-hours config + holidays, auto-create defaults if missing
 const loadEstimationConfig = async () => {
   let config = await WorkingHours.findOne().lean();
@@ -65,13 +77,40 @@ const customerScopeIds = async (req) => {
   return Customer.find({ company }).distinct("_id");
 };
 
-/** May this caller open this ticket? Staff always; a customer only within their company. */
+/**
+ * May this caller open this ticket? Staff always — except R&D tickets, which need
+ * R&D access (ticketVisibility.rndHiddenFrom); a customer only within their
+ * company. Every single-ticket handler answers 404 when this is false.
+ * `ticket` must carry `ticketType` (and `customer` for customers).
+ */
 const canSeeTicket = async (req, ticket) => {
+  if (!ticket) return false;
+  if (await rndHiddenFrom(req, ticket)) return false;
   const ids = await customerScopeIds(req);
   if (!ids) return true;
+  // Customers only ever see customer tickets (old internal tickets may still
+  // carry our own company's customer account)
+  if (!isCustomerTicket(ticket)) return false;
   const owner = ticket?.customer?._id ?? ticket?.customer;
   return ids.some((id) => String(id) === String(owner));
 };
+
+/**
+ * `requestedBy` from a request body: undefined (not sent), null (cleared) or a
+ * real employee id. Returns { value } or { error }.
+ */
+const resolveRequestedBy = async (raw) => {
+  if (raw === undefined) return { value: undefined };
+  if (raw === null || raw === "") return { value: null };
+  const id = raw?._id ?? raw;
+  if (!mongoose.Types.ObjectId.isValid(String(id))) return { error: "Invalid requested-by employee" };
+  if (!(await Consultant.exists({ _id: id }))) return { error: "Requested-by employee not found" };
+  return { value: id };
+};
+
+/** The customer a notification may reach: only customer tickets have one. */
+const customerRecipient = (ticket) =>
+  isCustomerTicket(ticket) && ticket?.customer?._id ? { userId: ticket.customer._id, userType: "customer" } : null;
 
 // Resolve the timestamp a new ticket is recorded with. Admins set a single
 // "data entry date" in Working Hours Setup so entry stays daily rather than
@@ -217,10 +256,17 @@ const getAllTickets = async (req, res) => {
       sortBy = "createdAt",
       sortOrder = "desc",
       includeSubTickets,
+      ticketType,
     } = req.query;
 
     // Helper: split a comma-separated param into an array; returns [] if empty
     const toArray = (val) => (val ? val.split(",").filter(Boolean) : []);
+
+    // ?ticketType=customer|internal|rnd ("customer" also matches legacy tickets)
+    const typeFilter = ticketType ? ticketTypeFilter(String(ticketType)) : null;
+    if (ticketType && !typeFilter) {
+      return res.status(400).json({ success: false, message: INVALID_TICKET_TYPE_MESSAGE });
+    }
 
     const query = {};
 
@@ -461,6 +507,10 @@ const getAllTickets = async (req, res) => {
       }
     }
 
+    // Type filter, then the R&D fence — ANDed in last so no other param can widen it
+    const fences = [typeFilter, await rndScopeFilter(req), ownCustomerIds && customerTicketFilter()].filter(Boolean);
+    if (fences.length) query.$and = [...(query.$and ?? []), ...fences];
+
     const skip = (page - 1) * limit;
     const sort = {};
     sort[sortBy] = sortOrder === "asc" ? 1 : -1;
@@ -473,6 +523,7 @@ const getAllTickets = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .populate("environment", "name description")
@@ -520,6 +571,7 @@ const getTicketById = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName description")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .populate("updatedBy", "firstName lastName email")
@@ -587,6 +639,7 @@ const getTicketByNumber = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate({
         path: "comments",
@@ -658,33 +711,52 @@ const createTicket = async (req, res) => {
       internalDeliveryDate,
       scheduledWeek,
       durationHours,
+      ticketType: requestedType,
+      requestedBy: requestedByRaw,
     } = req.body;
 
-    // The entry date comes from Working Hours Setup, never from the request —
-    // a ticket can't be back-dated by whoever creates it.
-    const { entryDate, isConfigured } = await resolveDataEntryDate();
+    // Customers only ever raise customer tickets; staff pick the type
+    const typeResult = resolveTicketType({ isCustomerCaller: !isEmployee(req), requested: requestedType });
+    if (typeResult.error) {
+      return res.status(400).json({ success: false, message: typeResult.error });
+    }
+    const ticketType = typeResult.type;
+    if (ticketType === "rnd" && !(await canSeeRnd(req.user))) {
+      return res.status(403).json({ success: false, message: RND_FORBIDDEN_MESSAGE });
+    }
 
     // If user is a customer, automatically use their ID
     if (req.userType === "customer") {
       customer = req.user._id;
     }
+    if (customer === "" || customer === null) customer = undefined;
 
-    // Verify customer ID is provided
-    if (!customer) {
+    // Only customer tickets need a customer
+    if (!customer && ticketType === "customer") {
       return res.status(400).json({
         success: false,
-        message: "Customer ID is required",
+        message: CUSTOMER_REQUIRED_MESSAGE,
       });
     }
 
     // Verify customer exists
-    const customerExists = await Customer.findById(customer);
-    if (!customerExists) {
-      return res.status(404).json({
-        success: false,
-        message: "Customer not found",
-      });
+    let customerExists = null;
+    if (customer) {
+      customerExists = mongoose.Types.ObjectId.isValid(String(customer)) ? await Customer.findById(customer) : null;
+      if (!customerExists) {
+        return res.status(404).json({
+          success: false,
+          message: "Customer not found",
+        });
+      }
     }
+
+    // Internal / R&D: who is asking — defaults to the employee creating it
+    const requested = await resolveRequestedBy(isEmployee(req) ? requestedByRaw : undefined);
+    if (requested.error) {
+      return res.status(400).json({ success: false, message: requested.error });
+    }
+    const requestedBy = requested.value ?? (ticketType !== "customer" && isEmployee(req) ? req.user._id : null);
 
     // Created straight into a later status → the duration must come with it
     const createDurationError = durationError(status || "new", isEmployee(req) ? durationHours : undefined);
@@ -692,14 +764,20 @@ const createTicket = async (req, res) => {
       return res.status(400).json({ success: false, message: createDurationError });
     }
 
-    // Get SLA from customer if mapped
-    const sla = customerExists.slaMapping || null;
+    // The entry date comes from Working Hours Setup, never from the request —
+    // a ticket can't be back-dated by whoever creates it.
+    const { entryDate, isConfigured } = await resolveDataEntryDate();
 
-    const estimation = await calcEstimation(customer, entryDate);
+    // SLA and delivery estimation follow the customer; a ticket without one gets
+    // neither (the same as a customer with no SLA mapped).
+    const sla = customerExists?.slaMapping || null;
+    const estimation = customer ? await calcEstimation(customer, entryDate) : {};
 
     const ticket = await Ticket.create({
       createdAt: entryDate,
+      ticketType,
       customer,
+      requestedBy,
       subject,
       description,
       category,
@@ -745,6 +823,7 @@ const createTicket = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("environment", "name description")
       .populate("feature", "name")
@@ -754,15 +833,14 @@ const createTicket = async (req, res) => {
       .populate("scope", "name")
       .populate("source", "name");
 
-    // Send email notification (fire-and-forget)
+    // Send email notification (fire-and-forget) — the customer hears only of customer tickets
+    const newTicketCustomer = customerRecipient(populatedTicket);
     notifyAndEmail("new_ticket", {
       ticket: populatedTicket,
       ticketNumber: populatedTicket.ticketNumber,
       subject: populatedTicket.subject,
       notifyEmails: populatedTicket.notifyEmails || [],
-      recipients: [
-        { userId: populatedTicket.customer._id || populatedTicket.customer, userType: "customer" },
-      ],
+      recipients: newTicketCustomer ? [newTicketCustomer] : [],
     }).catch((err) => console.error("Email notification error:", err.message));
 
     res.status(201).json({
@@ -828,6 +906,8 @@ const updateTicket = async (req, res) => {
       closedAt,
       deliveredAt,
       createdAt,
+      ticketType: requestedType,
+      requestedBy: requestedByRaw,
     } = req.body;
 
     let ticket = await Ticket.findById(req.params.id);
@@ -837,6 +917,36 @@ const updateTicket = async (req, res) => {
         success: false,
         message: "Ticket not found",
       });
+    }
+
+    // Ticket type: staff may switch it (customers never); making a ticket R&D
+    // needs R&D access, as does editing one (canSeeTicket already hid it).
+    const typeResult = resolveTicketType({
+      isCustomerCaller: !isEmployee(req),
+      requested: requestedType,
+      current: ticket.ticketType,
+    });
+    if (typeResult.error) {
+      return res.status(400).json({ success: false, message: typeResult.error });
+    }
+    // A customer's edit keeps whatever type the ticket has
+    const nextType = isEmployee(req) ? typeResult.type : ticket.ticketType || "customer";
+    if (nextType === "rnd" && !isRndTicket(ticket) && !(await canSeeRnd(req.user))) {
+      return res.status(403).json({ success: false, message: RND_FORBIDDEN_MESSAGE });
+    }
+
+    // Only customer tickets need a customer — judged on the merged values
+    const nextCustomer = customer !== undefined ? customer || null : ticket.customer;
+    if (nextType === "customer" && !nextCustomer) {
+      return res.status(400).json({ success: false, message: CUSTOMER_REQUIRED_MESSAGE });
+    }
+    if (customer && !(mongoose.Types.ObjectId.isValid(String(customer)) && (await Customer.exists({ _id: customer })))) {
+      return res.status(404).json({ success: false, message: "Customer not found" });
+    }
+
+    const requested = await resolveRequestedBy(isEmployee(req) ? requestedByRaw : undefined);
+    if (requested.error) {
+      return res.status(400).json({ success: false, message: requested.error });
     }
 
     // Data entry date — admins only. Re-submitting the ticket's existing date is a
@@ -892,7 +1002,13 @@ const updateTicket = async (req, res) => {
     };
 
     if (customer !== undefined) {
-      updateData.customer = customer;
+      updateData.customer = customer || null;
+    }
+    if (isEmployee(req)) {
+      updateData.ticketType = nextType;
+      if (requested.value !== undefined) updateData.requestedBy = requested.value;
+      // Switching to internal / R&D with nobody named: the editor is asking
+      else if (nextType !== "customer" && !ticket.requestedBy) updateData.requestedBy = req.user._id;
     }
 
     // Track who performed this update / resolution / closure (consultants only)
@@ -961,6 +1077,7 @@ const updateTicket = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .populate("updatedBy", "firstName lastName email")
@@ -987,9 +1104,8 @@ const updateTicket = async (req, res) => {
     // Send email on any status change
     if (status && status !== oldStatus) {
       const recipients = [];
-      if (ticket.customer?._id) {
-        recipients.push({ userId: ticket.customer._id, userType: "customer" });
-      }
+      const customerTo = customerRecipient(ticket); // customer tickets only
+      if (customerTo) recipients.push(customerTo);
       if (ticket.assignedBy?._id) {
         recipients.push({ userId: ticket.assignedBy._id, userType: USER_TYPES.EMPLOYEE });
       }
@@ -1159,6 +1275,7 @@ const updateTicketStatus = async (req, res) => {
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .populate("updatedBy", "firstName lastName email")
@@ -1167,9 +1284,8 @@ const updateTicketStatus = async (req, res) => {
 
     // Build recipients: customer + all unique consultants (assignedBy + acceptedBy)
     const recipients = [];
-    if (ticket.customer?._id) {
-      recipients.push({ userId: ticket.customer._id, userType: "customer" });
-    }
+    const customerTo = customerRecipient(ticket); // customer tickets only
+    if (customerTo) recipients.push(customerTo);
     if (ticket.assignedBy?._id) {
       recipients.push({ userId: ticket.assignedBy._id, userType: USER_TYPES.EMPLOYEE });
     }
@@ -1244,7 +1360,7 @@ const assignTicket = async (req, res) => {
 
     let ticket = await Ticket.findById(req.params.id);
 
-    if (!ticket) {
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -1281,6 +1397,7 @@ const assignTicket = async (req, res) => {
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName");
 
     // Notify the assigned consultant (fire-and-forget)
@@ -1317,7 +1434,7 @@ const acceptTicket = async (req, res) => {
   try {
     const ticket = await Ticket.findById(req.params.id);
 
-    if (!ticket) {
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -1399,6 +1516,11 @@ const addCustomerFeedback = async (req, res) => {
       });
     }
 
+    // Feedback is the customer's — internal and R&D tickets have none
+    if (!isCustomerTicket(ticket)) {
+      return res.status(400).json({ success: false, message: FEEDBACK_CUSTOMER_ONLY_MESSAGE });
+    }
+
     // Only allow feedback on resolved or closed tickets
     if (!["resolved", "closed"].includes(ticket.status)) {
       return res.status(400).json({
@@ -1418,6 +1540,7 @@ const addCustomerFeedback = async (req, res) => {
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName");
 
     res.status(200).json({
@@ -1481,16 +1604,26 @@ const deleteTicket = async (req, res) => {
 // @access  Public
 const getTicketStats = async (req, res) => {
   try {
-    const totalTickets = await Ticket.countDocuments();
-    const newTickets = await Ticket.countDocuments({ status: "new" });
-    const assignedTickets = await Ticket.countDocuments({ status: "assigned" });
-    const inProgressTickets = await Ticket.countDocuments({ status: "in_progress" });
-    const resolvedTickets = await Ticket.countDocuments({ status: "resolved" });
-    const closedTickets = await Ticket.countDocuments({ status: "closed" });
-    const reopenedTickets = await Ticket.countDocuments({ status: "reopened" });
-    const slaBreachedTickets = await Ticket.countDocuments({ isSlaBreached: true });
+    // ?ticketType= narrows every figure; the R&D fence always applies
+    const { ticketType } = req.query;
+    const typeFilter = ticketType ? ticketTypeFilter(String(ticketType)) : null;
+    if (ticketType && !typeFilter) {
+      return res.status(400).json({ success: false, message: INVALID_TICKET_TYPE_MESSAGE });
+    }
+    const fences = [typeFilter, await rndScopeFilter(req)].filter(Boolean);
+    const scoped = (extra = {}) => (fences.length ? { $and: [...fences, extra] } : extra);
+
+    const totalTickets = await Ticket.countDocuments(scoped());
+    const newTickets = await Ticket.countDocuments(scoped({ status: "new" }));
+    const assignedTickets = await Ticket.countDocuments(scoped({ status: "assigned" }));
+    const inProgressTickets = await Ticket.countDocuments(scoped({ status: "in_progress" }));
+    const resolvedTickets = await Ticket.countDocuments(scoped({ status: "resolved" }));
+    const closedTickets = await Ticket.countDocuments(scoped({ status: "closed" }));
+    const reopenedTickets = await Ticket.countDocuments(scoped({ status: "reopened" }));
+    const slaBreachedTickets = await Ticket.countDocuments(scoped({ isSlaBreached: true }));
 
     const ticketsByPriority = await Ticket.aggregate([
+      { $match: scoped() },
       {
         $group: {
           _id: "$priority",
@@ -1500,6 +1633,7 @@ const getTicketStats = async (req, res) => {
     ]);
 
     const ticketsByCategory = await Ticket.aggregate([
+      { $match: scoped() },
       {
         $group: {
           _id: "$category",
@@ -1510,7 +1644,7 @@ const getTicketStats = async (req, res) => {
 
     const averageRating = await Ticket.aggregate([
       {
-        $match: { customerRating: { $exists: true, $ne: null } },
+        $match: scoped({ customerRating: { $exists: true, $ne: null } }),
       },
       {
         $group: {
@@ -1596,11 +1730,13 @@ const getTicketSLAStatus = async (req, res) => {
 // @access  Private (consultants)
 const getPendingCandidates = async (req, res) => {
   try {
-    const ticket = await Ticket.findById(req.params.id).select("customer").lean();
-    if (!ticket) {
+    const ticket = await Ticket.findById(req.params.id).select("customer ticketType").lean();
+    if (!ticket || !(await canSeeTicket(req, ticket))) {
       return res.status(404).json({ success: false, message: "Ticket not found" });
     }
-    const owner = await Customer.findById(ticket.customer).select("company companyName").lean();
+    const owner = ticket.customer
+      ? await Customer.findById(ticket.customer).select("company companyName").lean()
+      : null;
     if (!owner) {
       return res.status(200).json({ success: true, data: [] });
     }
@@ -1634,19 +1770,21 @@ const getTicketsByStatus = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    const tickets = await Ticket.find({ status })
+    const statusQuery = { status, ...(await rndScopeFilter(req)) };
+    const tickets = await Ticket.find(statusQuery)
       .populate("customer", "companyName email")
       .populate("pendingOn", "companyName contactPerson email")
       .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
 
-    const total = await Ticket.countDocuments({ status });
+    const total = await Ticket.countDocuments(statusQuery);
 
     res.status(200).json({
       success: true,
@@ -1683,19 +1821,21 @@ const getTicketsByPriority = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    const tickets = await Ticket.find({ priority })
+    const priorityQuery = { priority, ...(await rndScopeFilter(req)) };
+    const tickets = await Ticket.find(priorityQuery)
       .populate("customer", "companyName email")
       .populate("pendingOn", "companyName contactPerson email")
       .populate("pendingBy", "firstName lastName")
       .populate("category", "name description")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
 
-    const total = await Ticket.countDocuments({ priority });
+    const total = await Ticket.countDocuments(priorityQuery);
 
     res.status(200).json({
       success: true,
@@ -1774,11 +1914,14 @@ const createSubTicket = async (req, res) => {
     // entry too, so they follow the same setup-configured entry date as any ticket.
     const { entryDate: subEntryDate, isConfigured: subDateConfigured } =
       await resolveDataEntryDate();
-    const subEstimation = await calcEstimation(parentTicket.customer, subEntryDate);
+    const subEstimation = parentTicket.customer ? await calcEstimation(parentTicket.customer, subEntryDate) : {};
 
+    // A sub-ticket is the same kind of ticket as its parent, for the same requester
     const subTicket = await Ticket.create({
       createdAt: subEntryDate,
+      ticketType: parentTicket.ticketType || "customer",
       customer: parentTicket.customer,
+      requestedBy: parentTicket.requestedBy ?? null,
       subject,
       description,
       category: category || parentTicket.category,
@@ -1824,6 +1967,7 @@ const createSubTicket = async (req, res) => {
       .populate("sla", "slaName priorityLevel responseTimeHours resolutionTimeHours")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName email")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("environment", "name description")
       .populate("feature", "name")
@@ -1839,9 +1983,7 @@ const createSubTicket = async (req, res) => {
       ticketNumber: populatedSubTicket.ticketNumber,
       subject: populatedSubTicket.subject,
       notifyEmails: populatedSubTicket.notifyEmails || [],
-      recipients: populatedSubTicket.customer
-        ? [{ userId: populatedSubTicket.customer._id || populatedSubTicket.customer, userType: "customer" }]
-        : [],
+      recipients: customerRecipient(populatedSubTicket) ? [customerRecipient(populatedSubTicket)] : [],
     }).catch((err) => console.error("Sub-ticket email notification error:", err.message));
 
     // If a consultant was assigned at creation time, send them the assignment email
@@ -1917,6 +2059,7 @@ const getSubTickets = async (req, res) => {
       .populate("scope", "name")
       .populate("assignedTeam", "teamName")
       .populate("assignedBy", "firstName lastName")
+      .populate("requestedBy", "firstName lastName email")
       .populate("createdByConsultant", "firstName lastName")
       .populate("acceptedBy", "firstName lastName email")
       .sort({ createdAt: -1 })

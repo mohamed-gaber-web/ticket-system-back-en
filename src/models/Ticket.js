@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { TICKET_TYPES, DEFAULT_TICKET_TYPE, ticketTypePrefix } from "../utils/ticketTypes.js";
 
 /** What a person last did to a ticket — see utils/ticketActivity.js. */
 export const TICKET_ACTIVITY_TYPES = Object.freeze([
@@ -19,10 +20,33 @@ const ticketSchema = mongoose.Schema(
       type: String,
       unique: true,
     },
+    // customer / internal / rnd — see utils/ticketTypes.js. Docs saved before
+    // the field existed have none and read as customer tickets everywhere.
+    ticketType: {
+      type: String,
+      enum: TICKET_TYPES,
+      default: DEFAULT_TICKET_TYPE,
+      index: true,
+    },
+    // Only customer tickets need a customer; internal and R&D tickets name the
+    // employee asking for the work in `requestedBy` instead.
     customer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
-      required: [true, "Customer is required"],
+      required: [
+        function () {
+          // Update validators run with the Query (or nothing) as `this`; the
+          // update controller enforces the rule against the merged values.
+          if (!this || this instanceof mongoose.Query) return false;
+          return (this.ticketType ?? DEFAULT_TICKET_TYPE) === "customer";
+        },
+        "Customer is required",
+      ],
+    },
+    requestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Consultant",
+      default: null,
     },
     subject: {
       type: String,
@@ -323,8 +347,9 @@ ticketSchema.pre("save", async function () {
 
   const TicketModel = mongoose.model("Ticket");
 
-  // Get company prefix from customer (first 3 chars of companyName, uppercased)
-  let prefix = "TKT";
+  // Get company prefix from customer (first 3 chars of companyName, uppercased);
+  // a ticket without a customer is numbered by its type (INT / RND).
+  let prefix = ticketTypePrefix(this.ticketType);
   if (this.customer) {
     const customer = await mongoose.model("Customer").findById(this.customer).select("companyName").lean();
     if (customer?.companyName) {

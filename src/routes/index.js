@@ -10,6 +10,7 @@ import ticketAttachmentRoutes from "./ticketAttachmentRoutes.js";
 import ticketEmailRoutes from "./ticketEmailRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import ticketStatusHistoryRoutes from "./ticketStatusHistoryRoutes.js";
+import ticketSettingsRoutes from "./ticketSettingsRoutes.js";
 import categoryRoutes from "./categoryRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
 import { guardHrFiles } from "../controllers/employeeDocumentController.js";
@@ -90,6 +91,9 @@ router.use("/notifications", notificationRoutes);
 
 // Ticket Status History routes
 router.use("/ticket-status-history", ticketStatusHistoryRoutes);
+
+// Ticketing settings (R&D department) — employees read, admins write
+router.use("/ticket-settings", ticketSettingsRoutes);
 
 // Category routes
 router.use("/categories", categoryRoutes);

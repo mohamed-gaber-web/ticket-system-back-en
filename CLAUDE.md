@@ -109,10 +109,18 @@ Standard MVC pattern: `src/models/`, `src/controllers/`, `src/routes/`. Each dom
 
 ### Ticket System
 
-- Tickets auto-generate numbers as `TKT-YYYY-XXXXX` via pre-save hook
+- Tickets auto-generate numbers as `{PREFIX}-YYYY-XXXXX` via pre-save hook (prefix = first 3 letters of the customer's company; `INT` / `RND` for internal / R&D tickets without a customer; one yearly sequence)
 - Related data (comments, attachments, assignments, status history) are separate collections linked by ticket ObjectId, exposed as Mongoose virtuals
-- Supports sub-tickets via `parentTicket`/`isSubTicket` fields
+- Supports sub-tickets via `parentTicket`/`isSubTicket` fields (a sub-ticket inherits its parent's `ticketType` and `requestedBy`)
 - SLA tracking with due date calculation and breach detection
+
+**Ticket types:** `Ticket.ticketType` is `customer` | `internal` | `rnd` (vocabulary + filters in `src/utils/ticketTypes.js`; docs without the field are customer tickets everywhere — filter with `customerTicketFilter()`, never `{ ticketType: "customer" }`). Only customer tickets require a `customer`; internal/R&D name the asking employee in `requestedBy` (defaults to the creator). Customers can only raise, list and open customer tickets. Same workflow for all types, but no customer e-mails/notifications (`notifyAndEmail` strips customer recipients centrally — `withoutCustomerUnlessCustomerTicket`), no SLA/estimation without a customer, feedback is 400 for non-customer tickets, and the evaluation/KPI delivery metrics count customer tickets only. `GET /tickets` and `/tickets/stats` take `?ticketType=`.
+
+**R&D visibility:** R&D tickets are seen by admins and the employees of ONE department — the singleton `TicketSettings.rndDepartment` (`GET/PUT /api/ticket-settings`, read by any employee with the caller's `canSeeRnd`, written by admins). Decide it only with `canSeeRnd(user)` in access.js (by department id, cached 30 s, primed on PUT). Every ticket endpoint goes through `src/utils/ticketVisibility.js`: single-ticket handlers answer **404** (`rndHiddenFrom` / `ticketIdHiddenFrom`, folded into `canSeeTicket` in `ticketController.js`), lists AND `rndScopeFilter(req)` in last, the ticket e-mail inbox drops R&D threads. Creating, editing or switching a ticket to R&D without access is a 403.
+
+**R&D → development boards:** `DevBoard.rndImport { enabled, list, setBy }` (`PUT /api/development/boards/:id/rnd-import { enabled, list? }`, same guard as the ticket rule). While enabled every open R&D ticket gets a card (assigned to its first assignee, created by `setBy`); enabling imports the open ones (`importRndTicketsForBoard`), and `syncTicketToDevBoards` adds new ones.
+
+**Existing data:** `node src/scripts/backfillTicketTypes.js --dry`, then without `--dry` — tickets of the "Grow Path For Business Development" customer → internal, every other untyped ticket → customer. Tests: `tests/ticketTypes.test.js`.
 
 ### File Uploads
 

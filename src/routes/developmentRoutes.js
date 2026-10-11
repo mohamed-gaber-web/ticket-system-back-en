@@ -9,6 +9,7 @@ import {
   deleteBoard,
   setMembers,
   setTicketRule,
+  setRndImport,
   addLabel,
   updateLabel,
   deleteLabel,
@@ -55,6 +56,7 @@ router.patch("/boards/:id", ...dev, updateBoard);
 router.delete("/boards/:id", ...dev, deleteBoard);
 router.put("/boards/:id/members", ...dev, setMembers);
 router.put("/boards/:id/ticket-rule", ...dev, setTicketRule);
+router.put("/boards/:id/rnd-import", ...dev, setRndImport);
 router.post("/boards/:id/labels", ...dev, addLabel);
 router.patch("/boards/:id/labels/:labelId", ...dev, updateLabel);
 router.delete("/boards/:id/labels/:labelId", ...dev, deleteLabel);

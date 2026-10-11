@@ -1,5 +1,6 @@
 import TicketAssignment from "../models/TicketAssignment.js";
 import Ticket from "../models/Ticket.js";
+import { rndHiddenFrom, ticketIdHiddenFrom } from "../utils/ticketVisibility.js";
 import Team from "../models/Team.js";
 import Consultant from "../models/Consltant.js";
 import { notifyAndEmail } from "../utils/emailHelper.js";
@@ -84,7 +85,7 @@ const getTicketAssignmentById = async (req, res) => {
       .populate("assignedByConsultant", "firstName lastName email phone")
       .populate("acceptedBy", "firstName lastName email phone team");
 
-    if (!assignment) {
+    if (!assignment || (await ticketIdHiddenFrom(req, assignment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket assignment not found",
@@ -119,7 +120,7 @@ const getCurrentAssignmentForTicket = async (req, res) => {
 
     // Verify ticket exists
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
+    if (!ticket || (await rndHiddenFrom(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -164,7 +165,7 @@ const getAssignmentHistoryForTicket = async (req, res) => {
 
     // Verify ticket exists
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
+    if (!ticket || (await rndHiddenFrom(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -225,7 +226,7 @@ const createTicketAssignment = async (req, res) => {
 
     // Verify ticket exists
     const ticketExists = await Ticket.findById(ticket);
-    if (!ticketExists) {
+    if (!ticketExists || (await rndHiddenFrom(req, ticketExists))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -308,7 +309,7 @@ const updateTicketAssignment = async (req, res) => {
 
     let assignment = await TicketAssignment.findById(req.params.id);
 
-    if (!assignment) {
+    if (!assignment || (await ticketIdHiddenFrom(req, assignment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket assignment not found",
@@ -367,7 +368,7 @@ const reassignTicket = async (req, res) => {
 
     const currentAssignment = await TicketAssignment.findById(req.params.id);
 
-    if (!currentAssignment) {
+    if (!currentAssignment || (await ticketIdHiddenFrom(req, currentAssignment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket assignment not found",
@@ -467,7 +468,7 @@ const deleteTicketAssignment = async (req, res) => {
   try {
     const assignment = await TicketAssignment.findById(req.params.id);
 
-    if (!assignment) {
+    if (!assignment || (await ticketIdHiddenFrom(req, assignment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket assignment not found",
@@ -673,7 +674,7 @@ const assignToMultipleConsultants = async (req, res) => {
 
     let assignment = await TicketAssignment.findById(assignmentId);
 
-    if (!assignment) {
+    if (!assignment || (await ticketIdHiddenFrom(req, assignment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket assignment not found",
@@ -774,7 +775,7 @@ const reassignConsultants = async (req, res) => {
     const assignment = await TicketAssignment.findById(assignmentId)
       .populate("assignedByConsultant", "firstName lastName email");
 
-    if (!assignment) {
+    if (!assignment || (await ticketIdHiddenFrom(req, assignment.ticket))) {
       return res.status(404).json({ success: false, message: "Ticket assignment not found" });
     }
 
@@ -871,7 +872,7 @@ const updateConsultantAssignmentStatus = async (req, res) => {
 
     let assignment = await TicketAssignment.findById(assignmentId);
 
-    if (!assignment) {
+    if (!assignment || (await ticketIdHiddenFrom(req, assignment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket assignment not found",
@@ -943,7 +944,7 @@ const removeConsultantFromAssignment = async (req, res) => {
 
     let assignment = await TicketAssignment.findById(assignmentId);
 
-    if (!assignment) {
+    if (!assignment || (await ticketIdHiddenFrom(req, assignment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket assignment not found",

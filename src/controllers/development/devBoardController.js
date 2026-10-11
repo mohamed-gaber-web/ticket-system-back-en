@@ -4,7 +4,7 @@ import DevCard from "../../models/DevCard.js";
 import DevCardComment from "../../models/DevCardComment.js";
 import Department from "../../models/Department.js";
 import { boardScopeFilter, canSeeAllBoards } from "../../utils/developmentScope.js";
-import { importTicketsForBoard } from "../../utils/devTicketSync.js";
+import { importTicketsForBoard, importRndTicketsForBoard } from "../../utils/devTicketSync.js";
 import { escapeRegex } from "../../utils/escapeRegex.js";
 import {
   PERSON_FIELDS,
@@ -57,6 +57,8 @@ const getBoards = async (req, res) => {
 
     const data = boards.map((b) => ({
       ...b,
+      // lean() skips schema defaults: boards older than the setting read as off
+      rndImport: b.rndImport ?? { enabled: false, list: null, setBy: null },
       listCount: lists[String(b._id)] ?? 0,
       cardCount: cards[String(b._id)] ?? 0,
     }));
@@ -229,6 +231,49 @@ const setTicketRule = async (req, res) => {
   }
 };
 
+// @desc    Import R&D tickets onto the board: while enabled, every open R&D
+//          ticket gets a card in `list` (or the first list). Enabling imports
+//          the open R&D tickets now; disabling leaves existing cards alone.
+// @route   PUT /api/development/boards/:id/rnd-import   { enabled: boolean, list?: id | null }
+const setRndImport = async (req, res) => {
+  try {
+    const board = await loadBoardInScope(req, req.params.id);
+    if (!board) return notFound(res);
+    // Same guard as the ticket rule: it pulls ticketing data onto the board
+    if (!canSeeAllBoards(req.user)) return forbidden(res, TICKET_RULE_MESSAGE);
+
+    const { enabled, list } = req.body ?? {};
+    if (typeof enabled !== "boolean") return badRequest(res, "enabled must be true or false");
+
+    let listId = board.rndImport?.list ?? null;
+    if (list !== undefined) {
+      if (list === null || list === "") listId = null;
+      else if (!isValidId(list) || !(await DevList.exists({ _id: list, board: board._id }))) {
+        return badRequest(res, "The column must be a list on this board");
+      } else listId = list;
+    }
+    if (enabled && !listId && !(await DevList.exists({ board: board._id }))) {
+      return badRequest(res, "Add a column to the board first — R&D tickets land in it");
+    }
+
+    board.rndImport = {
+      enabled,
+      list: listId,
+      setBy: enabled ? req.user._id : board.rndImport?.setBy ?? req.user._id,
+    };
+    await board.save();
+    const imported = enabled ? await importRndTicketsForBoard(board) : 0;
+    const message = !enabled
+      ? "R&D import turned off"
+      : imported
+        ? `R&D import on — ${imported} open R&D ticket${imported === 1 ? "" : "s"} added`
+        : "R&D import on";
+    ok(res, { board: await populateBoard(DevBoard.findById(board._id)), imported }, message);
+  } catch (error) {
+    fail(res, error, "Error saving the R&D import");
+  }
+};
+
 // @desc    Add a label to the board
 // @route   POST /api/development/boards/:id/labels
 const addLabel = async (req, res) => {
@@ -296,6 +341,7 @@ export {
   deleteBoard,
   setMembers,
   setTicketRule,
+  setRndImport,
   addLabel,
   updateLabel,
   deleteLabel,

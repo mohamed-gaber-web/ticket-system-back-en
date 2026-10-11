@@ -41,6 +41,13 @@ const staff = requireModule("tickets");
  *     security:
  *       - bearerAuth: []
  *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: ticketType
+ *         schema:
+ *           type: string
+ *           enum: [customer, internal, rnd]
+ *         description: Count only this ticket type. R&D tickets are never counted for callers without R&D access.
  *     responses:
  *       200:
  *         description: Statistics retrieved successfully
@@ -247,6 +254,12 @@ router.get("/number/:ticketNumber", getTicketByNumber);
  *         schema:
  *           type: string
  *         description: Filter by assigned team ID
+ *       - in: query
+ *         name: ticketType
+ *         schema:
+ *           type: string
+ *           enum: [customer, internal, rnd]
+ *         description: Filter by ticket type ("customer" also matches tickets saved before the field existed). R&D tickets are never listed for callers without R&D access.
  *     responses:
  *       200:
  *         description: Tickets retrieved successfully
@@ -285,8 +298,15 @@ router.get("/number/:ticketNumber", getTicketByNumber);
  *               - subject
  *               - description
  *               - priority
- *               - customer
  *             properties:
+ *               ticketType:
+ *                 type: string
+ *                 enum: [customer, internal, rnd]
+ *                 default: customer
+ *                 description: Staff only (customers always create customer tickets). "rnd" needs R&D access (403 otherwise).
+ *               requestedBy:
+ *                 type: string
+ *                 description: Employee ID asking for the work; internal/R&D default to the creator.
  *               subject:
  *                 type: string
  *                 example: Cannot login to account
@@ -299,7 +319,7 @@ router.get("/number/:ticketNumber", getTicketByNumber);
  *                 example: high
  *               customer:
  *                 type: string
- *                 description: Customer ID
+ *                 description: Customer ID (required only for customer tickets)
  *                 example: 60d5ec49f1b2c72b8c8e4f1b
  *               category:
  *                 type: string

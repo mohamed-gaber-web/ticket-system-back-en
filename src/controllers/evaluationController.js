@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Consultant from "../models/Consltant.js";
 import { withAnyRole } from "../utils/access.js";
 import Ticket from "../models/Ticket.js";
+import { customerTicketFilter } from "../utils/ticketTypes.js";
 import Category from "../models/Category.js";
 import EmployeeEvaluation from "../models/EmployeeEvaluation.js";
 import { calculateTicketPerformance, calculateEvaluation, buildTicketDetails } from "../utils/evaluationCalculator.js";
@@ -99,6 +100,8 @@ export const getEvaluation = async (req, res) => {
         $or: [{ acceptedBy: consultantId }, { assignedBy: consultantId }],
         createdAt: { $gte: monthStart, $lte: monthEnd },
         category: { $nin: meetingCategoryIds },
+        // Customer evaluation / delivery metrics: customer tickets only
+        ...customerTicketFilter(),
       })
         .select("ticketNumber subject status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate createdAt isSubTicket parentTicket")
         .lean(),
@@ -227,6 +230,8 @@ export const getAllEvaluations = async (req, res) => {
       Ticket.find({
         createdAt: { $gte: monthStart, $lte: monthEnd },
         category: { $nin: meetingCategoryIds },
+        // Customer evaluation / delivery metrics: customer tickets only
+        ...customerTicketFilter(),
       })
         .select("status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate acceptedBy assignedBy isSubTicket")
         .lean(),
@@ -336,6 +341,8 @@ export const getAllEvaluationsRange = async (req, res) => {
       Ticket.find({
         $or: dateRanges,
         category: { $nin: meetingCategoryIds },
+        // Customer evaluation / delivery metrics: customer tickets only
+        ...customerTicketFilter(),
       })
         .select("status resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate acceptedBy assignedBy isSubTicket")
         .lean(),

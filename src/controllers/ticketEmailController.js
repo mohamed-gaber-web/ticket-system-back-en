@@ -2,7 +2,8 @@ import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
 import Customer from "../models/Customer.js";
 import TicketEmail from "../models/TicketEmail.js";
-import { isAdmin } from "../utils/access.js";
+import { isAdmin, canSeeRnd } from "../utils/access.js";
+import { rndHiddenFrom, ticketIdHiddenFrom, rndTicketIds } from "../utils/ticketVisibility.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import { syncLeadInbox } from "../utils/leadInboxSync.js";
 import {
@@ -20,7 +21,8 @@ import {
  *
  * Staff only: every route sits behind requireModule("tickets"), which customers
  * never pass. Any member of the ticketing staff may see every ticket (the rule
- * the tickets API already follows), so a ticket's thread needs no per-row fence.
+ * the tickets API already follows) except R&D tickets, which need R&D access:
+ * their threads answer 404 and stay out of the inbox (utils/ticketVisibility.js).
  *
  * Every outbound subject carries the ticket number ("[TKT-2026-00012] …"), so
  * the inbox sync can still file a customer's reply here when it arrives outside
@@ -29,9 +31,11 @@ import {
 
 const notFound = (res, what = "Ticket") => res.status(404).json({ success: false, message: `${what} not found` });
 
-const loadTicket = async (id) => {
+/** The ticket behind `id` if the caller may see it, else null (→ 404). */
+const loadTicket = async (req, id) => {
   if (!mongoose.Types.ObjectId.isValid(String(id))) return null;
-  return Ticket.findById(id).select("_id ticketNumber subject customer acceptedBy status").lean();
+  const ticket = await Ticket.findById(id).select("_id ticketNumber subject customer acceptedBy status ticketType").lean();
+  return ticket && !(await rndHiddenFrom(req, ticket)) ? ticket : null;
 };
 
 /** Make sure the subject names the ticket, so replies can be matched back to it. */
@@ -68,7 +72,7 @@ const sendAndRecord = async (req, res, ticket, replyTo = null) => {
 // @access  Private (ticketing staff)
 export const getTicketEmails = async (req, res) => {
   try {
-    const ticket = await loadTicket(req.params.ticketId);
+    const ticket = await loadTicket(req, req.params.ticketId);
     if (!ticket) return notFound(res);
     const emails = await TicketEmail.find({ ticket: ticket._id })
       .populate("sentBy", "firstName lastName email")
@@ -83,7 +87,7 @@ export const getTicketEmails = async (req, res) => {
 // @route   POST /api/ticket-emails/ticket/:ticketId
 // @access  Private (ticketing staff)
 export const sendTicketEmail = async (req, res) => {
-  const ticket = await loadTicket(req.params.ticketId);
+  const ticket = await loadTicket(req, req.params.ticketId);
   if (!ticket) return notFound(res);
   return sendAndRecord(req, res, ticket);
 };
@@ -93,7 +97,7 @@ export const sendTicketEmail = async (req, res) => {
 // @access  Private (ticketing staff)
 export const replyToTicketEmail = async (req, res) => {
   try {
-    const ticket = await loadTicket(req.params.ticketId);
+    const ticket = await loadTicket(req, req.params.ticketId);
     if (!ticket) return notFound(res);
     if (!mongoose.Types.ObjectId.isValid(String(req.params.emailId))) return notFound(res, "Email");
     const original = await TicketEmail.findOne({ _id: req.params.emailId, ticket: ticket._id }).lean();
@@ -117,6 +121,7 @@ export const replyToTicketEmail = async (req, res) => {
 export const markTicketEmailRead = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(String(req.params.emailId))) return notFound(res, "Email");
+    if (await ticketIdHiddenFrom(req, req.params.ticketId)) return notFound(res, "Email");
     const email = await TicketEmail.findOne({ _id: req.params.emailId, ticket: req.params.ticketId });
     if (!email) return notFound(res, "Email");
     if (email.direction === "inbound" && email.status === "received") {
@@ -137,6 +142,7 @@ export const markTicketEmailRead = async (req, res) => {
 export const deleteTicketEmail = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(String(req.params.emailId))) return notFound(res, "Email");
+    if (await ticketIdHiddenFrom(req, req.params.ticketId)) return notFound(res, "Email");
     const email = await TicketEmail.findOne({ _id: req.params.emailId, ticket: req.params.ticketId });
     if (!email) return notFound(res, "Email");
     const isSender = email.sentBy && String(email.sentBy) === String(req.user._id);
@@ -192,6 +198,11 @@ export const getTicketEmailInbox = async (req, res) => {
       match.ticket = { $in: ticketIds };
     }
     if (filter === "mine") match.sentBy = req.user._id;
+    // R&D tickets' conversations are not listed for callers without R&D access
+    if (!(await canSeeRnd(req.user))) {
+      const hidden = await rndTicketIds();
+      if (hidden.length) match.ticket = { ...(match.ticket ?? {}), $nin: hidden };
+    }
 
     const rows = await TicketEmail.aggregate([
       { $match: match },

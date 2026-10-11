@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Consultant from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
+import { customerTicketFilter } from "../utils/ticketTypes.js";
 import KpiSettings from "../models/KpiSettings.js";
 
 const RESOLVED_STATUSES = new Set(["resolved", "closed", "delivered", "tested"]);
@@ -84,6 +85,8 @@ export const getConsultantKpi = async (req, res) => {
       $or: [{ acceptedBy: consultantId }, { assignedBy: consultantId }],
       createdAt: { $gte: monthStart, $lte: monthEnd },
       isSubTicket: { $ne: true },
+      // Delivery KPIs are measured on customer tickets only
+      ...customerTicketFilter(),
     })
       .select(
         "_id ticketNumber subject status priority resolvedAt deliveredAt closedAt deliveryEstimationDate internalDeliveryDate adminPoints"

@@ -1,5 +1,6 @@
 import TicketStatusHistory from "../models/TicketStatusHistory.js";
 import Ticket from "../models/Ticket.js";
+import { rndHiddenFrom, ticketIdHiddenFrom } from "../utils/ticketVisibility.js";
 
 import { isValidUserType, normalizeUserType } from "../utils/access.js";
 // @desc    Get all status history records
@@ -81,7 +82,7 @@ const getStatusHistoryById = async (req, res) => {
         select: "firstName lastName email companyName contactPerson",
       });
 
-    if (!statusHistory) {
+    if (!statusHistory || (await ticketIdHiddenFrom(req, statusHistory.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Status history record not found",
@@ -117,7 +118,7 @@ const getStatusHistoryByTicket = async (req, res) => {
 
     // Verify ticket exists
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
+    if (!ticket || (await rndHiddenFrom(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -176,7 +177,7 @@ const createStatusHistory = async (req, res) => {
 
     // Verify ticket exists
     const ticketExists = await Ticket.findById(ticket);
-    if (!ticketExists) {
+    if (!ticketExists || (await rndHiddenFrom(req, ticketExists))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -233,7 +234,7 @@ const updateStatusHistory = async (req, res) => {
 
     let statusHistory = await TicketStatusHistory.findById(req.params.id);
 
-    if (!statusHistory) {
+    if (!statusHistory || (await ticketIdHiddenFrom(req, statusHistory.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Status history record not found",
@@ -298,7 +299,7 @@ const deleteStatusHistory = async (req, res) => {
   try {
     const statusHistory = await TicketStatusHistory.findById(req.params.id);
 
-    if (!statusHistory) {
+    if (!statusHistory || (await ticketIdHiddenFrom(req, statusHistory.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Status history record not found",

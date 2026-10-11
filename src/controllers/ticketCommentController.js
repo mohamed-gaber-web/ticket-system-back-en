@@ -1,5 +1,7 @@
 import TicketComment from "../models/TicketComment.js";
 import Ticket from "../models/Ticket.js";
+import { rndHiddenFrom, ticketIdHiddenFrom } from "../utils/ticketVisibility.js";
+import { isCustomerTicket } from "../utils/ticketTypes.js";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import { notifyAndEmail, resolveUser } from "../utils/emailHelper.js";
@@ -102,7 +104,7 @@ const getCommentById = async (req, res) => {
     const comment = await TicketComment.findById(req.params.id)
       .populate("ticket", "ticketNumber subject status priority");
 
-    if (!comment) {
+    if (!comment || (await ticketIdHiddenFrom(req, comment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Comment not found",
@@ -141,7 +143,7 @@ const getCommentsByTicket = async (req, res) => {
 
     // Verify ticket exists
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
+    if (!ticket || (await rndHiddenFrom(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -201,7 +203,7 @@ const createComment = async (req, res) => {
 
     // Verify ticket exists
     const ticketExists = await Ticket.findById(ticket);
-    if (!ticketExists) {
+    if (!ticketExists || (await rndHiddenFrom(req, ticketExists))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -252,8 +254,8 @@ const createComment = async (req, res) => {
           } else {
             commenterName = `${commenterUser.firstName} ${commenterUser.lastName}`;
             commenterRole = "Consultant";
-            // Notify customer
-            if (fullTicket.customer) {
+            // Notify customer — customer tickets only
+            if (fullTicket.customer && isCustomerTicket(fullTicket)) {
               recipient = fullTicket.customer;
               recipients.push({ userId: fullTicket.customer._id, userType: "customer" });
             }
@@ -308,7 +310,7 @@ const updateComment = async (req, res) => {
 
     let comment = await TicketComment.findById(req.params.id);
 
-    if (!comment) {
+    if (!comment || (await ticketIdHiddenFrom(req, comment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Comment not found",
@@ -375,7 +377,7 @@ const deleteComment = async (req, res) => {
   try {
     const comment = await TicketComment.findById(req.params.id);
 
-    if (!comment) {
+    if (!comment || (await ticketIdHiddenFrom(req, comment.ticket))) {
       return res.status(404).json({
         success: false,
         message: "Comment not found",
@@ -415,7 +417,7 @@ const getInternalComments = async (req, res) => {
 
     // Verify ticket exists
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
+    if (!ticket || (await rndHiddenFrom(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",
@@ -475,7 +477,7 @@ const getPublicComments = async (req, res) => {
 
     // Verify ticket exists
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
+    if (!ticket || (await rndHiddenFrom(req, ticket))) {
       return res.status(404).json({
         success: false,
         message: "Ticket not found",

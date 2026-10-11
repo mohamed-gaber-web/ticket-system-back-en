@@ -3,6 +3,7 @@ import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
 import { emitNotification } from "../socket/io.js";
+import { isCustomerTicket } from "./ticketTypes.js";
 import {
   sendTicketCreatedEmail,
   sendTicketAssignedEmail,
@@ -27,6 +28,8 @@ import {
  * the calling controller.
  */
 export const notifyAndEmail = async (eventType, data = {}) => {
+  // Internal and R&D tickets never reach the customer, whatever the caller passed
+  data = await withoutCustomerUnlessCustomerTicket(data);
   // Run both in parallel, catch errors independently
   await Promise.allSettled([
     createNotification(eventType, data).catch((err) =>
@@ -36,6 +39,32 @@ export const notifyAndEmail = async (eventType, data = {}) => {
       console.error(`Email error [${eventType}]:`, err.message)
     ),
   ]);
+};
+
+/**
+ * Only customer tickets talk to their customer. For any other ticket, drop every
+ * customer recipient (in-app rows say userType "customer"; reminder e-mail lists
+ * carry the customer document itself) and mark the data so the e-mail dispatch
+ * skips the customer-facing templates. Tickets loaded without `ticketType` are
+ * looked up once, so a partial select can never fall back to "customer" wrongly.
+ */
+export const withoutCustomerUnlessCustomerTicket = async (data) => {
+  const { ticket } = data;
+  if (!ticket) return data;
+  let typed = ticket;
+  if (ticket.ticketType === undefined && ticket._id) {
+    typed = (await Ticket.findById(ticket._id).select("ticketType").lean()) ?? ticket;
+  }
+  if (isCustomerTicket(typed)) return data;
+  const customerId = String(ticket.customer?._id ?? ticket.customer ?? "");
+  const isCustomer = (r) =>
+    r?.userType === "customer" || (customerId && String(r?.userId ?? r?._id ?? "") === customerId);
+  return {
+    ...data,
+    customerFacing: false,
+    recipients: Array.isArray(data.recipients) ? data.recipients.filter((r) => !isCustomer(r)) : data.recipients,
+    recipient: isCustomer(data.recipient) ? null : data.recipient,
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -148,7 +177,7 @@ const sendEventEmail = async (eventType, data) => {
 
   switch (eventType) {
     case "new_ticket": {
-      const customer = await resolveCustomer(ticket.customer);
+      const customer = data.customerFacing === false ? null : await resolveCustomer(ticket.customer);
       if (customer) {
         // Always CC the company_admin(s) for this company (covers both scenarios:
         // admin creates ticket for a company_user, and company_user creates their own ticket)
@@ -193,7 +222,7 @@ const sendEventEmail = async (eventType, data) => {
       break;
     }
     case "status_change": {
-      const customer = await resolveCustomer(ticket.customer);
+      const customer = data.customerFacing === false ? null : await resolveCustomer(ticket.customer);
       if (customer) {
         await sendStatusChangeEmail(ticket, customer, data.oldStatus, data.newStatus);
       }
@@ -204,7 +233,7 @@ const sendEventEmail = async (eventType, data) => {
       break;
     }
     case "ticket_resolved": {
-      const customer = await resolveCustomer(ticket.customer);
+      const customer = data.customerFacing === false ? null : await resolveCustomer(ticket.customer);
       if (customer) {
         await sendTicketResolvedEmail(ticket, customer);
       }
@@ -214,7 +243,7 @@ const sendEventEmail = async (eventType, data) => {
       break;
     }
     case "ticket_closed": {
-      const customer = await resolveCustomer(ticket.customer);
+      const customer = data.customerFacing === false ? null : await resolveCustomer(ticket.customer);
       if (customer) {
         await sendTicketClosedEmail(ticket, customer);
       }
@@ -224,7 +253,7 @@ const sendEventEmail = async (eventType, data) => {
       break;
     }
     case "ticket_delivered": {
-      const customer = await resolveCustomer(ticket.customer);
+      const customer = data.customerFacing === false ? null : await resolveCustomer(ticket.customer);
       if (customer) {
         await sendTicketDeliveredEmail(ticket, customer);
       }
@@ -240,14 +269,14 @@ const sendEventEmail = async (eventType, data) => {
       break;
     }
     case "ticket_auto_closed": {
-      const customer = await resolveCustomer(ticket.customer);
+      const customer = data.customerFacing === false ? null : await resolveCustomer(ticket.customer);
       if (customer) {
         await sendAutoCloseEmail(ticket, customer, data);
       }
       break;
     }
     case "pending_reminder": {
-      const customer = await resolveCustomer(ticket.customer);
+      const customer = data.customerFacing === false ? null : await resolveCustomer(ticket.customer);
       if (customer) {
         await sendPendingReminderEmail(ticket, customer, data);
       }

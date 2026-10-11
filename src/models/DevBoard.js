@@ -37,6 +37,22 @@ const ticketRuleSchema = mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * "Import R&D tickets": while `enabled`, every open R&D ticket gets a card on
+ * this board (in `list`, or the first list when that one is gone) — no
+ * department or assignee condition. Same guard and same card rules as the
+ * ticket rule (devBoardController.setRndImport, src/utils/devTicketSync.js);
+ * `setBy` becomes the cards' creator.
+ */
+const rndImportSchema = mongoose.Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    list: { type: mongoose.Schema.Types.ObjectId, ref: "DevList", default: null },
+    setBy: { type: mongoose.Schema.Types.ObjectId, ref: "Consultant", default: null },
+  },
+  { _id: false }
+);
+
 const devBoardSchema = mongoose.Schema(
   {
     name: {
@@ -60,6 +76,7 @@ const devBoardSchema = mongoose.Schema(
     labels: { type: [labelSchema], default: [] },
     archived: { type: Boolean, default: false },
     ticketRule: { type: ticketRuleSchema, default: null },
+    rndImport: { type: rndImportSchema, default: () => ({ enabled: false, list: null, setBy: null }) },
     // Every ticket that has ever had a card on this board. A deleted ticket
     // card stays deleted: sync never re-adds a ticket listed here.
     syncedTickets: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Ticket" }], default: [], select: false },
@@ -71,6 +88,7 @@ devBoardSchema.index({ members: 1 });
 devBoardSchema.index({ createdBy: 1 });
 devBoardSchema.index({ archived: 1, updatedAt: -1 });
 devBoardSchema.index({ "ticketRule.department": 1, "ticketRule.employee": 1 });
+devBoardSchema.index({ "rndImport.enabled": 1 });
 
 const DevBoard = mongoose.model("DevBoard", devBoardSchema);
 export default DevBoard;
