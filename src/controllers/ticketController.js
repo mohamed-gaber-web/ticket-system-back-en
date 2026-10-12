@@ -673,10 +673,10 @@ const getTicketByNumber = async (req, res) => {
 
 // ── Duration rule ─────────────────────────────────────────────────────────────
 // Work is only recorded once it has been done: a ticket may sit in New or
-// Assigned without a duration, but any later status (in progress, pending,
+// Assigned (or be put On Hold / Cancelled) without a duration, but any later status (in progress, pending,
 // delivered, tested, resolved, closed, reopened, not related…) needs the hours
 // spent on it — otherwise the hour reports count it as zero.
-const STATUSES_WITHOUT_DURATION = new Set(["new", "assigned"]);
+const STATUSES_WITHOUT_DURATION = new Set(["new", "assigned", "cancelled", "on_hold"]);
 export const DURATION_REQUIRED_MESSAGE =
   "Enter the ticket's duration (hours, more than 0) before moving it past Assigned.";
 const hasDuration = (v) => v !== null && v !== undefined && v !== "" && Number(v) > 0;
@@ -1202,7 +1202,7 @@ const updateTicketStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered", "not_related"];
+    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered", "not_related", "cancelled", "on_hold"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -1760,7 +1760,7 @@ const getTicketsByStatus = async (req, res) => {
     const { status } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered", "not_related"];
+    const validStatuses = ["new", "assigned", "in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered", "not_related", "cancelled", "on_hold"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,

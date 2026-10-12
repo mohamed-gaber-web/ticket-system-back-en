@@ -12,8 +12,8 @@ import { durationError, DURATION_REQUIRED_MESSAGE } from "../src/controllers/tic
 const LATER_STATUSES = ["in_progress", "customer_pending", "resolved", "tested", "closed", "reopened", "delivered", "not_related"];
 
 describe("durationError", () => {
-  it("allows New and Assigned without a duration", () => {
-    for (const status of ["new", "assigned"]) {
+  it("allows New, Assigned, On Hold and Cancelled without a duration", () => {
+    for (const status of ["new", "assigned", "on_hold", "cancelled"]) {
       for (const duration of [undefined, null, "", 0, "0"]) {
         assert.equal(durationError(status, duration), null, `${status} / ${String(duration)}`);
       }

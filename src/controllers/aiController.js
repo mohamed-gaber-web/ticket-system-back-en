@@ -205,7 +205,7 @@ export const parseSearch = async (req, res) => {
     const prompt = `You are a search query parser for a ticket management system. Today is ${today}.
 Convert this natural language query into structured filter parameters.
 
-Valid status values: new, assigned, in_progress, customer_pending, resolved, tested, closed, delivered, not_related
+Valid status values: new, assigned, in_progress, customer_pending, resolved, tested, closed, delivered, not_related, cancelled, on_hold
 Valid priority values: low, medium, high, critical
 
 Query: "${query}"

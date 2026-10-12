@@ -24,7 +24,7 @@ import TicketAssignment from "../models/TicketAssignment.js";
  */
 
 /** Tickets in these statuses are finished and never get a card. */
-const FINISHED = ["closed", "not_related"];
+const FINISHED = ["closed", "not_related", "cancelled"];
 
 const TICKET_TO_CARD_PRIORITY = { low: "low", medium: "medium", high: "high", critical: "urgent" };
 

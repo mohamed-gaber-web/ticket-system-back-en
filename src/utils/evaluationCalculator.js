@@ -36,7 +36,7 @@ export const categorizeTicket = (ticket) => {
   const deadline = ticket.deliveryEstimationDate ?? null; // customer delivery date
   if (!deadline) return null;
   // Not the consultant's work at all — never counted for or against them.
-  if (ticket.status === "not_related") return null;
+  if (ticket.status === "not_related" || ticket.status === "cancelled") return null;
 
   const deadlineDay = toDay(deadline);
   const deliveredDate = deliveryMoment(ticket).date;
