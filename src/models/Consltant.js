@@ -215,6 +215,21 @@ const consultantSchema = mongoose.Schema(
       min: 0,
       default: null,
     },
+    // My Home profile card + planner. office / skills / availability are the
+    // employee's own to edit (PUT /auth/profile); the capacity is not.
+    office: { type: String, trim: true, maxlength: 100, default: "" },
+    skills: {
+      type: [{ type: String, trim: true, maxlength: 50 }],
+      default: [],
+      validate: { validator: (v) => v.length <= 20, message: "At most 20 skills" },
+    },
+    availability: {
+      type: String,
+      enum: ["available", "busy", "away", "on_leave"],
+      default: "available",
+    },
+    timezone: { type: String, trim: true, default: "Africa/Cairo" },
+    dailyCapacityHours: { type: Number, min: 1, max: 24, default: null },
     profilePicture: {
       type: String,
       default: null,

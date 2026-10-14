@@ -684,6 +684,14 @@ const hasDuration = (v) => v !== null && v !== undefined && v !== "" && Number(v
 export const durationError = (status, duration) =>
   status && !STATUSES_WITHOUT_DURATION.has(status) && !hasDuration(duration) ? DURATION_REQUIRED_MESSAGE : null;
 
+// Planned hours from a form value: empty clears it, anything else must be a number ≥ 0.
+const toEstimate = (v) => {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
 // @desc    Create new ticket
 // @route   POST /api/tickets
 // @access  Public
@@ -711,6 +719,7 @@ const createTicket = async (req, res) => {
       internalDeliveryDate,
       scheduledWeek,
       durationHours,
+      estimateHours,
       ticketType: requestedType,
       requestedBy: requestedByRaw,
     } = req.body;
@@ -799,6 +808,7 @@ const createTicket = async (req, res) => {
       internalDeliveryDate: isEmployee(req) ? internalDeliveryDate : undefined,
       scheduledWeek: isEmployee(req) ? scheduledWeek : undefined,
       durationHours: isEmployee(req) ? durationHours : undefined,
+      estimateHours: isEmployee(req) ? toEstimate(estimateHours) : undefined,
       estimationStartDate: estimation.estimationStartDate,
       deliveryEstimationDate: estimation.deliveryEstimationDate,
       estimationDays: estimation.estimationDays,
@@ -902,6 +912,7 @@ const updateTicket = async (req, res) => {
       internalDeliveryDate,
       scheduledWeek,
       durationHours,
+      estimateHours,
       resolvedAt,
       closedAt,
       deliveredAt,
@@ -994,6 +1005,7 @@ const updateTicket = async (req, res) => {
       ...(internalDeliveryDate !== undefined && { internalDeliveryDate }),
       ...(scheduledWeek !== undefined && { scheduledWeek }),
       ...(durationHours !== undefined && { durationHours }),
+      ...(estimateHours !== undefined && isEmployee(req) && { estimateHours: toEstimate(estimateHours) }),
       ...(resolvedAt !== undefined && { resolvedAt }),
       ...(closedAt !== undefined && { closedAt }),
       // The delivered date can be set or corrected by hand (staff only — it drives

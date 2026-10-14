@@ -34,6 +34,19 @@ const callLogSchema = mongoose.Schema(
       type: String,
       trim: true,
     },
+    // Logged from the My Home call list. Older calls (and the lead page's call
+    // form) leave it unset.
+    outcome: {
+      type: String,
+      enum: ["answered", "no_answer", "callback"],
+      default: undefined,
+    },
+    // The reminder a "callback" outcome created, so undoing the call removes it.
+    followUp: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "FollowUp",
+      default: null,
+    },
   },
   {
     timestamps: true,
