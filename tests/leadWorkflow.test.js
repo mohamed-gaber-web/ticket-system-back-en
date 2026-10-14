@@ -69,8 +69,8 @@ describe("proposalPriceFromStatus", () => {
     assert.equal(proposalPriceFromStatus("Closed Won", { final: 55000 }), null);
   });
 
-  it("ignores an empty amount and defaults the currency to EGP", () => {
+  it("ignores an empty amount and stores the price as USD", () => {
     assert.equal(proposalPriceFromStatus("Proposal Sent", { value: "" }), null);
-    assert.equal(proposalPriceFromStatus("Proposal Sent", { value: 1, value__c: "BTC" }).currency, "EGP");
+    assert.equal(proposalPriceFromStatus("Proposal Sent", { value: 1, value__c: "EGP" }).currency, "USD");
   });
 });

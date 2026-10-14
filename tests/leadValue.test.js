@@ -9,10 +9,10 @@ import assert from "node:assert/strict";
 import { leadValueFromStatus } from "../src/config/leadStatusWorkflow.js";
 
 describe("leadValueFromStatus", () => {
-  it("takes the Quoted Value at Proposal Sent, with its currency", () => {
+  it("takes the Quoted Value at Proposal Sent, always in USD", () => {
     assert.deepEqual(leadValueFromStatus("Proposal Sent", { value: "50000", value__c: "SAR" }), {
       amount: 50000,
-      currency: "SAR",
+      currency: "USD",
       source: "quoted",
     });
   });
@@ -22,9 +22,9 @@ describe("leadValueFromStatus", () => {
     assert.equal(leadValueFromStatus("Closed Won", { final: 40000 }).source, "final");
   });
 
-  it("defaults the currency to EGP, and refuses one outside the list", () => {
-    assert.equal(leadValueFromStatus("Closed Won", { final: 1 }).currency, "EGP");
-    assert.equal(leadValueFromStatus("Closed Won", { final: 1, final__c: "BTC" }).currency, "EGP");
+  it("stores every value as USD, whatever currency is sent", () => {
+    assert.equal(leadValueFromStatus("Closed Won", { final: 1 }).currency, "USD");
+    assert.equal(leadValueFromStatus("Closed Won", { final: 1, final__c: "EGP" }).currency, "USD");
   });
 
   it("keeps the lead's value when the optional figure is left empty", () => {

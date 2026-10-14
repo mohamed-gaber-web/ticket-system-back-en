@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { LEAD_STATUSES, VALUE_CURRENCIES, VALUE_SOURCES } from "../config/leadStatusWorkflow.js";
+import { LEAD_STATUSES, VALUE_CURRENCIES, VALUE_SOURCES, DEFAULT_VALUE_CURRENCY } from "../config/leadStatusWorkflow.js";
 
 // ── Spec enum value lists (see tele-sales lead field specification) ────────────
 
@@ -288,8 +288,8 @@ const leadSchema = mongoose.Schema(
       type: Number,
       min: 0,
     },
-    // Unset on leads valued before currencies were recorded — read as EGP, the
-    // default the status-change form has always offered.
+    // Always USD (tele-sales prices are in dollars only); unset on leads that
+    // have no value.
     valueCurrency: {
       type: String,
       enum: VALUE_CURRENCIES,
@@ -475,6 +475,13 @@ leadSchema.statics.reserveCustomerIds = async function (count) {
   }
   return ids;
 };
+
+// Prices are USD only. A record still carrying an older currency (EGP, SAR…)
+// is relabelled on its next save instead of failing the enum.
+leadSchema.pre("validate", function () {
+  if (this.valueCurrency && this.valueCurrency !== DEFAULT_VALUE_CURRENCY) this.valueCurrency = DEFAULT_VALUE_CURRENCY;
+  if (this.proposalCurrency && this.proposalCurrency !== DEFAULT_VALUE_CURRENCY) this.proposalCurrency = DEFAULT_VALUE_CURRENCY;
+});
 
 // Single-document creates (Lead.create / doc.save) get their ID here.
 leadSchema.pre("save", async function () {

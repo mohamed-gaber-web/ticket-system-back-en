@@ -30,7 +30,7 @@ const proposalField = (status) =>
 
 /** "50,000 EGP" → { amount: 50000, currency: "EGP" }; null when unreadable or zero. */
 const parseMoney = (text) => {
-  const m = String(text ?? "").trim().match(/^([\d,.]+)\s*([A-Z]{3})?$/);
+  const m = String(text ?? "").trim().match(/^\$?\s*([\d,.]+)\s*([A-Z]{3})?$/);
   if (!m) return null;
   const amount = Number(m[1].replace(/,/g, ""));
   if (!Number.isFinite(amount) || amount <= 0) return null;

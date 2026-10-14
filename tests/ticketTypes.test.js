@@ -256,3 +256,13 @@ describe("development boards: R&D import", () => {
     assert.deepEqual(cardOwners(board, "rule", ["x"]), { assignedTo: person, createdBy: ruleSetBy });
   });
 });
+
+describe("isInternalCompanyName", () => {
+  it("recognises our own company however it is spaced or cased", async () => {
+    const { isInternalCompanyName } = await import("../src/utils/ticketTypes.js");
+    assert.equal(isInternalCompanyName("Grow Path For Business Development"), true);
+    assert.equal(isInternalCompanyName("  grow path  for business development "), true);
+    assert.equal(isInternalCompanyName("Grow Path Trading"), false);
+    assert.equal(isInternalCompanyName(undefined), false);
+  });
+});

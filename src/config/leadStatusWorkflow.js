@@ -38,10 +38,16 @@ export const LEAD_STATUSES = [
 export const STEPS = ["New Lead", "Contact Attempts", "Qualified", "Meeting", "Proposal", "Negotiation", "Closed"];
 
 // ── Lead value (Lead.potentialValue) ─────────────────────────────────────────
-// Currencies a money field (and the lead's value) may carry. The status-change
-// form offers the first three; the lead form offers all of them.
-export const VALUE_CURRENCIES = ["EGP", "SAR", "AED", "USD", "EUR"];
-export const DEFAULT_VALUE_CURRENCY = "EGP";
+// Tele-sales prices are in US dollars only. Older records carried EGP / SAR /
+// AED / EUR; they were relabelled USD with the amount unchanged
+// (src/scripts/migrateCurrencyToUsd.js), and anything else that still arrives is
+// stored as USD too (the Lead model's pre-validate hook, blankEnumsToNull).
+export const VALUE_CURRENCIES = ["USD"];
+export const DEFAULT_VALUE_CURRENCY = "USD";
+// The currencies records were stored in before USD-only (read by the migration).
+export const LEGACY_CURRENCIES = ["EGP", "SAR", "AED", "USD", "EUR"];
+/** "$50,000" — how a tele-sales amount is displayed and stored in history. */
+export const formatUsd = (amount) => `$${Number(amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 
 // Where the lead's value came from. A money field marked `leadValue` below
 // overwrites Lead.potentialValue when its status is reached, so the lead always
@@ -411,8 +417,7 @@ export const buildFieldValueMap = (statusKey, rawValues, lead) => {
       }
       case "money": {
         const amount = Number(raw) || 0;
-        const currency = values[`${field.k}__c`] || "EGP";
-        out[field.k] = amount ? `${amount.toLocaleString("en-US")} ${currency}` : "";
+        out[field.k] = amount ? formatUsd(amount) : "";
         break;
       }
       case "toggle":
@@ -439,10 +444,7 @@ export const leadValueFromStatus = (statusKey, rawValues) => {
   if (!field) return null;
   const amount = Number(values[field.k]);
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  const currency = VALUE_CURRENCIES.includes(values[`${field.k}__c`])
-    ? values[`${field.k}__c`]
-    : DEFAULT_VALUE_CURRENCY;
-  return { amount, currency, source: field.leadValue };
+  return { amount, currency: DEFAULT_VALUE_CURRENCY, source: field.leadValue };
 };
 
 /**
@@ -458,10 +460,7 @@ export const proposalPriceFromStatus = (statusKey, rawValues) => {
   if (!field) return null;
   const amount = Number(values[field.k]);
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  const currency = VALUE_CURRENCIES.includes(values[`${field.k}__c`])
-    ? values[`${field.k}__c`]
-    : DEFAULT_VALUE_CURRENCY;
-  return { amount, currency };
+  return { amount, currency: DEFAULT_VALUE_CURRENCY };
 };
 
 const FOLLOWUP_TYPE_BY_KIND = { call: "Call", meet: "Meeting", follow: "Call", deal: "Call" };

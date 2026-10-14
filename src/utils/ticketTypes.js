@@ -43,6 +43,12 @@ export const ticketTypeFilter = (type) => {
 /** Ticket number prefix for a ticket without a customer. */
 export const ticketTypePrefix = (type) => (type === "internal" ? "INT" : type === "rnd" ? "RND" : "TKT");
 
+// Our own company. Its tickets are internal work, never customer tickets — a
+// ticket raised under one of its customer accounts is stored as internal.
+export const INTERNAL_COMPANY_NAME = "Grow Path For Business Development";
+const normaliseCompany = (name) => String(name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+export const isInternalCompanyName = (name) => normaliseCompany(name) === normaliseCompany(INTERNAL_COMPANY_NAME);
+
 export const RND_FORBIDDEN_MESSAGE = "You do not have access to R&D tickets.";
 export const CUSTOMER_REQUIRED_MESSAGE = "Customer ID is required";
 export const FEEDBACK_CUSTOMER_ONLY_MESSAGE = "Feedback is only for customer tickets";
