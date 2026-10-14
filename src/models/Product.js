@@ -65,7 +65,7 @@ const productSchema = new mongoose.Schema(
     specifications: { type: [specificationSchema], default: [] },
     price: {
       amount: { type: Number, min: 0 },
-      currency: { type: String, trim: true, uppercase: true, maxlength: 3, default: "EGP" },
+      currency: { type: String, trim: true, uppercase: true, maxlength: 3, default: "USD" },
       // "per user / month", "starting from", "on request"…
       note: { type: String, trim: true, maxlength: 200 },
     },

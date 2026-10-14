@@ -66,7 +66,8 @@ const cleanPrice = (value) => {
   if (amount !== undefined && (!Number.isFinite(amount) || amount < 0)) throw new InputError("price.amount must be a non-negative number");
   return {
     amount,
-    currency: value.currency ? String(value.currency).trim().toUpperCase().slice(0, 3) : "EGP",
+    // Tele-sales prices are USD only.
+    currency: "USD",
     note: value.note ? String(value.note).trim() : undefined,
   };
 };

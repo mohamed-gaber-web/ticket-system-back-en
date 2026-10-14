@@ -66,8 +66,8 @@ const splitName = (full) => {
 
 const formatPrice = (price) => {
   if (!price || price.amount == null) return price?.note ?? "";
-  const amount = Number(price.amount).toLocaleString("en-US", { maximumFractionDigits: 2 });
-  const base = `${amount} ${price.currency || ""}`.trim();
+  // Tele-sales prices are USD only.
+  const base = `$${Number(price.amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
   return price.note ? `${base} (${price.note})` : base;
 };
 

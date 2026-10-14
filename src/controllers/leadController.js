@@ -50,6 +50,8 @@ const blankEnumsToNull = (data) => {
   OPTIONAL_ENUM_FIELDS.forEach((f) => {
     if (data[f] !== undefined && !cleanStr(data[f])) data[f] = null;
   });
+  // USD only: any currency a client still sends is stored as USD.
+  if (data.valueCurrency) data.valueCurrency = DEFAULT_VALUE_CURRENCY;
   return data;
 };
 
@@ -615,14 +617,15 @@ export const getLeadStats = async (req, res) => {
         { $group: { _id: "$status", count: { $sum: 1 }, value: { $sum: "$potentialValue" } } },
         { $sort: { _id: 1 } },
       ]),
-      // Money never adds across currencies, so values are totalled per currency
-      // and per bucket: open (still in play), won and lost.
+      // Values are totalled per bucket: open (still in play), won and lost. All
+      // prices are USD now, so every row lands in the one USD total — even a
+      // record not yet relabelled by migrateCurrencyToUsd.js.
       Lead.aggregate([
         { $match: { ...matchStage, potentialValue: { $gt: 0 } } },
         {
           $group: {
             _id: {
-              currency: { $ifNull: ["$valueCurrency", DEFAULT_VALUE_CURRENCY] },
+              currency: DEFAULT_VALUE_CURRENCY,
               bucket: {
                 $switch: {
                   branches: [

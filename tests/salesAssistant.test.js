@@ -48,7 +48,7 @@ describe("buildTemplateContext", () => {
     assert.equal(ctx.lead.lastName, "Mohamed Ali");
     assert.equal(ctx.lead.fullName, "Ahmed Mohamed Ali");
     assert.equal(ctx.salesAgent.name, "Mona Jaber");
-    assert.equal(ctx.product.price, "1,500 EGP (per user / month)");
+    assert.equal(ctx.product.price, "$1,500 (per user / month)");
     assert.equal(ctx.document.url, "https://api.example.com/api/sales-documents/public/abcDEF123456789_-xyz");
     assert.deepEqual(ctx.company.socialLinks, ["Website: https://growpath.net", "Instagram: https://instagram.com/growpath"]);
   });

@@ -20,6 +20,7 @@ import {
   CUSTOMER_REQUIRED_MESSAGE,
   FEEDBACK_CUSTOMER_ONLY_MESSAGE,
   INVALID_TICKET_TYPE_MESSAGE,
+  isInternalCompanyName,
 } from "../utils/ticketTypes.js";
 import { rndHiddenFrom, rndScopeFilter } from "../utils/ticketVisibility.js";
 // Load working-hours config + holidays, auto-create defaults if missing
@@ -720,7 +721,7 @@ const createTicket = async (req, res) => {
     if (typeResult.error) {
       return res.status(400).json({ success: false, message: typeResult.error });
     }
-    const ticketType = typeResult.type;
+    let ticketType = typeResult.type;
     if (ticketType === "rnd" && !(await canSeeRnd(req.user))) {
       return res.status(403).json({ success: false, message: RND_FORBIDDEN_MESSAGE });
     }
@@ -749,6 +750,12 @@ const createTicket = async (req, res) => {
           message: "Customer not found",
         });
       }
+    }
+
+    // Grow Path's own tickets are internal work: staff raising a "customer"
+    // ticket for our own company get an internal one.
+    if (ticketType === "customer" && isEmployee(req) && isInternalCompanyName(customerExists?.companyName)) {
+      ticketType = "internal";
     }
 
     // Internal / R&D: who is asking — defaults to the employee creating it
@@ -930,7 +937,7 @@ const updateTicket = async (req, res) => {
       return res.status(400).json({ success: false, message: typeResult.error });
     }
     // A customer's edit keeps whatever type the ticket has
-    const nextType = isEmployee(req) ? typeResult.type : ticket.ticketType || "customer";
+    let nextType = isEmployee(req) ? typeResult.type : ticket.ticketType || "customer";
     if (nextType === "rnd" && !isRndTicket(ticket) && !(await canSeeRnd(req.user))) {
       return res.status(403).json({ success: false, message: RND_FORBIDDEN_MESSAGE });
     }
@@ -942,6 +949,11 @@ const updateTicket = async (req, res) => {
     }
     if (customer && !(mongoose.Types.ObjectId.isValid(String(customer)) && (await Customer.exists({ _id: customer })))) {
       return res.status(404).json({ success: false, message: "Customer not found" });
+    }
+    // Grow Path's own tickets are internal work (see createTicket).
+    if (nextType === "customer" && isEmployee(req) && nextCustomer) {
+      const owner = await Customer.findById(nextCustomer).select("companyName").lean();
+      if (isInternalCompanyName(owner?.companyName)) nextType = "internal";
     }
 
     const requested = await resolveRequestedBy(isEmployee(req) ? requestedByRaw : undefined);
