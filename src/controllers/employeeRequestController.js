@@ -1,4 +1,7 @@
 import EmployeeRequest from "../models/EmployeeRequest.js";
+import WorkingHours from "../models/WorkingHours.js";
+import Holiday from "../models/Holiday.js";
+import { WEEKEND_DAYS, addDaysKey, countWorkingDays, dayKey, startOfDayKey } from "../utils/myHomeRules.js";
 import EmployeeBalance from "../models/EmployeeBalance.js";
 import Consultant from "../models/Consltant.js";
 import Notification from "../models/notification.js";
@@ -120,13 +123,22 @@ const populateRequest = (q) =>
     .populate("department", "name")
     .populate("reviewedBy", "firstName lastName email");
 
-// Inclusive whole-day count between two dates
-const countDays = (start, end) => {
-  const s = new Date(start);
-  const e = new Date(end);
-  s.setHours(0, 0, 0, 0);
-  e.setHours(0, 0, 0, 0);
-  return Math.floor((e - s) / 86400000) + 1;
+// A vacation costs only working days: the weekend (WorkingHours.weekendDays,
+// default Fri + Sat) and public holidays in the range are not counted. Dates are
+// read on the office calendar (Cairo), so "2026-12-06" is that day wherever the
+// server runs.
+const toDayKey = (value) =>
+  typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : dayKey(new Date(value));
+
+export const countVacationDays = async (start, end) => {
+  const from = toDayKey(start);
+  const to = toDayKey(end);
+  const [config, holidays] = await Promise.all([
+    WorkingHours.findOne().select("weekendDays").lean(),
+    Holiday.find({ date: { $gte: startOfDayKey(from), $lt: startOfDayKey(addDaysKey(to, 1)) } }).select("date").lean(),
+  ]);
+  const weekend = Array.isArray(config?.weekendDays) ? config.weekendDays : WEEKEND_DAYS;
+  return countWorkingDays(from, to, new Set(holidays.map((h) => dayKey(h.date))), weekend);
 };
 
 // Hours between two "HH:mm" strings
@@ -326,7 +338,13 @@ const createRequest = async (req, res) => {
       }
       doc.startDate = startDate;
       doc.endDate = endDate;
-      doc.days = countDays(startDate, endDate);
+      doc.days = await countVacationDays(startDate, endDate);
+      if (doc.days < 1) {
+        return res.status(400).json({
+          success: false,
+          message: "These dates fall on weekend days or holidays only — there are no working days to request.",
+        });
+      }
     } else {
       if (!date || !fromTime || !toTime) {
         return res.status(400).json({

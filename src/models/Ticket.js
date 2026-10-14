@@ -230,6 +230,13 @@ const ticketSchema = mongoose.Schema(
       type: Number,
       min: 0,
     },
+    // Planned effort in hours (My Home week planner / logged-vs-estimate bar).
+    // Unset falls back to estimationDays × the daily capacity.
+    estimateHours: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
     adminPoints: {
       type: Number,
       default: null,
@@ -323,6 +330,9 @@ ticketSchema.index({ createdAt: -1 });
 ticketSchema.index({ status: 1, priority: 1 });
 ticketSchema.index({ assignedTeam: 1, status: 1 });
 ticketSchema.index({ slaDueDate: 1 });
+// "My tickets" (My Home, KPI, evaluation) match acceptedBy OR assignedBy.
+ticketSchema.index({ acceptedBy: 1, status: 1 });
+ticketSchema.index({ assignedBy: 1, status: 1 });
 ticketSchema.index({ parentTicket: 1 });
 ticketSchema.index({ isSubTicket: 1 });
 ticketSchema.index({ startDate: 1 });

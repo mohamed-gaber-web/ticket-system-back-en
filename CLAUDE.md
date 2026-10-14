@@ -103,6 +103,22 @@ The `development` module is `DevBoard` → `DevList` (columns) → `DevCard` (+ 
 
 `/api/marketing` (`marketingRoutes.js`, `requireModule("marketing")`). **CSP:** `CustomerSurvey` — one survey per customer `Company` visit, a free list of `items: [{ rating 1–5, comment }]` (≤50, `averageRating` kept by a pre-save hook); `GET /companies` feeds the dropdown; the author, a marketing manager or an admin edits/deletes (`canManageMarketing` in access.js). **Email campaign:** imported `CampaignContact`s (unique lower-cased email; `POST /campaign/contacts/import`, ≤5000 rows, duplicates skipped) and the singleton `EmailCampaignSettings` (`sendHours` default 10–16, `template` — default the active email template named "Template Email Catalog", else the default catalog template — `attachCatalog`, `enabled`). `src/utils/emailCampaign.js` (`runCampaignSlot`, cron every 5 min) sends **one random `pending` contact per send hour** (7 a day by default), hours read in `MARKETING_CAMPAIGN_TZ` (default `Africa/Cairo`; the server is UTC) via `campaignClock`; each hour slot is claimed atomically through `lastSlot` (`YYYY-MM-DD-HH`), the contact `pending→sending`, sent from the sales mailbox with the catalog attached, then `sent`/`failed`; `todaySent`/`todayFailed` tally the day. **Starts paused:** nothing is sent until a manager presses **Activate** (`PUT /campaign/settings { enabled: true }` — refused without an active template, a send hour or a waiting contact; stamps `activatedAt/By`, Pause stamps `pausedAt/By`). **Never twice:** a contact is picked only while `pending`; `POST /campaign/contacts/mark-sent { ids }` marks contacts already emailed by hand (`sentManually`); sent contacts can't be deleted (409) because their record is what stops a re-import from emailing the address again. Settings writes and contact deletes: `requireMarketingManager`. Tests: `tests/marketing.test.js`.
 
+### My Home (employee landing page)
+
+`/api/me` (`meRoutes.js`, `protect` + `requireEmployee`, caller's own records only):
+
+- `GET /home` returns one aggregate for the page. It is built by `src/utils/myHome.js` from the existing collections.
+- Write routes: `POST/GET /time-entries`, `/todos`, `/goals` (+ `/goals/:goalId/steps/:stepId`), `PATCH /emails/:source/:id/replied`, and `POST/DELETE /telesales/calls` (403 unless `sales`/`sales_manager`).
+- Business rules (Cairo calendar, Sun–Thu week, status folding into todo/in_progress/waiting/done, email age buckets, working days) live in `src/utils/myHomeRules.js` (tests: `tests/myHomeRules.test.js`).
+- Log time writes a `TimeEntry` **and** `$inc`s `Ticket.durationHours`, the single total every hour report reads.
+- New fields:
+  - Ticket: `estimateHours`.
+  - Employee: `office`, `skills`, `availability`, `timezone`, `dailyCapacityHours` (not self-editable).
+  - CallLog: `outcome`, `followUp`.
+- New collections: `PersonalTodo`, `GrowthGoal`, `TimeEntry`.
+- The spec → model mapping is in `docs/my-home-mapping.md`.
+- Demo data: `node src/scripts/seedMyHome.js <email>` (`--remove` undoes it; local DB only unless `--allow-remote`).
+
 ### Code Organization
 
 Standard MVC pattern: `src/models/`, `src/controllers/`, `src/routes/`. Each domain entity follows the same structure (e.g., `Category` has `Category.js` model, `categoryController.js`, `categoryRoutes.js`).

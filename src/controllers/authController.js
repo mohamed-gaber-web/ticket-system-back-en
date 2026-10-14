@@ -264,6 +264,7 @@ export const updateProfile = async (req, res) => {
       // never the employee's own — salary, contract, IBAN, national ID…
       "hr",
       "employeeCode",
+      "dailyCapacityHours",
       "resetPasswordToken",
       "resetPasswordExpire",
     ];
