@@ -1,0 +1,341 @@
+{
+  "settings": {
+    "maxDiscount": 10,
+    "vat": {
+      "Egypt": 14,
+      "KSA": 15,
+      "Other": 0
+    }
+  },
+  "services": [
+    {
+      "id": "s1",
+      "cat": "Implementation",
+      "name": "Microsoft Dynamics 365 F&O Finance module according to Mention in scope table",
+      "price": 0
+    },
+    {
+      "id": "s2",
+      "cat": "Implementation",
+      "name": "Microsoft Dynamics 365 F&O Supply Chain modules according to Mention in scope table",
+      "price": 0
+    },
+    {
+      "id": "s3",
+      "cat": "Implementation",
+      "name": "Microsoft Dynamics 365 F&O Production modules according to Mention in scope table",
+      "price": 0
+    },
+    {
+      "id": "s4",
+      "cat": "Implementation",
+      "name": "Dynamics 365 Business Central implementation according to Mention in scope table",
+      "price": 0
+    },
+    {
+      "id": "s5",
+      "cat": "Implementation",
+      "name": "Copy Legal Entities and Chart of Account",
+      "price": 255
+    },
+    {
+      "id": "s6",
+      "cat": "Upgrade",
+      "name": "AX 2012 to Dynamics 365 F&O Upgrade",
+      "price": 0
+    },
+    {
+      "id": "s7",
+      "cat": "Support",
+      "name": "Service Level Agreement (SLA) / Customer Success Program – monthly",
+      "price": 0
+    },
+    {
+      "id": "s8",
+      "cat": "Services",
+      "name": "Project Management Service",
+      "price": 0
+    },
+    {
+      "id": "s9",
+      "cat": "Services",
+      "name": "ERP Audit Service",
+      "price": 0
+    },
+    {
+      "id": "s10",
+      "cat": "Services",
+      "name": "ERP Training Service (per day)",
+      "price": 0
+    },
+    {
+      "id": "s12",
+      "cat": "Integration",
+      "name": "E-Invoice Integration (ETA Egypt)",
+      "price": 0
+    },
+    {
+      "id": "s13",
+      "cat": "Integration",
+      "name": "E-Invoice Integration (ZATCA KSA)",
+      "price": 0
+    },
+    {
+      "id": "s14",
+      "cat": "Integration",
+      "name": "Shopify Integration",
+      "price": 0
+    },
+    {
+      "id": "s15",
+      "cat": "Integration",
+      "name": "Exchange Rate Integration",
+      "price": 0
+    },
+    {
+      "id": "s16",
+      "cat": "Integration",
+      "name": "WhatsApp Integration",
+      "price": 0
+    },
+    {
+      "id": "s17",
+      "cat": "Integration",
+      "name": "GS1 Integration",
+      "price": 0
+    },
+    {
+      "id": "s18",
+      "cat": "Grow Path Solutions",
+      "name": "ONE365 Mobile App – One-Time Setup Fee",
+      "price": 0
+    },
+    {
+      "id": "s19",
+      "cat": "Grow Path Solutions",
+      "name": "ONE365 Mobile App – per agent",
+      "price": 0
+    },
+    {
+      "id": "s20",
+      "cat": "Grow Path Solutions",
+      "name": "AI Reporting Portal",
+      "price": 0
+    },
+    {
+      "id": "s21",
+      "cat": "Vertical",
+      "name": "Animal Feeding Vertical Solution",
+      "price": 0
+    },
+    {
+      "id": "s22",
+      "cat": "Vertical",
+      "name": "Animal Fattening & Slaughterhouse Vertical",
+      "price": 0
+    },
+    {
+      "id": "s23",
+      "cat": "Vertical",
+      "name": "Bank Facility Vertical Solution",
+      "price": 0
+    },
+    {
+      "id": "s24",
+      "cat": "Ready-Made",
+      "name": "Ready-Made Reports & Dashboards pack",
+      "price": 0
+    }
+  ],
+  "skus": [
+    {
+      "id": "k1",
+      "fam": "Dynamics 365 F&O",
+      "name": "D365 - Dynamics 365 Finance (New Commerce)",
+      "sku": "CFQ7TTC0LGV4:0001",
+      "m": 210
+    },
+    {
+      "id": "k2",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Finance Attach to Qualifying Dynamics 365 Base Offer",
+      "sku": "CFQ7TTC0LGV4:0002",
+      "m": 30
+    },
+    {
+      "id": "k3",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Supply Chain Management",
+      "sku": "",
+      "m": 210
+    },
+    {
+      "id": "k4",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Supply Chain Management Attach",
+      "sku": "",
+      "m": 30
+    },
+    {
+      "id": "k5",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Commerce",
+      "sku": "",
+      "m": 210
+    },
+    {
+      "id": "k6",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Commerce Attach",
+      "sku": "",
+      "m": 30
+    },
+    {
+      "id": "k7",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Project Operations",
+      "sku": "",
+      "m": 120
+    },
+    {
+      "id": "k8",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Human Resources",
+      "sku": "",
+      "m": 135
+    },
+    {
+      "id": "k9",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Operations – Activity",
+      "sku": "",
+      "m": 50
+    },
+    {
+      "id": "k10",
+      "fam": "Dynamics 365 F&O",
+      "name": "Dynamics 365 Team Members",
+      "sku": "",
+      "m": 8
+    },
+    {
+      "id": "k11",
+      "fam": "Business Central",
+      "name": "Dynamics 365 Business Central Essentials",
+      "sku": "",
+      "m": 80
+    },
+    {
+      "id": "k12",
+      "fam": "Business Central",
+      "name": "Dynamics 365 Business Central Premium",
+      "sku": "",
+      "m": 110
+    },
+    {
+      "id": "k13",
+      "fam": "Business Central",
+      "name": "Dynamics 365 Business Central Team Members",
+      "sku": "",
+      "m": 8
+    },
+    {
+      "id": "k14",
+      "fam": "Dynamics 365 CE",
+      "name": "Dynamics 365 Sales Enterprise",
+      "sku": "",
+      "m": 105
+    },
+    {
+      "id": "k15",
+      "fam": "Dynamics 365 CE",
+      "name": "Dynamics 365 Sales Professional",
+      "sku": "",
+      "m": 65
+    },
+    {
+      "id": "k16",
+      "fam": "Dynamics 365 CE",
+      "name": "Dynamics 365 Customer Service Enterprise",
+      "sku": "",
+      "m": 105
+    },
+    {
+      "id": "k17",
+      "fam": "Dynamics 365 CE",
+      "name": "Dynamics 365 Field Service",
+      "sku": "",
+      "m": 105
+    },
+    {
+      "id": "k18",
+      "fam": "Power Platform",
+      "name": "Power Apps Premium",
+      "sku": "",
+      "m": 20
+    },
+    {
+      "id": "k19",
+      "fam": "Power Platform",
+      "name": "Power Automate Premium",
+      "sku": "",
+      "m": 15
+    },
+    {
+      "id": "k20",
+      "fam": "Power Platform",
+      "name": "Power BI Pro",
+      "sku": "",
+      "m": 14
+    },
+    {
+      "id": "k21",
+      "fam": "Power Platform",
+      "name": "Power BI Premium Per User",
+      "sku": "",
+      "m": 24
+    },
+    {
+      "id": "k22",
+      "fam": "Microsoft 365",
+      "name": "Microsoft 365 Copilot",
+      "sku": "",
+      "m": 30
+    },
+    {
+      "id": "k23",
+      "fam": "Microsoft 365",
+      "name": "Microsoft 365 Business Basic",
+      "sku": "",
+      "m": 6
+    },
+    {
+      "id": "k24",
+      "fam": "Microsoft 365",
+      "name": "Microsoft 365 Business Standard",
+      "sku": "",
+      "m": 12.5
+    },
+    {
+      "id": "k25",
+      "fam": "Microsoft 365",
+      "name": "Microsoft 365 Business Premium",
+      "sku": "",
+      "m": 22
+    },
+    {
+      "id": "k26",
+      "fam": "Microsoft 365",
+      "name": "Microsoft 365 E3",
+      "sku": "",
+      "m": 36
+    },
+    {
+      "id": "k27",
+      "fam": "Microsoft 365",
+      "name": "Microsoft 365 E5",
+      "sku": "",
+      "m": 57
+    }
+  ]
+}

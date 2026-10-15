@@ -1,0 +1,55 @@
+{
+  "4 phases (25% each)": [
+    {
+      "phase": "Analysis Phase",
+      "items": "Kick Of Meeting and plan\nBusiness analysis\nMaster data Preparation",
+      "pct": 25
+    },
+    {
+      "phase": "Execution Phase",
+      "items": "System Setup and configuration\nSample master data uploading\nTest Script FDD",
+      "pct": 25
+    },
+    {
+      "phase": "UAT Phase",
+      "items": "Training\nUser Acceptance Test (UAT)",
+      "pct": 25
+    },
+    {
+      "phase": "Go Live Phase",
+      "items": "Uploading Live Master data\nGo live and operation",
+      "pct": 25
+    }
+  ],
+  "60% / 40%": [
+    {
+      "phase": "Down Payment",
+      "items": "",
+      "pct": 60
+    },
+    {
+      "phase": "After Delivery and Go Live",
+      "items": "",
+      "pct": 40
+    }
+  ],
+  "50% / 50%": [
+    {
+      "phase": "Down Payment",
+      "items": "",
+      "pct": 50
+    },
+    {
+      "phase": "After Go Live",
+      "items": "",
+      "pct": 50
+    }
+  ],
+  "0 down payment (monthly)": [
+    {
+      "phase": "Monthly installments",
+      "items": "Equal monthly installments over the project duration",
+      "pct": 100
+    }
+  ]
+}

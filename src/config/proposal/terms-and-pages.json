@@ -1,0 +1,40 @@
+{
+  "DEFAULT_TERMS": [
+    "All Grow Path Invoices Issued will be Paid in Full Within 10 Days from Issuance Date.",
+    "This Proposal is Valid for two weeks.",
+    "All Subscriptions Paid are Non-Refundable.",
+    "The amount is collected in Egyptian pounds according to the Central Bank rate.",
+    "Grow Path Has the Rights to Place your company's branding on all company-owned advertising media.",
+    "The Client shall be fully responsible for arranging and covering all necessary transportation for any activities performed outside Cairo Governorate"
+  ],
+  "STATIC_PAGES": [
+    [
+      "toc",
+      "Table of Contents"
+    ],
+    [
+      "about",
+      "About Us"
+    ],
+    [
+      "services",
+      "Our Services"
+    ],
+    [
+      "products",
+      "Our Products"
+    ],
+    [
+      "solutions",
+      "Our Solutions"
+    ],
+    [
+      "d365",
+      "1.1 What Is Dynamics 365?"
+    ],
+    [
+      "d365app",
+      "1.2 Dynamics 365 Application"
+    ]
+  ]
+}

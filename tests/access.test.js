@@ -107,8 +107,8 @@ describe("normalizeUserType", () => {
 describe("effectiveModules", () => {
   it("gives every role its defaults", () => {
     assert.deepEqual(effectiveModules(user("consultant")), ["tickets"]);
-    assert.deepEqual(effectiveModules(user("sales")), ["telesales"]);
-    assert.deepEqual(effectiveModules(user("sales_manager")), ["telesales"]);
+    assert.deepEqual(effectiveModules(user("sales")), ["telesales", "proposals"]);
+    assert.deepEqual(effectiveModules(user("sales_manager")), ["telesales", "proposals"]);
     assert.deepEqual(effectiveModules(user("marketing")), ["telesales", "tasks", "marketing"]);
     assert.deepEqual(effectiveModules(user("marketing_manager")), ["telesales", "tasks", "marketing"]);
     assert.deepEqual(effectiveModules(user("developer")), ["development"]);
@@ -126,7 +126,7 @@ describe("effectiveModules", () => {
   });
 
   it("ignores unknown module names in an override and falls back to defaults when none survive", () => {
-    assert.deepEqual(effectiveModules(user("sales", { modules: ["bogus"] })), ["telesales"]);
+    assert.deepEqual(effectiveModules(user("sales", { modules: ["bogus"] })), ["telesales", "proposals"]);
     assert.deepEqual(effectiveModules(user("sales", { modules: ["bogus", "tasks"] })), ["tasks"]);
   });
 

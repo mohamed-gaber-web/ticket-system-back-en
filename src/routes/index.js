@@ -53,6 +53,8 @@ import companySettingsRoutes from "./companySettingsRoutes.js";
 import salesAssistantRoutes from "./salesAssistantRoutes.js";
 import marketingRoutes from "./marketingRoutes.js";
 import meRoutes from "./meRoutes.js";
+import proposalRoutes from "./proposalRoutes.js";
+import { guardProposalFiles } from "../controllers/proposalController.js";
 
 const router = express.Router();
 
@@ -188,6 +190,11 @@ router.use("/message-templates", messageTemplateRoutes);
 router.use("/company-settings", companySettingsRoutes);
 router.use("/sales-assistant", salesAssistantRoutes);
 
+// Proposal Builder: price list, proposals built from opportunities, SOW images.
+// Mounted at the root because it owns three prefixes (/proposal-catalog,
+// /proposals, /opportunities/:id/proposals).
+router.use("/", proposalRoutes);
+
 // Marketing: CSP surveys and the email campaign
 router.use("/marketing", marketingRoutes);
 
@@ -196,6 +203,7 @@ router.use("/me", meRoutes);
 // HR documents live in the same GridFS bucket but are only ever served through
 // /consultants/:id/documents — the generic file routes refuse them.
 router.all(["/files/:id", "/files/:id/info"], guardHrFiles);
+router.all(["/files/:id", "/files/:id/info"], guardProposalFiles);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

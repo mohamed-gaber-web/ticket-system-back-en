@@ -1,0 +1,71 @@
+{
+  "Microsoft Dynamic 365 F&O for Finance": [
+    "Account Payable",
+    "Account Receivable",
+    "Budget",
+    "Cash & Bank Management",
+    "Cost Accounting",
+    "Consolidation",
+    "Expenses management",
+    "Fixed assets",
+    "Asset leasing",
+    "General ledger",
+    "Project management & Accounting",
+    "Revenue Recognition",
+    "Tax",
+    "Financial Reporting"
+  ],
+  "Microsoft Dynamics F&O 365 for Supply Chain Management": [
+    "Asset Management",
+    "Cost management",
+    "Inventory management",
+    "Landed Cost",
+    "Master Planning",
+    "Procurement and sourcing",
+    "Product Information Management",
+    "Production Control",
+    "Quality Management",
+    "Rebate Management",
+    "Sales & marketing",
+    "Service management",
+    "Transportation Management",
+    "Vendor Collaboration",
+    "Warehouse Management"
+  ],
+  "Microsoft Dynamic 365 F&O for Retail (Commerce)": [
+    "Retail Headquarters (HQ)",
+    "Point Of Sales (POS)",
+    "Commerce scale Unit (CSU)",
+    "Retail Server",
+    "Commerce Runtime (CRT)",
+    "Channel Database",
+    "Retail Channels",
+    "Retails Scheduler\\ Distribution"
+  ],
+  "Dynamics 365 Business Central": [
+    "Finance",
+    "Sales & Receivables",
+    "Purchasing & Payables",
+    "Inventory",
+    "Warehouse",
+    "Manufacturing",
+    "Projects",
+    "Service Management"
+  ],
+  "Ready Made": [
+    "E-Invoice",
+    "Exchange Rate Integration",
+    "Inventory Mobile Application",
+    "Reports",
+    "Dashboard"
+  ],
+  "Grow Path Solutions": [
+    "Shopify Integration",
+    "Gedia Integration",
+    "Grow Path Mobile Application (ONE365)",
+    "Ai Reporting Portal",
+    "Animal Fatting and slaughterhouse Vertical",
+    "Animal Feeding Vertical",
+    "Bank Facility Vertical"
+  ]
+}
