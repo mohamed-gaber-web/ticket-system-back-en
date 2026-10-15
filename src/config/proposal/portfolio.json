@@ -1,0 +1,146 @@
+[
+  {
+    "cat": "Our Services",
+    "h": "Service",
+    "items": [
+      [
+        "Microsoft Dynamics Implementation",
+        "Industry-tailored ERP and CRM implementation on Dynamics 365 F&O and Business Central."
+      ],
+      [
+        "AX 2012 to Dynamics 365 Upgrade",
+        "Move from AX 2012 to Dynamics 365 F&O, keeping historical data and customizations."
+      ],
+      [
+        "Service Level Agreement (SLA) / Customer Success Program",
+        "Open-scope monthly support focused on the business, with continuous monitoring."
+      ],
+      [
+        "Project Management Service",
+        "Structured, results-driven delivery on time and on budget."
+      ],
+      [
+        "Microsoft Licensing Service",
+        "Secure, cost-effective Microsoft licensing through New Commerce."
+      ],
+      [
+        "ERP Audit Service",
+        "Review of system efficiency, compliance and performance to maximize ROI."
+      ],
+      [
+        "ERP Training Service",
+        "Practical, hands-on training for better system adoption."
+      ],
+      [
+        "Custom Development (X++)",
+        "Extensions, reports (SSRS), data entities and integrations built to Microsoft standards."
+      ]
+    ]
+  },
+  {
+    "cat": "Microsoft Products",
+    "h": "Product",
+    "items": [
+      [
+        "Dynamics 365 Finance",
+        "General ledger, AP, AR, cash and bank, fixed assets, budgeting and tax."
+      ],
+      [
+        "Dynamics 365 Supply Chain Management",
+        "Inventory, procurement, sales, production, master planning, quality and warehouse."
+      ],
+      [
+        "Dynamics 365 Commerce",
+        "Retail headquarters, POS and omnichannel retail operations."
+      ],
+      [
+        "Dynamics 365 Project Operations",
+        "Project planning, resourcing, time, expenses and project accounting."
+      ],
+      [
+        "Dynamics 365 Human Resources",
+        "Employee records, leave, benefits and HR self-service."
+      ],
+      [
+        "Dynamics 365 Business Central",
+        "All-in-one ERP for small and mid-size companies."
+      ],
+      [
+        "Dynamics 365 Sales & Customer Service",
+        "CRM for pipeline, opportunities, quotes and customer support."
+      ],
+      [
+        "Microsoft Power Platform",
+        "Power BI, Power Apps and Power Automate for analytics, apps and workflows."
+      ],
+      [
+        "Microsoft 365 & Copilot",
+        "Productivity suite with AI assistance across the business."
+      ]
+    ]
+  },
+  {
+    "cat": "Grow Path Solutions",
+    "h": "Solution",
+    "items": [
+      [
+        "ONE365 Mobile & Web App",
+        "Directly integrated with Dynamics 365. Full Integration, Zero Middleware."
+      ],
+      [
+        "AI Reporting Portal",
+        "AI-driven reports and insights on top of Dynamics 365 data."
+      ],
+      [
+        "Animal Feeding Vertical",
+        "Formulation, batch production and cost per ton for feed mills."
+      ],
+      [
+        "Animal Fattening & Slaughterhouse Vertical",
+        "Livestock, fattening cycles and slaughterhouse operations."
+      ],
+      [
+        "Bank Facility Vertical",
+        "Bank facilities, limits and financing management."
+      ],
+      [
+        "Ready-Made Reports & Dashboards",
+        "Pre-built financial statements, reports and dashboards."
+      ],
+      [
+        "Forms Design",
+        "Invoices, statements and documents designed to your brand."
+      ]
+    ]
+  },
+  {
+    "cat": "Integrations",
+    "h": "Integration",
+    "items": [
+      [
+        "E-Invoice (ETA Egypt / ZATCA KSA)",
+        "Certified e-invoicing directly from Dynamics 365."
+      ],
+      [
+        "Shopify Integration",
+        "Orders, products and inventory synced with Dynamics 365."
+      ],
+      [
+        "WhatsApp Integration",
+        "Notifications and documents sent from Dynamics 365 via WhatsApp."
+      ],
+      [
+        "GS1 Integration",
+        "Product barcodes and master data aligned with GS1."
+      ],
+      [
+        "Exchange Rate Integration",
+        "Automatic daily exchange rates into Dynamics 365."
+      ],
+      [
+        "Gedia Integration",
+        "Data exchange with Gedia."
+      ]
+    ]
+  }
+]

@@ -1,4 +1,6 @@
 import Lead, { normalizeEgyptPhone, PHONE_INTL_REGEX, LEAD_SOURCE_DETAILS, isValidUrl } from "../models/Lead.js";
+import { cleanProposalDetails } from "../utils/proposalRules.js";
+import { getProposalConfig } from "../utils/proposalConfig.js";
 import IndustrySector from "../models/IndustrySector.js";
 import Product from "../models/Product.js";
 import Company from "../models/Company.js";
@@ -225,6 +227,7 @@ export const createLead = async (req, res) => {
 
     const lead = await Lead.create({
       ...blankEnumsToNull({ ...req.body }),
+      ...cleanProposalDetails(req.body, Object.keys((await getProposalConfig()).interests ?? {})),
       customerNeedProducts: needs.ids,
       isExistingCustomer: false,
       account: null,
@@ -778,6 +781,8 @@ export const updateLead = async (req, res) => {
       if (req.body[field] !== undefined) updateData[field] = req.body[field];
     });
     blankEnumsToNull(updateData);
+    // Proposal details (legal entities, interests, expected users) — read by the Proposal Builder.
+    Object.assign(updateData, cleanProposalDetails(req.body, Object.keys((await getProposalConfig()).interests ?? {})));
     const accountLink = await resolveAccountLink(req.body, lead);
     if (accountLink.error) {
       return res.status(400).json({ success: false, message: "Validation error", errors: [accountLink.error] });

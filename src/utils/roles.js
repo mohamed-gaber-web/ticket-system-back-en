@@ -26,14 +26,14 @@ export const ROLES = Object.freeze([
   "developer_manager",
 ]);
 
-export const MODULES = Object.freeze(["tickets", "telesales", "tasks", "admin", "development", "hr", "marketing"]);
+export const MODULES = Object.freeze(["tickets", "telesales", "tasks", "admin", "development", "hr", "marketing", "proposals"]);
 
 /** What each role opens when the admin has not overridden `modules`. */
 export const ROLE_DEFAULT_MODULES = Object.freeze({
   admin: MODULES,
   consultant: ["tickets"],
-  sales: ["telesales"],
-  sales_manager: ["telesales"],
+  sales: ["telesales", "proposals"],
+  sales_manager: ["telesales", "proposals"],
   marketing: ["telesales", "tasks", "marketing"],
   marketing_manager: ["telesales", "tasks", "marketing"],
   developer: ["development"],

@@ -1,0 +1,82 @@
+{
+  "D365 F&O implementation": [
+    {
+      "t": "Introduction",
+      "b": "This Statement of Work (SOW) defines the objectives, scope, and approach for the implementation of **{product}** for **{client}**, covering {entities}.\nThe goal of this project is to deliver a unified, scalable, and intelligent ERP solution that enables **{client}** to optimize business performance, enhance operational control, and strengthen financial and supply chain visibility across all entities.\n## The implementation will encompass the following functional areas:\n* {modules}\nThrough this initiative, **{client}** aims to establish standardized business processes, improve data accuracy, and provide management with real-time insights for informed decision-making. The project will be executed using Microsoft's Dynamics 365 implementation methodology and best practices.\nThis SOW further outlines the project scope, deliverables, timelines, and mutual responsibilities of **{client}** and **Grow Path for Business Development**."
+    },
+    {
+      "t": "Project Objectives",
+      "b": "The primary objective of this project is to implement **{product}** as a unified enterprise resource planning (ERP) platform for **{client}**. The implementation aims to achieve the following goals:\n# Business Process Standardization\n# Operational Efficiency\n# Financial Visibility and Control\n# Integrated Supply Chain Operations\n# Data Integrity and Insight\n# Scalability and Future Readiness"
+    },
+    {
+      "t": "Scope Summary",
+      "b": "The scope of this engagement includes the design, configuration, testing, and deployment of **{product}** modules for {entities}.\n## Finance Modules: {finance}\n## Supply Chain Modules: {scm}\n## Out of Scope: Custom development beyond approved requirements, third-party integrations not defined in the initial project plan, legacy data cleansing or restructuring, and post go-live support beyond the agreed hyper-care period."
+    },
+    {
+      "t": "Roles & Responsibilities",
+      "b": "Both **{client}** and the Implementing Partner will collaborate closely throughout the project. **{client}** will provide business knowledge, resources, and decision-making support, while the Implementing Partner will deliver solution design, configuration, development, testing, and training according to Microsoft best practices."
+    },
+    {
+      "t": "Project Deliverables & Timeline",
+      "b": "The implementation will follow Microsoft's Sure Step methodology, covering the following phases:\n# Initiation & Planning\n# Analysis & Design\n# Configuration & Development\n# Testing & Training\n# Data Migration & Go-Live Preparation\n# Go-Live & Hypercare Support\n## Key Deliverables:\n* Project Charter, Governance Plan, and Kick-off\n* Solution Design Documents\n* Configured and Tested D365 F&O Modules\n* Data Migration and Validation Reports\n* Training and Knowledge Transfer Documentation\n* Go-Live and Handover Reports\n* Estimated Project Duration: {duration}"
+    },
+    {
+      "t": "Assumptions & Dependencies",
+      "b": "## Assumptions:\n* **{client}** will assign qualified resources and ensure data readiness.\n* All approvals and decisions will be provided in a timely manner.\n## Dependencies:\n* Data accuracy, infrastructure readiness, and stakeholder engagement are critical to project success."
+    },
+    {
+      "t": "Change Management & Communication Plan",
+      "b": "Change requests will be handled through a formal process including identification, impact analysis, approval, and implementation tracking.\nCommunication will be maintained through weekly project meetings, monthly steering committee sessions, and shared documentation via project collaboration tools."
+    },
+    {
+      "t": "Acceptance & Sign-Off",
+      "b": "All deliverables must meet the quality, scope, and acceptance criteria outlined in this SOW.\nFormal sign-off by authorized representatives from **{client}** and the Implementing Partner signifies acceptance of the deliverables and completion of the project phase."
+    }
+  ],
+  "Legal entity copy": [
+    {
+      "t": "Introduction",
+      "b": "This SOW covers creating new legal entities for **{client}** in the existing Dynamics 365 environment and transferring the required master data and setup."
+    },
+    {
+      "t": "Scope Summary",
+      "b": "* Open new legal entities as agreed\n## Transfer master data:\n* Number sequence\n* Customer group\n* All customers\n* Vendor group\n* All vendors\n* Product master\n* Chart of account\n* Parameters\n* Posting profile\n* Tax"
+    },
+    {
+      "t": "Acceptance & Sign-Off",
+      "b": "The work is accepted once **{client}** confirms the new legal entities and transferred data in the production environment."
+    }
+  ],
+  "AX 2012 upgrade": [
+    {
+      "t": "Introduction",
+      "b": "This SOW defines the upgrade of **{client}** from Microsoft Dynamics AX 2012 to **{product}**, covering {entities}."
+    },
+    {
+      "t": "Scope Summary",
+      "b": "* Assessment of the current AX 2012 environment and customizations\n* Code upgrade and refactoring to extensions (Chain of Command)\n* Data upgrade from AX 2012 to Dynamics 365 F&O\n* Integration re-wiring and testing\n* SSRS report migration\n* UAT and cut-over plan\n* Go-live and post go-live support\n## Modules: {modules}"
+    },
+    {
+      "t": "Project Deliverables & Timeline",
+      "b": "# Assessment\n# Code Upgrade\n# Data Upgrade\n# Testing & UAT\n# Cut-over\n# Hypercare\n* Estimated Project Duration: {duration}"
+    },
+    {
+      "t": "Acceptance & Sign-Off",
+      "b": "Formal sign-off by authorized representatives from **{client}** and the Implementing Partner signifies acceptance of the upgraded environment."
+    }
+  ],
+  "SLA / Customer Success Program": [
+    {
+      "t": "Introduction",
+      "b": "This SOW defines the Customer Success Program (SLA) provided by Grow Path to **{client}** for its Microsoft Dynamics 365 environment, built on an open-scope model so the work follows the business needs."
+    },
+    {
+      "t": "Scope Summary",
+      "b": "* Support hours per month as agreed\n* Incident handling per agreed response times\n* Monthly system health check\n* Minor enhancements and report changes\n* Quarterly business review"
+    },
+    {
+      "t": "Acceptance & Sign-Off",
+      "b": "Monthly service reports are shared with **{client}** and reviewed in the quarterly business review."
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "INTERESTS": {
+    "D365 Finance": {
+      "group": "Microsoft Dynamic 365 F&O for Finance",
+      "sku": "k1"
+    },
+    "D365 Supply Chain": {
+      "group": "Microsoft Dynamics F&O 365 for Supply Chain Management",
+      "sku": "k3"
+    },
+    "D365 Commerce": {
+      "group": "Microsoft Dynamic 365 F&O for Retail (Commerce)",
+      "sku": "k5"
+    },
+    "Business Central": {
+      "group": "Dynamics 365 Business Central",
+      "sku": "k12"
+    },
+    "D365 Sales / CE": {
+      "sku": "k14"
+    },
+    "Power Platform": {
+      "sku": "k18"
+    },
+    "Copilot": {
+      "sku": "k22"
+    },
+    "AX 2012 Upgrade": {},
+    "SLA / Support": {},
+    "E-Invoice": {}
+  },
+  "STAGES": [
+    "New",
+    "Qualified",
+    "Demo done",
+    "Proposal sent",
+    "Negotiation",
+    "Won",
+    "Lost"
+  ]
+}

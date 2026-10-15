@@ -16,6 +16,11 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Lead",
     },
+    // Set for Proposal Builder notifications (approval requested / approved).
+    proposal: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Proposal",
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       required: [true, "User ID is required"],
@@ -49,6 +54,8 @@ const notificationSchema = new mongoose.Schema(
         "meeting_reminder",
         "lead_email_reply",
         "ticket_email_reply",
+        "proposal_approval_request",
+        "proposal_approved",
       ],
     },
     message: {
@@ -98,6 +105,7 @@ notificationSchema.statics.getUnreadForUser = function (userId, userType) {
     .populate("ticket", "ticketNumber subject priority status")
     .populate("meeting", "title startAt status")
     .populate("lead", "companyName contactPersonName")
+    .populate("proposal", "number client")
     .sort({ createdAt: -1 });
 };
 
@@ -111,6 +119,7 @@ notificationSchema.statics.getForUser = function (
     .populate("ticket", "ticketNumber subject priority status")
     .populate("meeting", "title startAt status")
     .populate("lead", "companyName contactPersonName")
+    .populate("proposal", "number client")
     .sort({ createdAt: -1 })
     .limit(limit);
 };

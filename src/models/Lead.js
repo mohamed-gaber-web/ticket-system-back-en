@@ -392,6 +392,31 @@ const leadSchema = mongoose.Schema(
       type: Boolean,
     },
 
+    // Proposal details — what the Proposal Builder reads when it creates a
+    // proposal from this opportunity (PROPOSAL_BUILDER_SPEC.md §2.1). Cleaned by
+    // `cleanProposalDetails` (proposalRules.js); interests are keys of
+    // src/config/proposal/interests.json.
+    legalEntities: {
+      type: [
+        {
+          _id: false,
+          name: { type: String, trim: true },
+          location: { type: String, trim: true },
+          industry: { type: String, trim: true },
+        },
+      ],
+      default: [],
+    },
+    proposalInterests: {
+      type: [String],
+      default: [],
+    },
+    expectedUsers: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+
     // Tags
     tags: {
       type: [String],
