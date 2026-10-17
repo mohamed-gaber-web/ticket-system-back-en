@@ -5,6 +5,7 @@ import { syncLeadInbox } from "../utils/leadInboxSync.js";
 import { salesMailbox, salesMailboxName } from "../utils/emailService.js";
 import {
   validateAndSend,
+  personalSender,
   threadSummary,
   conversationStages,
   inboxFacet,
@@ -17,11 +18,15 @@ import {
 //
 // Returns `{ status, body }` rather than writing the response so the sales
 // assistant can send through this exact path and then add its own audit record.
-// @desc    The mailbox lead email is sent from (shown as "From" in the composer)
+// @desc    Who lead email can be sent from (the composer's "From" choice): the
+//          sales mailbox, and the employee's own mailbox when it is a company one
 // @route   GET /api/leads/emails/sender
 // @access  Private (tele-sales)
 export const getLeadEmailSender = (req, res) =>
-  res.status(200).json({ success: true, data: { mailbox: salesMailbox(), name: salesMailboxName() } });
+  res.status(200).json({
+    success: true,
+    data: { mailbox: salesMailbox(), name: salesMailboxName(), personal: personalSender(req) },
+  });
 
 export const sendAndRecord = async (req, lead, replyTo = null) => {
   const fail = (status, message, extra = {}) => ({ status, body: { success: false, message, ...extra } });

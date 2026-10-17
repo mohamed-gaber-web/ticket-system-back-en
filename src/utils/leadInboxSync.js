@@ -32,6 +32,11 @@ import {
 //      ticket email carries it, so a forwarded or re-started mail still lands),
 //   4. the lead whose email address sent it.
 // Everything else in the inbox is ignored (left untouched in the mailbox).
+//
+// Employees may also send from their own mailbox (sendAs "personal"). Each such
+// mailbox that sent in the last PERSONAL_WINDOW_DAYS is read too, but only rules
+// 1–2 apply there: a message is filed only when it continues a conversation the
+// system started, so the rest of the employee's mail is never touched or stored.
 
 // The support mailbox keeps the original cursor key, so upgrading does not
 // re-read its last day; any other mailbox gets its own.
@@ -41,6 +46,7 @@ const syncKeyFor = (mailbox) =>
 const FIRST_RUN_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 // Re-read a small window each run; internetMessageId de-duplicates.
 const OVERLAP_MS = 5 * 60 * 1000;
+const PERSONAL_WINDOW_DAYS = 90;
 
 let running = false;
 
@@ -114,7 +120,7 @@ const LEAD_FIELDS = "_id team assignedTo email companyName contactPersonName";
  * Where an inbox message belongs: { ticket } or { lead }, or null when it is
  * nothing we sent or track (see the numbered rules at the top of this file).
  */
-export const matchMessage = async (msg) => {
+export const matchMessage = async (msg, { conversationOnly = false } = {}) => {
   if (msg.conversationId) {
     const ticketMail = await TicketEmail.findOne({ conversationId: msg.conversationId }).sort({ createdAt: -1 }).lean();
     if (ticketMail) {
@@ -129,6 +135,8 @@ export const matchMessage = async (msg) => {
       if (lead) return { lead };
     }
   }
+
+  if (conversationOnly) return null;
 
   const numbers = [...String(msg.subject ?? "").toUpperCase().matchAll(TICKET_NUMBER)].map((m) => m[1]);
   if (numbers.length) {
@@ -201,8 +209,8 @@ const fileTicketMessage = async (msg, mailbox, ticket) => {
 };
 
 /** File one inbox message under its ticket or lead. Exported for tests. */
-export const fileInboundMessage = async (msg, mailbox) => {
-  const match = await matchMessage(msg);
+export const fileInboundMessage = async (msg, mailbox, { conversationOnly = false } = {}) => {
+  const match = await matchMessage(msg, { conversationOnly });
   if (!match) return null;
   if (match.ticket) return fileTicketMessage(msg, mailbox, match.ticket);
   const { lead } = match;
@@ -267,14 +275,30 @@ export const syncLeadInbox = async () => {
       totals.filed += r.filed;
       if (r.error) errors.push(`${mailbox}: ${r.error}`);
     }
+    // An employee's own mailbox failing is logged on its cursor, not reported to
+    // whoever pressed Refresh.
+    for (const mailbox of await personalMailboxes()) {
+      const r = await syncMailbox(mailbox, { personal: true });
+      totals.processed += r.processed;
+      totals.filed += r.filed;
+    }
     return errors.length ? { ...totals, error: errors.join(" | ") } : totals;
   } finally {
     running = false;
   }
 };
 
+/** Employee mailboxes that sent lead / ticket email lately (never a shared one). */
+export const personalMailboxes = async () => {
+  const since = new Date(Date.now() - PERSONAL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const filter = { direction: "outbound", status: { $ne: "failed" }, sentAt: { $gte: since }, mailbox: { $nin: [null, ""] } };
+  const [leads, tickets] = await Promise.all([LeadEmail.distinct("mailbox", filter), TicketEmail.distinct("mailbox", filter)]);
+  const shared = new Set(syncedMailboxes());
+  return [...new Set([...leads, ...tickets].map((m) => String(m).toLowerCase()))].filter((m) => !shared.has(m));
+};
+
 /** One pass over one mailbox, with that mailbox's own cursor. */
-const syncMailbox = async (mailbox) => {
+const syncMailbox = async (mailbox, { personal = false } = {}) => {
   const key = syncKeyFor(mailbox);
   const state = (await MailSyncState.findOne({ key })) ?? new MailSyncState({ key });
   // Mail between our own mailboxes (support ↔ sales) is never a customer reply.
@@ -296,7 +320,7 @@ const syncMailbox = async (mailbox) => {
         (await TicketEmail.exists({ internetMessageId: msg.internetMessageId }))
       ) continue;
       try {
-        if (await fileInboundMessage(msg, mailbox)) filed++;
+        if (await fileInboundMessage(msg, mailbox, { conversationOnly: personal })) filed++;
       } catch (error) {
         // A duplicate from a concurrent run is fine; anything else is logged and skipped.
         if (error?.code !== 11000) console.error(`Lead inbox: failed to file ${msg.internetMessageId}:`, error.message);

@@ -2,6 +2,7 @@ import express from "express";
 import { protect, requireModule } from "../middleware/authMiddleware.js";
 import {
   getTicketEmailInbox,
+  getTicketEmailSender,
   syncTicketInboxNow,
   getTicketEmails,
   sendTicketEmail,
@@ -16,6 +17,7 @@ const router = express.Router();
 router.use(protect, requireModule("tickets"));
 
 router.get("/inbox", getTicketEmailInbox);
+router.get("/sender", getTicketEmailSender);
 router.post("/sync", syncTicketInboxNow);
 
 router.get("/ticket/:ticketId", getTicketEmails);

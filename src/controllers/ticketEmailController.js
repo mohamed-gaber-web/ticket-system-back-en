@@ -6,8 +6,10 @@ import { isAdmin, canSeeRnd } from "../utils/access.js";
 import { rndHiddenFrom, ticketIdHiddenFrom, rndTicketIds } from "../utils/ticketVisibility.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import { syncLeadInbox } from "../utils/leadInboxSync.js";
+import { senderMailbox } from "../utils/emailService.js";
 import {
   validateAndSend,
+  personalSender,
   threadSummary,
   conversationStages,
   inboxFacet,
@@ -66,6 +68,16 @@ const sendAndRecord = async (req, res, ticket, replyTo = null) => {
     return res.status(500).json({ success: false, message: "Error sending email" });
   }
 };
+
+// @desc    Who ticket email can be sent from (the composer's "From" choice): the
+//          support mailbox, and the employee's own mailbox when it is a company one
+// @route   GET /api/ticket-emails/sender
+// @access  Private (ticketing staff)
+export const getTicketEmailSender = (req, res) =>
+  res.status(200).json({
+    success: true,
+    data: { mailbox: senderMailbox(), name: null, personal: personalSender(req) },
+  });
 
 // @desc    The ticket's email conversation, oldest first, with where it stands
 // @route   GET /api/ticket-emails/ticket/:ticketId

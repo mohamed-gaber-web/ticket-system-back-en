@@ -479,6 +479,8 @@ export const sendCustomEmail = async ({
   replyToGraphId = null,
   // The mailbox to send from (salesMailbox() for leads); the support mailbox by default.
   from = null,
+  // Display name for the sender (an employee sending from their own mailbox).
+  fromName = undefined,
 }) => {
   const toLabel = Array.isArray(to) ? to.join(", ") : to;
 
@@ -508,6 +510,7 @@ export const sendCustomEmail = async ({
       // let the inbox sync match the lead's reply back to this message.
       track: true,
       replyToGraphId,
+      fromName,
     });
 
     console.log(`✅ Custom email sent to ${toLabel} - ${info.messageId}`);
@@ -1016,6 +1019,26 @@ export const salesMailboxName = () =>
 /** The display name to send under from `address`: the sales name for the sales mailbox, else none. */
 const senderNameFor = (address) =>
   address && address.toLowerCase() === String(salesMailbox() || "").toLowerCase() ? salesMailboxName() : null;
+
+/**
+ * The employee's own mailbox, when they may send from it: their address must be
+ * in one of our Microsoft 365 domains (the domains of the support / sales
+ * mailboxes, plus any listed in MS_PERSONAL_SEND_DOMAINS), because the app can
+ * only send as users of its own tenant. Null otherwise.
+ */
+export const personalMailboxFor = (user) => {
+  const email = String(user?.email ?? "").trim().toLowerCase();
+  const domain = email.includes("@") ? email.split("@").pop() : "";
+  if (!domain) return null;
+  const domains = new Set(
+    [senderMailbox(), salesMailbox()]
+      .filter(Boolean)
+      .map((m) => String(m).toLowerCase().split("@").pop())
+      .concat(String(process.env.MS_PERSONAL_SEND_DOMAINS ?? "").toLowerCase().split(/[\s,;]+/))
+      .filter(Boolean)
+  );
+  return domains.has(domain) ? email : null;
+};
 
 /** Every mailbox the inbox sync reads — support and sales, once each. */
 export const syncedMailboxes = () =>

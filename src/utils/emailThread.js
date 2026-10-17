@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { getGridFSBucket } from "../config/gridfs.js";
-import { sendCustomEmail, senderMailbox, MAX_TOTAL_ATTACHMENT_BYTES } from "./emailService.js";
+import { sendCustomEmail, senderMailbox, syncedMailboxes, personalMailboxFor, MAX_TOTAL_ATTACHMENT_BYTES } from "./emailService.js";
 import { sanitizeEmailHtml } from "./htmlSanitizer.js";
 import { HR_DOCUMENT_CATEGORY } from "../models/EmployeeDocument.js";
 
@@ -86,6 +86,12 @@ export const senderIdentity = (req) => {
   };
 };
 
+/** The employee's own mailbox as a "From" choice, or null when they cannot send from it. */
+export const personalSender = (req) => {
+  const mailbox = personalMailboxFor(req.user);
+  return mailbox ? { mailbox, name: senderIdentity(req).sentByName } : null;
+};
+
 /** Plain-text teaser for list views. */
 export const previewOf = (html) =>
   String(html ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
@@ -100,8 +106,13 @@ export const previewOf = (html) =>
  * @param {object}  [opts.replyTo]   the stored message being answered (threads the mail)
  * @param {object}  [opts.logMeta]   { leadId?, ticketId? } for EmailLog
  * @param {(subject: string) => string} [opts.subjectFor]  last say on the subject line
- * @param {string}  [opts.mailbox]   mailbox to send a NEW message from (default: support).
- *                                   A reply always leaves the mailbox its thread lives in.
+ * @param {string}  [opts.mailbox]   the shared mailbox to send from (default: support).
+ *
+ * `req.body.sendAs` picks the sender: "shared" (default) or "personal" — the
+ * employee's own mailbox (see personalMailboxFor). Graph can only answer a
+ * message from the mailbox that holds it, so a reply is threaded when it leaves
+ * the same mailbox as the message it answers, and otherwise goes out as a new
+ * message in the same conversation subject.
  * @returns {Promise<{ error: { status, message } } | { result, fields }>}
  */
 export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subjectFor, mailbox: newMailbox } = {}) => {
@@ -138,10 +149,23 @@ export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subje
     return error(400, attachmentError.message);
   }
 
-  // Graph can only answer a message from the mailbox that holds it.
-  const mailbox = (replyTo ? replyTo.mailbox || senderMailbox() : newMailbox || senderMailbox())?.toLowerCase();
-
   const identity = senderIdentity(req);
+
+  // Graph can only answer a message from the mailbox that holds it, so a reply
+  // from the shared side stays in the shared mailbox its thread lives in.
+  const threadMailbox = replyTo ? (replyTo.mailbox || senderMailbox())?.toLowerCase() : null;
+  let mailbox = (threadMailbox && syncedMailboxes().includes(threadMailbox) ? threadMailbox : newMailbox || senderMailbox())?.toLowerCase();
+  let fromName;
+  if (req.body.sendAs === "personal") {
+    const personal = personalMailboxFor(req.user);
+    if (!personal) {
+      return error(400, `You can only send from your own address when it is a company mailbox (${identity.sentByEmail || "no email on your profile"}).`);
+    }
+    mailbox = personal;
+    fromName = identity.sentByName;
+  }
+  const threaded = Boolean(replyTo?.graphMessageId) && threadMailbox === mailbox;
+
   const signature = `${identity.sentByName}${identity.sentByEmail ? ` · ${identity.sentByEmail}` : ""}`;
 
   const result = await sendCustomEmail({
@@ -152,12 +176,13 @@ export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subje
     bodyHtml: body,
     signature,
     // Replies must come back to the mailbox we sent from so the inbox sync can
-    // file them; the employee is named in the signature instead.
+    // file them; from a shared mailbox the employee is named in the signature.
     from: mailbox,
+    fromName,
     replyTo: mailbox,
     attachments,
     logMeta: { ...logMeta, userId: req.user._id, userType: req.userType },
-    replyToGraphId: replyTo?.graphMessageId ?? null,
+    replyToGraphId: threaded ? replyTo.graphMessageId : null,
   });
 
   return {
@@ -178,7 +203,7 @@ export const validateAndSend = async (req, { replyTo = null, logMeta = {}, subje
       graphMessageId: result.graphMessageId ?? undefined,
       mailbox,
       internetMessageId: result.internetMessageId ?? undefined,
-      conversationId: result.conversationId ?? replyTo?.conversationId ?? undefined,
+      conversationId: result.conversationId ?? (threaded ? replyTo?.conversationId : undefined) ?? undefined,
       inReplyTo: replyTo?._id ?? null,
     },
   };
