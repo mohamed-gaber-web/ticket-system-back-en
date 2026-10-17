@@ -445,18 +445,55 @@ export const cleanCatalogInput = (body) => {
   };
 };
 
+/** Statuses whose content can no longer be saved (Sent goes back to Draft first). */
+export const LOCKED_STATUSES = Object.freeze(["Sent", "Accepted", "Rejected"]);
+
+/** The admin's reason for refusing a proposal: required, at most 1000 characters. */
+export const REJECTION_REASON_MAX = 1000;
+export const cleanRejectionReason = (raw) => {
+  const reason = typeof raw === "string" ? raw.trim() : "";
+  if (!reason) return { error: "Give a reason for rejecting this proposal." };
+  if (reason.length > REJECTION_REASON_MAX) return { error: `The reason must be ${REJECTION_REASON_MAX} characters or fewer.` };
+  return { reason };
+};
+
 /**
- * Status after a save: an over-limit discount that nobody approved waits for a
- * manager; an approved proposal whose discounts changed loses its approval
- * (`clearApproval`); a pending one that is back within the limit is a draft again.
+ * Status changes of the status menu (`PATCH /proposals/:id/status`): target →
+ * the statuses it may come from. "Approved" is not here — only POST /approve
+ * sets it — and Sent needs an approved proposal.
  */
-export const statusAfterSave = ({ status, approvedBy, overLimit, discountsChanged }) => {
-  const clearApproval = Boolean(approvedBy) && discountsChanged && overLimit;
-  const approved = Boolean(approvedBy) && !clearApproval;
-  if (["Accepted", "Rejected"].includes(status)) return { status, clearApproval: false };
-  if (overLimit && !approved) return { status: "Pending approval", clearApproval };
-  if (status === "Pending approval" && !overLimit) return { status: "Draft", clearApproval };
-  return { status, clearApproval };
+export const STATUS_MOVES = Object.freeze({
+  Sent: ["Approved"],
+  Accepted: ["Sent"],
+  Rejected: ["Sent"],
+  Draft: ["Sent"],
+});
+
+export const canMoveStatus = (from, to) => Boolean(STATUS_MOVES[to]?.includes(from));
+
+/**
+ * Did a save change the proposal's content? The stored document is normalised
+ * through the same allow-list as the request, so defaults and id types compare
+ * equal; only the keys the save writes are compared.
+ */
+export const proposalContentChanged = (stored, input, { modules } = {}) => {
+  const before = cleanProposalInput(stored ?? {}, { modules });
+  const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return Object.keys(input).some((k) => {
+    if (k === "presentedDate") return new Date(stored?.presentedDate ?? 0).getTime() !== input.presentedDate.getTime();
+    return !same(before[k], input[k]);
+  });
+};
+
+/**
+ * Status after a save: any content change to a proposal that is waiting for or
+ * holds an admin's approval sends it back to Draft and clears the approval
+ * (`clearApproval`) — it needs approval again. A save that changes nothing keeps
+ * the status. Locked statuses never change here (the save is refused first).
+ */
+export const statusAfterSave = ({ status, contentChanged }) => {
+  if (contentChanged && ["Pending approval", "Approved"].includes(status)) return { status: "Draft", clearApproval: true };
+  return { status: status || "Draft", clearApproval: false };
 };
 
 /** Seed catalog (`cat`, `sku`, `m`, `fam`) → the stored shape. */

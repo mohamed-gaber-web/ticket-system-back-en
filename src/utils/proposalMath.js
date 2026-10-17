@@ -61,13 +61,23 @@ export const storedTotals = (p) => {
   return { implementation: r2(t.implementation), licenses: r2(t.licenses), grand: r2(t.grand) };
 };
 
-/** A discount above the catalog limit needs a manager's approval first. */
+/**
+ * A discount above the catalog limit. Information for the approving admin only —
+ * every proposal needs an admin's approval, whatever its discount.
+ */
 export const discountOverLimit = (p, maxDiscount) => {
   const max = num(maxDiscount);
   return num(p?.implementation?.discountPct) > max || num(p?.licenses?.discountPct) > max;
 };
 
-export const needsApproval = (p, maxDiscount) => discountOverLimit(p, maxDiscount) && !p?.approvedBy;
+/** Statuses that still wait for an admin's approval (a missing status reads as Draft). */
+export const APPROVAL_NEEDED_STATUSES = Object.freeze(["Draft", "Pending approval"]);
+/** Statuses whose PDF may be downloaded / e-mailed (`POST /proposals/:id/export`). */
+export const EXPORTABLE_STATUSES = Object.freeze(["Approved", "Sent", "Accepted"]);
+
+export const needsApproval = (p) => APPROVAL_NEEDED_STATUSES.includes(p?.status ?? "Draft");
+
+export const canExport = (p) => EXPORTABLE_STATUSES.includes(p?.status);
 
 export const milestonesTotal = (p) => (p?.payment?.milestones ?? []).reduce((a, m) => a + num(m.pct), 0);
 

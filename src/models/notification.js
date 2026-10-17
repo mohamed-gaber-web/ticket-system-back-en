@@ -56,6 +56,7 @@ const notificationSchema = new mongoose.Schema(
         "ticket_email_reply",
         "proposal_approval_request",
         "proposal_approved",
+        "proposal_rejected",
       ],
     },
     message: {

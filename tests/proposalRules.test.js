@@ -9,6 +9,8 @@ import {
   milestonesTotal,
   formatUsd,
   licenseUnitPrice,
+  canExport,
+  EXPORTABLE_STATUSES,
 } from "../src/utils/proposalMath.js";
 import {
   buildProposalDefaults,
@@ -26,7 +28,13 @@ import {
   normalizeLayout,
   defaultLayout,
   LAYOUT_KEYS,
+  proposalContentChanged,
+  cleanRejectionReason,
+  canMoveStatus,
+  LOCKED_STATUSES,
 } from "../src/utils/proposalRules.js";
+import { buildOpportunityFromCustomer } from "../src/utils/opportunityFromCustomer.js";
+import { missingQualifiedFields, missingLeadFields } from "../src/utils/leadStages.js";
 
 const seed = (f) => JSON.parse(readFileSync(new URL(`../src/config/proposal/${f}`, import.meta.url)));
 const catalog = catalogFromSeed(seed("catalog.json"));
@@ -75,11 +83,21 @@ test("empty proposal totals are zero and term defaults to 12", () => {
   assert.equal(licenseUnitPrice({ pricePerUserMonth: 10 }, 0), 120);
 });
 
-test("discount approval: above the limit and not yet approved", () => {
+test("approval: every Draft / Pending proposal needs it; the discount limit is information only", () => {
   assert.equal(discountOverLimit(sample, 10), false);
   assert.equal(discountOverLimit(sample, 9), true);
-  assert.equal(needsApproval(sample, 9), true);
-  assert.equal(needsApproval({ ...sample, approvedBy: "u1" }, 9), false);
+  assert.equal(needsApproval({ ...sample, status: "Draft" }), true);
+  assert.equal(needsApproval({ status: "Pending approval" }), true);
+  assert.equal(needsApproval(sample), true); // no status reads as Draft
+  // an old discount approval on a Draft does not count
+  assert.equal(needsApproval({ ...sample, status: "Draft", approvedBy: "u1" }), true);
+  for (const status of ["Approved", "Sent", "Accepted", "Rejected"]) assert.equal(needsApproval({ status }), false, status);
+});
+
+test("export gate: only Approved, Sent or Accepted", () => {
+  assert.deepEqual([...EXPORTABLE_STATUSES], ["Approved", "Sent", "Accepted"]);
+  for (const status of ["Approved", "Sent", "Accepted"]) assert.equal(canExport({ status }), true, status);
+  for (const status of ["Draft", "Pending approval", "Rejected", undefined]) assert.equal(canExport({ status, approvedBy: "u1" }), false, String(status));
 });
 
 test("milestones total and USD format", () => {
@@ -240,15 +258,121 @@ test("catalog input: codes kept unique, nameless rows dropped", () => {
   assert.equal(out.skus[0].pricePerUserMonth, 30);
 });
 
-test("status after save: approval rules", () => {
-  assert.deepEqual(statusAfterSave({ status: "Draft", approvedBy: null, overLimit: true, discountsChanged: true }), { status: "Pending approval", clearApproval: false });
-  assert.deepEqual(statusAfterSave({ status: "Pending approval", approvedBy: null, overLimit: false, discountsChanged: true }), { status: "Draft", clearApproval: false });
-  // approved and untouched discounts stay approved
-  assert.deepEqual(statusAfterSave({ status: "Approved", approvedBy: "m", overLimit: true, discountsChanged: false }), { status: "Approved", clearApproval: false });
-  // changing an approved over-limit discount needs approval again
-  assert.deepEqual(statusAfterSave({ status: "Approved", approvedBy: "m", overLimit: true, discountsChanged: true }), { status: "Pending approval", clearApproval: true });
-  assert.deepEqual(statusAfterSave({ status: "Accepted", approvedBy: null, overLimit: true, discountsChanged: true }), { status: "Accepted", clearApproval: false });
+test("status after save: a content change on Approved / Pending goes back to Draft", () => {
+  assert.deepEqual(statusAfterSave({ status: "Approved", contentChanged: true }), { status: "Draft", clearApproval: true });
+  assert.deepEqual(statusAfterSave({ status: "Pending approval", contentChanged: true }), { status: "Draft", clearApproval: true });
+  // a save that changes nothing keeps the status (and the approval)
+  assert.deepEqual(statusAfterSave({ status: "Approved", contentChanged: false }), { status: "Approved", clearApproval: false });
+  assert.deepEqual(statusAfterSave({ status: "Pending approval", contentChanged: false }), { status: "Pending approval", clearApproval: false });
+  // a Draft never becomes Pending by saving, whatever the discount
+  assert.deepEqual(statusAfterSave({ status: "Draft", contentChanged: true }), { status: "Draft", clearApproval: false });
+  assert.deepEqual([...LOCKED_STATUSES], ["Sent", "Accepted", "Rejected"]);
 });
+
+test("content change: the stored proposal re-saved unchanged is no change", () => {
+  const stored = buildProposalDefaults({
+    lead: { companyName: "Linah Group", country: "Egypt", proposalInterests: ["D365 Finance"], expectedUsers: 5 },
+    catalog,
+    config,
+  });
+  stored.sow.sections[0].attachments = [{ type: "image", fileId: { toString: () => "b".repeat(24) }, width: 10, height: 20, widthPct: 60, caption: "" }];
+  const body = JSON.parse(JSON.stringify(stored));
+  body.sow.sections[0].attachments[0].fileId = "b".repeat(24);
+  const opts = { modules: config.modules };
+  const same = cleanProposalInput(body, opts);
+  assert.equal(proposalContentChanged(stored, same, opts), false);
+  assert.equal(proposalContentChanged(stored, cleanProposalInput({ ...body, notes: ["new note"] }, opts), opts), true);
+  assert.equal(proposalContentChanged(stored, cleanProposalInput({ ...body, implementation: { ...body.implementation, discountPct: 3 } }, opts), opts), true);
+  assert.equal(proposalContentChanged(stored, cleanProposalInput({ ...body, presentedDate: "2020-01-01" }, opts), opts), true);
+});
+
+test("reject: a reason is required, at most 1000 characters", () => {
+  assert.ok(cleanRejectionReason("").error);
+  assert.ok(cleanRejectionReason("   ").error);
+  assert.ok(cleanRejectionReason(undefined).error);
+  assert.ok(cleanRejectionReason({ x: 1 }).error);
+  assert.ok(cleanRejectionReason("x".repeat(1001)).error);
+  assert.deepEqual(cleanRejectionReason("  Discount too high "), { reason: "Discount too high" });
+  assert.equal(cleanRejectionReason("x".repeat(1000)).reason.length, 1000);
+});
+
+test("status menu: Sent only from Approved, never a manual Approved", () => {
+  assert.equal(canMoveStatus("Approved", "Sent"), true);
+  for (const from of ["Draft", "Pending approval", "Sent", "Accepted", "Rejected"]) assert.equal(canMoveStatus(from, "Sent"), false, from);
+  for (const from of ["Draft", "Pending approval", "Sent"]) assert.equal(canMoveStatus(from, "Approved"), false, from);
+  assert.equal(canMoveStatus("Sent", "Accepted"), true);
+  assert.equal(canMoveStatus("Sent", "Rejected"), true);
+  assert.equal(canMoveStatus("Approved", "Accepted"), false);
+  assert.equal(canMoveStatus("Sent", "Draft"), true);
+  assert.equal(canMoveStatus("Approved", "Draft"), false);
+});
+
+// -- Opportunity from an existing customer -----------------------------------
+
+const company = { _id: "c".repeat(24), name: "Linah Group" };
+const contact = {
+  _id: "d".repeat(24),
+  contactPerson: "Mona Adel",
+  companyName: "Linah (old name)",
+  email: "Mona@Linah.com",
+  phone: "+20 100 123 4567",
+  address: "12 Nile St",
+  city: "Cairo",
+  country: "Egypt",
+};
+
+test("opportunity from a customer: company + contact mapping", () => {
+  const d = buildOpportunityFromCustomer({ company, contact });
+  assert.deepEqual(d, {
+    salesType: "Opportunity",
+    isExistingCustomer: true,
+    account: company._id,
+    accountContact: contact._id,
+    companyName: "Linah Group",
+    contactPersonName: "Mona Adel",
+    email: "Mona@Linah.com",
+    phonePrimary: "+20 100 123 4567",
+    fullAddress: "12 Nile St, Cairo",
+    country: "Egypt",
+  });
+});
+
+test("opportunity from a customer: body fields fill gaps and override; unknown keys ignored", () => {
+  const d = buildOpportunityFromCustomer({
+    company,
+    contact: { ...contact, phone: "n/a", email: "not-an-email" },
+    fields: {
+      companyName: " Linah Trading ",
+      phonePrimary: "+966 50 123 4567",
+      website: "linah.example",
+      leadSource: "Referral",
+      leadSourceDetail: "Ahmed",
+      entityType: "Company",
+      industrySector: "Food",
+      businessClassification: "Dates",
+      status: "Closed Won",
+      team: "e".repeat(24),
+      assignedTo: "f".repeat(24),
+    },
+  });
+  assert.equal(d.companyName, "Linah Trading");
+  assert.equal(d.phonePrimary, "+966 50 123 4567");
+  assert.equal(d.email, undefined); // invalid contact email left out, so it is reported missing
+  assert.equal(d.website, "linah.example");
+  assert.equal(d.leadSourceDetail, "Ahmed");
+  for (const k of ["status", "team", "assignedTo"]) assert.equal(k in d, false, k);
+});
+
+test("opportunity from a customer: missing fields reported by field", () => {
+  const d = buildOpportunityFromCustomer({ company, contact: { ...contact, phone: "" }, fields: { leadSource: "LinkedIn", leadSourceDetail: "not a url" } });
+  const missing = missingQualifiedFields(d);
+  assert.deepEqual(missing.map((m) => m.field), ["phonePrimary", "website", "entityType", "industrySector", "businessClassification", "leadSourceDetail", "assignedTo"]);
+  assert.equal(missing.find((m) => m.field === "leadSourceDetail").label, "LinkedIn URL (a valid URL)");
+  assert.deepEqual(missingLeadFields(d), missing.map((m) => m.label));
+  const complete = { ...d, phonePrimary: "+20 100", website: "x.example", entityType: "Company", industrySector: "Food", businessClassification: "B", leadSourceDetail: "linkedin.com/in/mona", assignedTo: "u1" };
+  assert.deepEqual(missingQualifiedFields(complete), []);
+});
+
 
 // ── Section layout ──────────────────────────────────────────────────────────
 

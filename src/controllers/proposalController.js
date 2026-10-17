@@ -1,8 +1,9 @@
 // Proposal Builder API (PROPOSAL_BUILDER_SPEC.md §3). A proposal belongs to a
 // tele-sales Opportunity and inherits its access rules: whoever may see the
 // opportunity may see its proposals (else 404), whoever may edit it may edit
-// them, and approving an over-limit discount is a sales manager's (of the
-// opportunity's team) or an admin's call. Business rules: utils/proposalRules.js;
+// them, and every proposal needs an admin's approval before its PDF is
+// downloaded or e-mailed (Draft -> Pending approval -> Approved, or rejected
+// back to Draft with a reason). Business rules: utils/proposalRules.js;
 // money: utils/proposalMath.js.
 import mongoose from "mongoose";
 import multer from "multer";
@@ -14,14 +15,13 @@ import Consultant from "../models/Consltant.js";
 import Notification from "../models/notification.js";
 import { getGridFSBucket } from "../config/gridfs.js";
 import { emitNotification } from "../socket/io.js";
-import { USER_TYPES, withAnyRole } from "../utils/access.js";
+import { USER_TYPES, isAdmin, withAnyRole } from "../utils/access.js";
 import {
   canEditLead,
   canManageLead,
   canViewLead,
   isCrossTeamReader,
   leadScopeFilter,
-  onTeamFilter,
   isLeadManager,
 } from "../utils/teleSalesScope.js";
 import { stageOf } from "../utils/leadStages.js";
@@ -30,13 +30,18 @@ import { applyStatusChange } from "./leadStatusController.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import { getProposalConfig } from "../utils/proposalConfig.js";
 import {
+  LOCKED_STATUSES,
+  STATUS_MOVES,
   buildProposalDefaults,
+  canMoveStatus,
   cleanCatalogInput,
   cleanProposalInput,
+  cleanRejectionReason,
+  proposalContentChanged,
   proposalNumber,
   statusAfterSave,
 } from "../utils/proposalRules.js";
-import { discountOverLimit, milestonesComplete, needsApproval, storedTotals } from "../utils/proposalMath.js";
+import { canExport, discountOverLimit, milestonesComplete, needsApproval, storedTotals } from "../utils/proposalMath.js";
 
 export const PROPOSAL_IMAGE_CATEGORY = "proposal-image";
 const PERSON = "firstName lastName email";
@@ -67,12 +72,27 @@ const loadProposal = async (req, id) => {
 };
 
 const permissionsFor = (req, proposal, lead) => {
-  const edit = canEditLead(req, lead) && !["Accepted", "Rejected"].includes(proposal.status);
+  const edit = canEditLead(req, lead) && !LOCKED_STATUSES.includes(proposal.status);
   return {
     edit,
-    approve: canManageLead(req, lead),
+    // Approving and rejecting are an admin's alone.
+    approve: isAdmin(req.user),
     delete: proposal.status === "Draft" && (canManageLead(req, lead) || (canEditLead(req, lead) && String(proposal.preparedBy?._id ?? proposal.preparedBy) === String(req.user._id))),
   };
+};
+
+/** Why a proposal can't be edited: its status, or the caller's rights. */
+const lockedMessage = (proposal) => {
+  if (proposal.status === "Sent") return "A sent proposal can't be edited — move it back to Draft or create a new version.";
+  if (LOCKED_STATUSES.includes(proposal.status)) return `A ${proposal.status.toLowerCase()} proposal can't be edited — create a new version.`;
+  return "You can't edit this proposal.";
+};
+
+/** Forget the admin's approval (the proposal needs approval again). */
+const clearApproval = (proposal) => {
+  proposal.approvedBy = null;
+  proposal.approvedAt = null;
+  proposal.approvalRequestedAt = null;
 };
 
 /** The full proposal as the builder needs it. */
@@ -80,6 +100,7 @@ const present = async (req, proposalId, lead) => {
   const doc = await Proposal.findById(proposalId)
     .populate("preparedBy", PERSON)
     .populate("approvedBy", PERSON)
+    .populate("rejection.by", PERSON)
     .populate({ path: "opportunity", select: OPPORTUNITY_FIELDS, populate: { path: "assignedTo", select: PERSON } })
     .lean();
   return { ...doc, permissions: permissionsFor(req, doc, lead) };
@@ -122,7 +143,8 @@ const summaryFields = "number version status client presentedDate preparedBy app
 const summarise = (rows, maxDiscount) =>
   rows.map(({ implementation, licenses, ...p }) => ({
     ...p,
-    needsApproval: needsApproval({ implementation, licenses, approvedBy: p.approvedBy }, maxDiscount),
+    needsApproval: needsApproval(p),
+    discountOverLimit: discountOverLimit({ implementation, licenses }, maxDiscount),
   }));
 
 /** GET /proposals — every proposal the caller may see, newest first. */
@@ -175,6 +197,46 @@ export const listOpportunityProposals = async (req, res, next) => {
       ProposalCatalog.getSingleton(),
     ]);
     res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /opportunities/by-customer/:accountId — the OPEN opportunities of one
+ * existing customer (ticketing Company) that the caller may see, newest first,
+ * so "New proposal → Existing customers" can offer to reuse one.
+ */
+export const listCustomerOpportunities = async (req, res, next) => {
+  try {
+    if (!isId(req.params.accountId)) return fail(res, 404, "Customer not found");
+    const rows = await Lead.find({
+      $and: [
+        { salesType: "Opportunity", account: req.params.accountId, status: { $nin: ["Closed Won", "Closed Lost"] } },
+        leadScopeFilter(req),
+      ],
+    })
+      .select("companyName contactPersonName status assignedTo updatedAt")
+      .sort({ updatedAt: -1 })
+      .limit(50)
+      .populate("assignedTo", "firstName lastName")
+      .lean();
+    const data = rows.map((r) => ({
+      _id: r._id,
+      companyName: r.companyName ?? "",
+      contactPersonName: r.contactPersonName ?? "",
+      status: r.status,
+      assignedTo: r.assignedTo
+        ? {
+            _id: r.assignedTo._id,
+            firstName: r.assignedTo.firstName,
+            lastName: r.assignedTo.lastName,
+            name: [r.assignedTo.firstName, r.assignedTo.lastName].filter(Boolean).join(" "),
+          }
+        : null,
+      updatedAt: r.updatedAt,
+    }));
+    res.json({ success: true, data });
   } catch (err) {
     next(err);
   }
@@ -234,13 +296,13 @@ export const createProposal = async (req, res, next) => {
         data.client = source.client;
         data.country = source.country;
       }
-      const overLimit = discountOverLimit(data, catalog.settings.maxDiscount);
       try {
+        // Every new proposal (and new version) starts as a Draft that needs approval.
         proposal = await Proposal.create({
           ...data,
           number: await freeNumber(data.client, version),
-          status: overLimit ? "Pending approval" : "Draft",
-          approvalRequestedAt: overLimit ? new Date() : null,
+          status: "Draft",
+          approvalRequestedAt: null,
           opportunity: lead._id,
           team: lead.team ?? null,
           preparedBy: req.user._id,
@@ -250,7 +312,6 @@ export const createProposal = async (req, res, next) => {
         if (err?.code !== 11000 || attempt >= 4) throw err;
       }
     }
-    if (proposal.status === "Pending approval") await notifyApprovers(req, lead, proposal);
     res.status(201).json({ success: true, data: await present(req, proposal._id, lead) });
   } catch (err) {
     next(err);
@@ -322,39 +383,24 @@ export const saveProposal = async (req, res, next) => {
     const found = await loadProposal(req, req.params.id);
     if (!found) return notFound(res);
     const { proposal, lead } = found;
-    if (!permissionsFor(req, proposal, lead).edit) {
-      return fail(res, 403, ["Accepted", "Rejected"].includes(proposal.status) ? `A ${proposal.status.toLowerCase()} proposal can't be edited — create a new version.` : "You can't edit this proposal.");
-    }
+    if (!permissionsFor(req, proposal, lead).edit) return fail(res, 403, lockedMessage(proposal));
 
-    const [catalog, config] = await Promise.all([ProposalCatalog.getSingleton(), getProposalConfig()]);
+    const config = await getProposalConfig();
     const input = cleanProposalInput(req.body, { modules: config.modules });
     const bad = await foreignImages(input, proposal.opportunity);
     if (bad.length) return fail(res, 400, "An image in the scope of work is not part of this proposal. Upload it again.");
 
-    const discountsChanged =
-      Number(proposal.implementation?.discountPct) !== input.implementation.discountPct ||
-      Number(proposal.licenses?.discountPct) !== input.licenses.discountPct;
-    const overLimit = discountOverLimit(input, catalog.settings.maxDiscount);
-    if (proposal.status === "Sent" && ((overLimit && !proposal.approvedBy) || !milestonesComplete(input))) {
-      return fail(res, 400, !milestonesComplete(input) ? "Payment milestones must add up to 100% on a sent proposal." : "This discount needs a manager's approval before the proposal is sent.");
-    }
-    const outcome = statusAfterSave({ status: proposal.status, approvedBy: proposal.approvedBy, overLimit, discountsChanged });
-
-    const becamePending = outcome.status === "Pending approval" && proposal.status !== "Pending approval";
+    // Any content change to a proposal waiting for / holding an approval sends it back to Draft.
+    const contentChanged = proposalContentChanged(proposal.toObject(), input, { modules: config.modules });
+    const outcome = statusAfterSave({ status: proposal.status, contentChanged });
     proposal.set({ ...input, totals: storedTotals(input), status: outcome.status });
-    if (outcome.clearApproval) {
-      proposal.approvedBy = null;
-      proposal.approvedAt = null;
-    }
-    if (becamePending) proposal.approvalRequestedAt = new Date();
+    if (outcome.clearApproval) clearApproval(proposal);
     await proposal.save();
-    // An over-limit discount asks the team's managers right away — no extra click needed.
-    if (becamePending) await notifyApprovers(req, lead, proposal);
 
     const leadStatus = await moveOpportunityToProposalSent(req, lead, proposal);
     const message = [
       `Saved ${proposal.number}`,
-      outcome.status === "Pending approval" ? "The discount needs a manager's approval." : "",
+      outcome.clearApproval ? "Changes need approval again." : "",
       leadStatus ? `Opportunity moved to "${leadStatus}".` : "",
     ].filter(Boolean).join(" · ");
     res.json({ success: true, message, data: await present(req, proposal._id, lead), leadStatus });
@@ -369,14 +415,15 @@ export const rebuildProposal = async (req, res, next) => {
     const found = await loadProposal(req, req.params.id);
     if (!found) return notFound(res);
     const { proposal, lead } = found;
-    if (!permissionsFor(req, proposal, lead).edit) return fail(res, 403, "You can't edit this proposal.");
     if (proposal.status === "Sent") {
       return fail(res, 409, "This proposal was already sent to the customer. Create a new version to rebuild it.");
     }
+    if (!permissionsFor(req, proposal, lead).edit) return fail(res, 403, lockedMessage(proposal));
     const [catalog, config] = await Promise.all([ProposalCatalog.getSingleton(), getProposalConfig()]);
     const data = buildProposalDefaults({ lead, catalog, config, version: proposal.version });
     const { number, version, presentedDate, status, ...content } = data;
-    proposal.set({ ...content, totals: storedTotals(data), approvedBy: null, approvedAt: null, status: "Draft" });
+    proposal.set({ ...content, totals: storedTotals(data), status: "Draft" });
+    clearApproval(proposal);
     await proposal.save();
     res.json({ success: true, message: "Proposal rebuilt from the opportunity", data: await present(req, proposal._id, lead) });
   } catch (err) {
@@ -439,29 +486,27 @@ const pushNotifications = async (docs, { lead, proposal }) => {
   );
 };
 
-/** The sales managers of the opportunity's team; admins when the team has none. */
-const approversFor = async (lead) => {
-  const active = { status: "active" };
-  const managers = lead.team
-    ? await Consultant.find({ $and: [withAnyRole(["sales_manager"]), onTeamFilter(lead.team), active] }).select("_id").lean()
-    : [];
-  if (managers.length) return managers;
-  return Consultant.find({ ...withAnyRole(["admin"]), ...active }).select("_id").lean();
-};
+/** Every active admin — the only approvers of a proposal. */
+const approvers = () => Consultant.find({ ...withAnyRole(["admin"]), status: "active" }).select("_id").lean();
 
-/** Ask the opportunity's approvers to look at an over-limit discount. Never fails the request. */
-const notifyApprovers = async (req, lead, proposal) => {
+const fullName = (user, fallback) => [user?.firstName, user?.lastName].filter(Boolean).join(" ") || fallback;
+
+/** Ask every active admin to approve the proposal (also the reminder). Never fails the request. */
+const notifyApprovers = async (req, lead, proposal, { reminder = false } = {}) => {
   try {
-    const approvers = (await approversFor(lead)).filter((u) => String(u._id) !== String(req.user._id));
-    const who = [req.user.firstName, req.user.lastName].filter(Boolean).join(" ") || "A sales rep";
+    const catalog = await ProposalCatalog.getSingleton();
+    const max = catalog.settings.maxDiscount;
+    const admins = (await approvers()).filter((u) => String(u._id) !== String(req.user._id));
+    const who = fullName(req.user, "A sales rep");
+    const note = discountOverLimit(proposal, max) ? ` The discount is above the ${max}% limit.` : "";
     await pushNotifications(
-      approvers.map((u) => ({
+      admins.map((u) => ({
         userId: u._id,
         userType: USER_TYPES.EMPLOYEE,
         notificationType: "proposal_approval_request",
         lead: lead._id,
         proposal: proposal._id,
-        message: `${who} asks you to approve the discount on proposal ${proposal.number} (${proposal.client}).`,
+        message: `${reminder ? "Reminder: " : ""}${who} asks you to approve proposal ${proposal.number} (${proposal.client}).${note}`,
       })),
       { lead, proposal },
     );
@@ -470,72 +515,119 @@ const notifyApprovers = async (req, lead, proposal) => {
   }
 };
 
-/** POST /proposals/:id/request-approval — status → Pending approval; the team's managers are notified. */
+/** Tell the author what an admin decided. Never fails the request. */
+const notifyAuthor = async (req, lead, proposal, notificationType, message) => {
+  try {
+    if (String(proposal.preparedBy) === String(req.user._id)) return;
+    await pushNotifications(
+      [{ userId: proposal.preparedBy, userType: USER_TYPES.EMPLOYEE, notificationType, lead: lead._id, proposal: proposal._id, message }],
+      { lead, proposal },
+    );
+  } catch (err) {
+    console.error(`Proposal ${notificationType} notification failed:`, err.message);
+  }
+};
+
+/**
+ * POST /proposals/:id/request-approval — a Draft goes to Pending approval and
+ * every active admin is notified; called again while pending it is a reminder.
+ * The payment milestones must total 100% first.
+ */
 export const requestApproval = async (req, res, next) => {
   try {
     const found = await loadProposal(req, req.params.id);
     if (!found) return notFound(res);
     const { proposal, lead } = found;
-    if (!permissionsFor(req, proposal, lead).edit) return fail(res, 403, "You can't edit this proposal.");
-    const catalog = await ProposalCatalog.getSingleton();
-    if (!discountOverLimit(proposal, catalog.settings.maxDiscount)) {
-      return fail(res, 400, `The discounts are within ${catalog.settings.maxDiscount}% — no approval is needed.`);
+    if (!permissionsFor(req, proposal, lead).edit) return fail(res, 403, lockedMessage(proposal));
+    const reminder = proposal.status === "Pending approval";
+    if (!reminder && proposal.status !== "Draft") {
+      return fail(res, 409, proposal.status === "Approved" ? "This proposal is already approved." : `A ${proposal.status} proposal can't be submitted for approval.`);
     }
-    if (proposal.approvedBy) return fail(res, 409, "This proposal is already approved.");
-    proposal.status = "Pending approval";
+    if (!milestonesComplete(proposal)) {
+      return fail(res, 400, "Payment milestones must add up to 100% before the proposal is submitted for approval.");
+    }
+    if (!reminder) {
+      proposal.status = "Pending approval";
+      proposal.approvedBy = null;
+      proposal.approvedAt = null;
+      proposal.rejection = null;
+    }
     proposal.approvalRequestedAt = new Date();
     await proposal.save();
-    await notifyApprovers(req, lead, proposal);
-    res.json({ success: true, message: "Sent to your sales manager for approval", data: await present(req, proposal._id, lead) });
+    await notifyApprovers(req, lead, proposal, { reminder });
+    res.json({
+      success: true,
+      message: reminder ? "Reminder sent to the admins" : "Submitted to the admins for approval",
+      data: await present(req, proposal._id, lead),
+    });
   } catch (err) {
     next(err);
   }
 };
 
-/** POST /proposals/:id/approve — a sales manager of the team, or an admin. */
+/** The checks approve and reject share: an admin, on a proposal waiting for approval. */
+const loadForDecision = async (req, res) => {
+  const found = await loadProposal(req, req.params.id);
+  if (!found) {
+    notFound(res);
+    return null;
+  }
+  if (!isAdmin(req.user)) {
+    fail(res, 403, "Only an admin can approve or reject proposals.");
+    return null;
+  }
+  if (found.proposal.status !== "Pending approval") {
+    fail(res, 409, `This proposal is ${found.proposal.status}, not waiting for approval.`);
+    return null;
+  }
+  return found;
+};
+
+/** POST /proposals/:id/approve — an admin approves a pending proposal; the author is notified. */
 export const approveProposal = async (req, res, next) => {
   try {
-    const found = await loadProposal(req, req.params.id);
-    if (!found) return notFound(res);
+    const found = await loadForDecision(req, res);
+    if (!found) return;
     const { proposal, lead } = found;
-    if (!canManageLead(req, lead)) return fail(res, 403, "Only a sales manager of this team or an admin can approve discounts.");
-    if (["Accepted", "Rejected"].includes(proposal.status)) return fail(res, 409, `This proposal is already ${proposal.status.toLowerCase()}.`);
+    proposal.status = "Approved";
     proposal.approvedBy = req.user._id;
     proposal.approvedAt = new Date();
-    if (["Draft", "Pending approval"].includes(proposal.status)) proposal.status = "Approved";
+    proposal.rejection = null;
     await proposal.save();
-
-    try {
-      if (String(proposal.preparedBy) !== String(req.user._id)) {
-        const who = [req.user.firstName, req.user.lastName].filter(Boolean).join(" ") || "Your manager";
-        await pushNotifications([
-          {
-            userId: proposal.preparedBy,
-            userType: USER_TYPES.EMPLOYEE,
-            notificationType: "proposal_approved",
-            lead: lead._id,
-            proposal: proposal._id,
-            message: `${who} approved proposal ${proposal.number} (${proposal.client}). You can download the PDF now.`,
-          },
-        ], { lead, proposal });
-      }
-    } catch (err) {
-      console.error("Proposal approved notification failed:", err.message);
-    }
+    await notifyAuthor(req, lead, proposal, "proposal_approved",
+      `${fullName(req.user, "An admin")} approved proposal ${proposal.number} (${proposal.client}). You can download the PDF and send it now.`);
     res.json({ success: true, message: `Approved ${proposal.number}`, data: await present(req, proposal._id, lead) });
   } catch (err) {
     next(err);
   }
 };
 
-const STATUS_MOVES = {
-  Sent: ["Draft", "Approved"],
-  Accepted: ["Sent"],
-  Rejected: ["Sent"],
-  Draft: ["Sent"],
+/** POST /proposals/:id/reject { reason } — an admin sends a pending proposal back to Draft. */
+export const rejectProposal = async (req, res, next) => {
+  try {
+    const found = await loadForDecision(req, res);
+    if (!found) return;
+    const { proposal, lead } = found;
+    const { reason, error } = cleanRejectionReason(req.body?.reason);
+    if (error) return fail(res, 400, error);
+    proposal.status = "Draft";
+    proposal.approvedBy = null;
+    proposal.approvedAt = null;
+    proposal.rejection = { reason, by: req.user._id, at: new Date() };
+    await proposal.save();
+    await notifyAuthor(req, lead, proposal, "proposal_rejected",
+      `${fullName(req.user, "An admin")} rejected proposal ${proposal.number} (${proposal.client}): ${reason.length > 200 ? `${reason.slice(0, 200)}…` : reason}`);
+    res.json({ success: true, message: `Rejected ${proposal.number}`, data: await present(req, proposal._id, lead) });
+  } catch (err) {
+    next(err);
+  }
 };
 
-/** PATCH /proposals/:id/status { status } — Sent / Accepted / Rejected, or back to Draft. */
+/**
+ * PATCH /proposals/:id/status { status } — Sent (only from Approved), Accepted /
+ * Rejected (from Sent), or Sent back to Draft (which needs approval again).
+ * "Approved" is set only by POST /approve.
+ */
 export const setProposalStatus = async (req, res, next) => {
   try {
     const found = await loadProposal(req, req.params.id);
@@ -543,15 +635,15 @@ export const setProposalStatus = async (req, res, next) => {
     const { proposal, lead } = found;
     if (!canEditLead(req, lead)) return fail(res, 403, "You can't change this proposal.");
     const target = String(req.body?.status ?? "");
-    const from = STATUS_MOVES[target];
-    if (!from) return fail(res, 400, "Status must be Sent, Accepted, Rejected or Draft.");
-    if (!from.includes(proposal.status)) return fail(res, 409, `A ${proposal.status} proposal can't be marked ${target}.`);
-    if (target === "Sent") {
-      const catalog = await ProposalCatalog.getSingleton();
-      if (needsApproval(proposal, catalog.settings.maxDiscount)) return fail(res, 403, "The discount needs a manager's approval first.");
-      if (!milestonesComplete(proposal)) return fail(res, 400, "Payment milestones must add up to 100% before the proposal is sent.");
+    if (!STATUS_MOVES[target]) return fail(res, 400, "Status must be Sent, Accepted, Rejected or Draft.");
+    if (!canMoveStatus(proposal.status, target)) {
+      return fail(res, 409, target === "Sent" ? "Only an approved proposal can be marked Sent." : `A ${proposal.status} proposal can't be marked ${target}.`);
     }
-    proposal.status = target === "Draft" && proposal.approvedBy ? "Approved" : target;
+    if (target === "Sent" && !milestonesComplete(proposal)) {
+      return fail(res, 400, "Payment milestones must add up to 100% before the proposal is sent.");
+    }
+    proposal.status = target;
+    if (target === "Draft") clearApproval(proposal);
     await proposal.save();
     res.json({ success: true, message: `Marked ${proposal.status}`, data: await present(req, proposal._id, lead) });
   } catch (err) {
@@ -561,17 +653,15 @@ export const setProposalStatus = async (req, res, next) => {
 
 /**
  * POST /proposals/:id/export — the PDF is drawn in the browser; this is the
- * server's gate (403 while a discount waits for approval) and the export record.
+ * server's gate (403 unless an admin approved it: Approved, Sent or Accepted)
+ * and the export record.
  */
 export const recordExport = async (req, res, next) => {
   try {
     const found = await loadProposal(req, req.params.id);
     if (!found) return notFound(res);
     const { proposal } = found;
-    const catalog = await ProposalCatalog.getSingleton();
-    if (needsApproval(proposal, catalog.settings.maxDiscount)) {
-      return fail(res, 403, `The discount is above ${catalog.settings.maxDiscount}%. A sales manager must approve it before the PDF can be downloaded.`);
-    }
+    if (!canExport(proposal)) return fail(res, 403, "This proposal needs an admin's approval first.");
     const generatedAt = new Date();
     await Proposal.updateOne({ _id: proposal._id }, { $set: { "pdf.generatedAt": generatedAt, "pdf.generatedBy": req.user._id } });
     res.json({ success: true, data: { generatedAt } });

@@ -55,6 +55,19 @@ const proposalSchema = new mongoose.Schema(
     approvedBy: { type: ObjectId, ref: "Consultant", default: null },
     approvedAt: { type: Date, default: null },
     approvalRequestedAt: { type: Date, default: null },
+    // The admin's last refusal (POST /reject): the proposal went back to Draft.
+    // Cleared by the next request for approval.
+    rejection: {
+      type: new mongoose.Schema(
+        {
+          reason: { type: String, trim: true, maxlength: 1000, required: true },
+          by: { type: ObjectId, ref: "Consultant", required: true },
+          at: { type: Date, required: true },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
     currency: { type: String, enum: ["USD"], default: "USD" },
     vat: { type: Number, min: 0, max: 100, default: 0 },
     legalEntities: { type: [entitySchema], default: [] },

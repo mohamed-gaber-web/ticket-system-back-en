@@ -26,7 +26,9 @@ import {
   isCrossTeamReader,
   isCallerTeam,
   isLeadManager,
+  TEAM_REQUIRED_MESSAGE,
 } from "../utils/teleSalesScope.js";
+import { buildOpportunityFromCustomer } from "../utils/opportunityFromCustomer.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import { DEFAULT_VALUE_CURRENCY, IMPORTED_LEAD_STATUS } from "../config/leadStatusWorkflow.js";
 import {
@@ -35,6 +37,7 @@ import {
   stageOf,
   viewStageFilter,
   missingLeadFields,
+  missingQualifiedFields,
   hasIdentity,
 } from "../utils/leadStages.js";
 
@@ -154,6 +157,22 @@ export const resolveLeadSourceDetail = (source, rawDetail) => {
   return { value: detail, errors: [] };
 };
 
+/**
+ * The team a record the caller creates belongs to. It comes from the caller, not
+ * the payload — an agent cannot create a lead inside another team; only a super
+ * admin picks one explicitly — and it has to exist: a well-formed but dangling id
+ * would create a lead no team filter can ever match. Returns { team, error }.
+ */
+const resolveLeadTeam = async (req, bodyTeam) => {
+  const resolved = resolveCreateTeam(req, bodyTeam);
+  if (resolved.error) return { team: null, error: resolved.error };
+  return resolveExistingTeam(resolved.team);
+};
+
+/** The lead's proposal details (entities, interests, users) from a body, cleaned. */
+const proposalDetailsFrom = async (body) =>
+  cleanProposalDetails(body ?? {}, Object.keys((await getProposalConfig()).interests ?? {}));
+
 // @desc    Create a new lead
 // @route   POST /api/leads
 // @access  Private (tele_sales)
@@ -182,15 +201,7 @@ export const createLead = async (req, res) => {
       return res.status(400).json({ success: false, message: "Validation error", errors: detail.errors });
     }
 
-    // The owning team comes from the caller, not the payload — an agent cannot
-    // create a lead inside another team. Only a super admin picks one explicitly.
-    const resolved = resolveCreateTeam(req, req.body.team);
-    if (resolved.error) {
-      return res.status(400).json({ success: false, message: resolved.error });
-    }
-    // The team has to exist: a well-formed but dangling id would create a lead no
-    // team filter can ever match, invisible to every agent in the system.
-    const { team, error: teamError } = await resolveExistingTeam(resolved.team);
+    const { team, error: teamError } = await resolveLeadTeam(req, req.body.team);
     if (teamError) {
       return res.status(400).json({ success: false, message: teamError });
     }
@@ -227,7 +238,7 @@ export const createLead = async (req, res) => {
 
     const lead = await Lead.create({
       ...blankEnumsToNull({ ...req.body }),
-      ...cleanProposalDetails(req.body, Object.keys((await getProposalConfig()).interests ?? {})),
+      ...(await proposalDetailsFrom(req.body)),
       customerNeedProducts: needs.ids,
       isExistingCustomer: false,
       account: null,
@@ -261,6 +272,89 @@ export const createLead = async (req, res) => {
       return res.status(400).json({ success: false, message: "Validation error", errors: messages });
     }
     res.status(500).json({ success: false, message: "Error creating lead", error: error.message });
+  }
+};
+
+// @desc    Start an Opportunity straight from an existing customer (Proposal
+//          Builder → New proposal → Existing customers): the company and one of
+//          its contacts, plus any lead fields the customer record lacks.
+// @route   POST /api/opportunities/from-customer
+//          { account, accountContact, team?, assignedTo?, fields: { website, leadSource, … } }
+// @access  Private (proposals module + tele-sales writers)
+export const createOpportunityFromCustomer = async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const accountId = cleanStr(body.account?._id ?? body.account);
+    const contactId = cleanStr(body.accountContact?._id ?? body.accountContact);
+    if (!accountId) return res.status(400).json({ success: false, message: "Choose the existing customer's company." });
+    const company = mongoose.isValidObjectId(accountId)
+      ? await Company.findOne({ _id: accountId, isActive: { $ne: false } }).select("name").lean()
+      : null;
+    if (!company) return res.status(400).json({ success: false, message: "The selected company does not exist." });
+    if (!contactId) return res.status(400).json({ success: false, message: "Choose the customer's contact." });
+    const contact = mongoose.isValidObjectId(contactId)
+      ? await Customer.findOne({ _id: contactId, company: company._id }).select(ACCOUNT_CONTACT_FIELDS).lean()
+      : null;
+    if (!contact) {
+      return res.status(400).json({ success: false, message: "The selected contact does not belong to that company." });
+    }
+
+    // Team: as on every create. A cross-team writer (admin) without a home team
+    // must choose one — reported with the missing fields so the form asks for it.
+    const missing = [];
+    let team = null;
+    const resolved = resolveCreateTeam(req, body.team);
+    if (resolved.error === TEAM_REQUIRED_MESSAGE) {
+      missing.push({ field: "team", label: "Team" });
+    } else {
+      const teamResult = await resolveLeadTeam(req, body.team);
+      if (teamResult.error) return res.status(400).json({ success: false, message: teamResult.error });
+      team = teamResult.team;
+    }
+
+    // Owner: a plain sales agent owns what they start; a manager or admin names the agent.
+    const assignedTo = isLeadManager(req) ? cleanStr(body.assignedTo) : String(req.user._id);
+    const data = { ...buildOpportunityFromCustomer({ company, contact, fields: body.fields }), assignedTo: assignedTo || undefined };
+
+    // The same mandatory fields as the lead form and conversion (an Opportunity is a qualified Lead).
+    missing.push(...missingQualifiedFields(data));
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Complete the mandatory fields first: ${missing.map((m) => m.label).join(", ")}.`,
+        missing,
+      });
+    }
+    const assigneeError = await assigneeTeamError(team, assignedTo);
+    if (assigneeError) return res.status(400).json({ success: false, message: assigneeError });
+    const detail = resolveLeadSourceDetail(data.leadSource, data.leadSourceDetail);
+    if (detail.errors.length > 0) {
+      return res.status(400).json({ success: false, message: "Validation error", errors: detail.errors });
+    }
+
+    const now = new Date();
+    const lead = await Lead.create({
+      ...blankEnumsToNull(data),
+      ...(await proposalDetailsFrom(body.fields)),
+      leadSourceDetail: detail.value || undefined,
+      customerNeedProducts: [],
+      // The status a new record starts in; converting a Lead keeps it, so an
+      // Opportunity made through conversion would hold it too.
+      status: "New Lead",
+      team,
+      createdBy: req.user._id,
+      convertedToLeadAt: now,
+      convertedToLeadBy: req.user._id,
+      convertedToOpportunityAt: now,
+      convertedToOpportunityBy: req.user._id,
+    });
+    res.status(201).json({ success: true, message: "Opportunity created", data: lead });
+  } catch (error) {
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({ success: false, message: "Validation error", errors: messages });
+    }
+    res.status(500).json({ success: false, message: "Error creating the opportunity" });
   }
 };
 

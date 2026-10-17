@@ -53,15 +53,22 @@ const filled = (v) => v !== undefined && v !== null && String(v).trim() !== "";
  * the lead-source detail its source asks for, and an owner. Empty when it is
  * ready to convert.
  */
-export const missingLeadFields = (lead) => {
-  const missing = REQUIRED_LEAD_FIELDS.filter(({ field }) => !filled(lead?.[field])).map(({ label }) => label);
+export const missingLeadFields = (lead) => missingQualifiedFields(lead).map(({ label }) => label);
+
+/**
+ * The same check as missingLeadFields, keyed by field so a form can show just
+ * those inputs: `[{ field, label }]` — the REQUIRED_LEAD_FIELDS, then
+ * `leadSourceDetail` (when the source asks for one) and `assignedTo`.
+ */
+export const missingQualifiedFields = (lead) => {
+  const missing = REQUIRED_LEAD_FIELDS.filter(({ field }) => !filled(lead?.[field])).map(({ field, label }) => ({ field, label }));
   const spec = lead?.leadSource ? LEAD_SOURCE_DETAILS[lead.leadSource] : undefined;
   if (spec) {
     const detail = lead.leadSourceDetail;
-    if (!filled(detail)) missing.push(spec.label);
-    else if (spec.type === "url" && !isValidUrl(detail)) missing.push(`${spec.label} (a valid URL)`);
+    if (!filled(detail)) missing.push({ field: "leadSourceDetail", label: spec.label });
+    else if (spec.type === "url" && !isValidUrl(detail)) missing.push({ field: "leadSourceDetail", label: `${spec.label} (a valid URL)` });
   }
-  if (!lead?.assignedTo) missing.push("Assign to");
+  if (!lead?.assignedTo) missing.push({ field: "assignedTo", label: "Assign to" });
   return missing;
 };
 
