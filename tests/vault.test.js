@@ -10,13 +10,24 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import {
   decrypt,
+  decryptBuffer,
   encrypt,
+  encryptBuffer,
   isVaultConfigured,
   parseVaultKey,
   requireVaultConfigured,
 } from "../src/utils/vaultCrypto.js";
 import {
   APPROVAL_REQUIRED_MESSAGE,
+  BLOCKED_EXTENSIONS,
+  LOOKUP_TYPES,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+  VAULT_ATTACHMENT_CATEGORY,
+  attachmentDisposition,
+  attachmentsView,
+  buildAttachmentList,
+  cleanAttachmentIds,
   CLIENT_ONLY_FIELDS,
   COMPANY_ONLY_FIELDS,
   DUE_SOON_DAYS,
@@ -32,12 +43,16 @@ import {
   entryComputed,
   entryView,
   inUseMessage,
+  isBlockedFileName,
   isDueSoon,
   isStale,
+  isUsableDepartment,
   lastDayKeys,
   lookupRefChecks,
   lookupRefErrors,
   monthStart,
+  removedAttachmentIds,
+  safeContentType,
   staleBefore,
   zeroFillDays,
 } from "../src/utils/vaultRules.js";
@@ -72,6 +87,24 @@ describe("vaultCrypto", () => {
     assert.throws(() => decrypt([flip(iv), tag, ct].join(":"), KEY));
     assert.throws(() => decrypt([iv, tag, ct].join(":"), crypto.randomBytes(32)));
     assert.throws(() => decrypt("not-a-ciphertext", KEY));
+  });
+
+  it("round-trips file bytes as one iv|tag|ciphertext buffer and rejects tampering", () => {
+    const plain = Buffer.concat([Buffer.from("%PDF-1.7 \u0000\u00ff"), crypto.randomBytes(4096)]);
+    const stored = encryptBuffer(plain, KEY);
+    assert.equal(stored.length, plain.length + 12 + 16);
+    assert.ok(!stored.includes(plain.subarray(0, 32)), "ciphertext must not contain the plaintext");
+    assert.ok(decryptBuffer(stored, KEY).equals(plain));
+    assert.ok(decryptBuffer(encryptBuffer(Buffer.alloc(0), KEY), KEY).equals(Buffer.alloc(0)));
+    assert.ok(!encryptBuffer(plain, KEY).equals(stored), "fresh IV each time");
+    for (const at of [0, 12, stored.length - 1]) {
+      const bad = Buffer.from(stored);
+      bad[at] ^= 0x01;
+      assert.throws(() => decryptBuffer(bad, KEY), `flipped byte ${at}`);
+    }
+    assert.throws(() => decryptBuffer(stored, crypto.randomBytes(32)));
+    assert.throws(() => decryptBuffer(stored.subarray(0, 20), KEY));
+    assert.throws(() => encryptBuffer("text", KEY));
   });
 
   it("accepts only a 32-byte base64 key; the guard answers 503 without one", () => {
@@ -179,6 +212,24 @@ describe("cleanEntryInput (owner-type rules, spec §3.3)", () => {
     assert.deepEqual(toClient.missing, ["client"]);
   });
 
+  it("department is a plain ref (the Department list), not a lookup", () => {
+    const base = { ownerType: "company", platform: "x", username: "u", password: "p" };
+    const { data, invalid } = cleanEntryInput({ ...base, department: ID(7) });
+    assert.deepEqual(invalid, []);
+    assert.equal(data.department, ID(7));
+    assert.deepEqual(cleanEntryInput({ ...base, department: "IT" }).invalid, ["department"]);
+    assert.deepEqual(lookupRefChecks({ department: ID(7) }), []);
+  });
+
+  it("a department must exist and be active, unless it is the entry's current one", () => {
+    assert.equal(isUsableDepartment(null), false);
+    assert.equal(isUsableDepartment({ _id: ID(1), isActive: true }), true);
+    assert.equal(isUsableDepartment({ _id: ID(1) }), true);
+    assert.equal(isUsableDepartment({ _id: ID(1), isActive: false }), false);
+    assert.equal(isUsableDepartment({ _id: ID(1), isActive: false }, ID(2)), false);
+    assert.equal(isUsableDepartment({ _id: ID(1), isActive: false }, ID(1)), true);
+  });
+
   it("lookup refs must exist with the matching type", () => {
     const data = { category: ID(1), environment: ID(2), sensitivity: ID(3), department: null };
     const checks = lookupRefChecks(data);
@@ -211,9 +262,13 @@ describe("lookups and delete protection", () => {
 
   it("the defaults cover every list, one None MFA and one approval level", () => {
     const docs = defaultLookupDocs();
-    for (const type of ["category", "environment", "accessLevel", "mfaMethod", "sensitivity", "department", "sendPurpose"]) {
+    for (const type of ["category", "environment", "accessLevel", "mfaMethod", "sensitivity", "sendPurpose"]) {
       assert.ok(docs.some((d) => d.type === type), type);
     }
+    // Departments are the company's Department list now, never a vault lookup.
+    assert.equal(LOOKUP_TYPES.includes("department"), false);
+    assert.equal(docs.some((d) => d.type === "department"), false);
+    assert.ok(cleanLookupInput({ type: "department", name: "IT" }, { isCreate: true }).error);
     assert.deepEqual(docs.filter((d) => d.isNone).map((d) => d.name), ["None"]);
     assert.deepEqual(docs.filter((d) => d.requiresApproval).map((d) => d.name), ["Top Secret"]);
   });
@@ -406,5 +461,113 @@ describe("vault search terms", () => {
     const term = escapeRegex(q.trim().slice(0, 200));
     assert.doesNotThrow(() => new RegExp(term));
     assert.ok(new RegExp(term).test(q));
+  });
+});
+
+describe("attachments", () => {
+  const file = (n, meta = {}) => ({
+    _id: ID(n),
+    uploadDate: new Date("2026-10-01T00:00:00Z"),
+    metadata: {
+      category: VAULT_ATTACHMENT_CATEGORY,
+      encrypted: true,
+      originalName: `file-${n}.rdp`,
+      contentType: "application/x-rdp",
+      size: 100 * n,
+      uploadedBy: ID(9),
+      uploadedAt: new Date("2026-10-02T00:00:00Z"),
+      ...meta,
+    },
+  });
+
+  it("refuses executables by extension, case-insensitively", () => {
+    for (const ext of BLOCKED_EXTENSIONS) {
+      assert.equal(isBlockedFileName(`setup.${ext}`), true, ext);
+      assert.equal(isBlockedFileName(`SETUP.${ext.toUpperCase()}`), true, ext);
+    }
+    assert.equal(isBlockedFileName("evil.exe."), true, "trailing dot (Windows strips it)");
+    assert.equal(isBlockedFileName("evil.exe  "), true);
+    for (const name of ["server.rdp", "client.ovpn", "cert.pfx", "notes.json", "readme", "archive.js.txt", "شهادة.pdf"]) {
+      assert.equal(isBlockedFileName(name), false, name);
+    }
+    assert.equal(MAX_ATTACHMENT_BYTES, 10 * 1024 * 1024);
+  });
+
+  it("accepts [{ fileId }] or ids, de-duplicates, max 10; undefined = unchanged, null = clear", () => {
+    assert.deepEqual(cleanAttachmentIds(undefined), { ids: undefined });
+    assert.deepEqual(cleanAttachmentIds(null), { ids: [] });
+    assert.deepEqual(cleanAttachmentIds([{ fileId: ID(1) }, ID(2), { fileId: ID(1).toUpperCase() }]).ids, [ID(1), ID(2)]);
+    assert.ok(cleanAttachmentIds("x").error);
+    assert.ok(cleanAttachmentIds([{ fileId: "nope" }]).error);
+    assert.ok(cleanAttachmentIds([{ fileId: { $ne: null } }]).error);
+    const many = Array.from({ length: MAX_ATTACHMENTS + 1 }, (_, i) => ({ fileId: ID(i + 1) }));
+    assert.ok(cleanAttachmentIds(many).error);
+    assert.equal(cleanAttachmentIds(many.slice(0, MAX_ATTACHMENTS)).ids.length, MAX_ATTACHMENTS);
+  });
+
+  it("rebuilds the list from GridFS metadata in request order, never from the client", () => {
+    const { list, error } = buildAttachmentList([ID(2), ID(1)], [file(1), file(2)]);
+    assert.equal(error, undefined);
+    assert.deepEqual(list.map((a) => String(a.fileId)), [ID(2), ID(1)]);
+    assert.deepEqual(list[0], {
+      fileId: ID(2),
+      fileName: "file-2.rdp",
+      fileType: "application/x-rdp",
+      fileSize: 200,
+      uploadedBy: ID(9),
+      uploadedAt: new Date("2026-10-02T00:00:00Z"),
+    });
+    assert.ok(buildAttachmentList([ID(3)], [file(1)]).error, "unknown file");
+    assert.ok(buildAttachmentList([ID(1)], [file(1, { category: "hr-document" })]).error, "other category");
+    assert.ok(buildAttachmentList([ID(1)], [file(1, { encrypted: false })]).error, "not encrypted");
+    const odd = buildAttachmentList([ID(1)], [
+      file(1, { originalName: "..\\..\\x/evil\u0000.txt", contentType: "text/html; x=<b>" }),
+    ]).list[0];
+    assert.equal(odd.fileName, "evil.txt");
+    assert.equal(odd.fileType, "application/octet-stream");
+  });
+
+  it("lists removed files and builds an ASCII-only download header", () => {
+    assert.deepEqual(
+      removedAttachmentIds([{ fileId: ID(1) }, { fileId: ID(2) }], [{ fileId: ID(2) }, { fileId: ID(3) }]),
+      [ID(1)]
+    );
+    assert.deepEqual(removedAttachmentIds([], []), []);
+    assert.equal(safeContentType("Application/PDF"), "application/pdf");
+    assert.equal(safeContentType(undefined), "application/octet-stream");
+    assert.equal(
+      attachmentDisposition("vpn (1).ovpn"),
+      "attachment; filename=\"vpn (1).ovpn\"; filename*=UTF-8''vpn%20%281%29.ovpn"
+    );
+    const ar = attachmentDisposition('شهادة "x".pdf');
+    assert.match(ar, /^attachment; filename="_____ _x_\.pdf"; filename\*=UTF-8''%D8%B4/);
+    assert.ok(!/[^\x20-\x7e]/.test(ar), "header stays ASCII");
+  });
+
+  it("views: the list carries a count, the detail list leaks no extra fields", () => {
+    const entry = { _id: ID(1), ownerType: "company", platform: "x", username: "u", attachments: [{ fileId: ID(2) }] };
+    assert.equal(entryView(entry).attachmentCount, 1);
+    assert.equal(entryView({ ...entry, attachments: undefined }).attachmentCount, 0);
+    assert.equal("attachments" in entryView(entry), false);
+    const [a] = attachmentsView([
+      {
+        fileId: ID(2),
+        fileName: "a.rdp",
+        fileType: "application/x-rdp",
+        fileSize: 5,
+        uploadedAt: null,
+        secret: 1,
+        uploadedBy: { _id: ID(9), firstName: "Ada", lastName: "Smoke", password: "x" },
+      },
+    ]);
+    assert.deepEqual(a, {
+      fileId: ID(2),
+      fileName: "a.rdp",
+      fileType: "application/x-rdp",
+      fileSize: 5,
+      uploadedAt: null,
+      uploadedBy: { _id: ID(9), name: "Ada Smoke" },
+    });
+    assert.equal(attachmentsView([{ fileId: ID(2), uploadedBy: ID(9) }])[0].uploadedBy, null);
   });
 });

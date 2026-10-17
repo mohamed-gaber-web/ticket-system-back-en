@@ -13,6 +13,7 @@ import crypto from "node:crypto";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import Company from "../models/Company.js";
+import Department from "../models/Department.js";
 import VaultEntry from "../models/VaultEntry.js";
 import VaultLookup from "../models/VaultLookup.js";
 import { encrypt, isVaultConfigured } from "../utils/vaultCrypto.js";
@@ -59,6 +60,9 @@ const seedDemo = async () => {
   }
   const lookups = await VaultLookup.find().lean();
   const pick = (type, name) => lookups.find((l) => l.type === type && l.name === name)?._id ?? null;
+  // Company departments are the real Department list (left empty when the name doesn't exist).
+  const departments = await Department.find({ isActive: { $ne: false } }).select("name").lean();
+  const dept = (name) => departments.find((d) => d.name.toLowerCase() === name.toLowerCase())?._id ?? null;
   const day = 86400000;
   const now = Date.now();
 
@@ -68,11 +72,11 @@ const seedDemo = async () => {
     { ownerType: "client", client: clients[1]._id, platform: "ETA portal (Demo)", category: pick("category", "E-Invoice"), environment: pick("environment", "Production"), url: "https://invoicing.eta.gov.eg", username: "delta.finance", sensitivity: pick("sensitivity", "Sensitive"), mfaMethod: pick("mfaMethod", "None"), changed: 200 },
     { ownerType: "client", client: clients[1]._id, platform: "VPN (Demo)", category: pick("category", "VPN / Remote Access"), environment: pick("environment", "Not applicable"), url: "vpn.deltatrading.example", username: "DELTA\\gp.support", sensitivity: pick("sensitivity", "Standard"), notes: "Connect the VPN before opening AX.", changed: 40 },
     { ownerType: "client", client: clients[2]._id, platform: "AX 2012 RDP (Demo)", category: pick("category", "AX 2012"), environment: pick("environment", "Production"), url: "10.0.0.15", username: "CAIRO\\gp.ax", sensitivity: pick("sensitivity", "Sensitive"), changed: 95 },
-    { ownerType: "company", platform: "M365 admin (Demo)", category: pick("category", "Azure / Microsoft 365"), environment: pick("environment", "Production"), url: "https://admin.microsoft.com", username: "admin@growpath.example", department: pick("department", "IT"), sensitivity: pick("sensitivity", "Top Secret"), mfaMethod: pick("mfaMethod", "Microsoft Authenticator"), renewalDate: new Date(now + 12 * day), cost: "22 USD / month", changed: 30 },
-    { ownerType: "company", platform: "LCS dev environment (Demo)", category: pick("category", "Dynamics 365"), environment: pick("environment", "Development"), url: "https://lcs.dynamics.com", username: "dev@growpath.example", department: pick("department", "IT"), sensitivity: pick("sensitivity", "Standard"), changed: 5 },
-    { ownerType: "company", platform: "LinkedIn page (Demo)", category: pick("category", "Social Media"), environment: pick("environment", "Not applicable"), url: "https://www.linkedin.com", username: "marketing@growpath.example", department: pick("department", "Marketing"), sensitivity: pick("sensitivity", "Standard"), changed: 300 },
-    { ownerType: "company", platform: "Hosting panel (Demo)", category: pick("category", "Hosting & Servers"), environment: pick("environment", "Production"), url: "https://panel.hosting.example", username: "growpath", department: pick("department", "IT"), sensitivity: pick("sensitivity", "Sensitive"), renewalDate: new Date(now + 90 * day), cost: "120 USD / year", changed: 60 },
-    { ownerType: "company", platform: "Company email (Demo)", category: pick("category", "Email"), environment: pick("environment", "Not applicable"), url: "https://outlook.office.com", username: "info@growpath.example", department: pick("department", "Management"), sensitivity: pick("sensitivity", "Standard"), mfaMethod: pick("mfaMethod", "Email code"), changed: 15 },
+    { ownerType: "company", platform: "M365 admin (Demo)", category: pick("category", "Azure / Microsoft 365"), environment: pick("environment", "Production"), url: "https://admin.microsoft.com", username: "admin@growpath.example", department: dept("IT"), sensitivity: pick("sensitivity", "Top Secret"), mfaMethod: pick("mfaMethod", "Microsoft Authenticator"), renewalDate: new Date(now + 12 * day), cost: "22 USD / month", changed: 30 },
+    { ownerType: "company", platform: "LCS dev environment (Demo)", category: pick("category", "Dynamics 365"), environment: pick("environment", "Development"), url: "https://lcs.dynamics.com", username: "dev@growpath.example", department: dept("IT"), sensitivity: pick("sensitivity", "Standard"), changed: 5 },
+    { ownerType: "company", platform: "LinkedIn page (Demo)", category: pick("category", "Social Media"), environment: pick("environment", "Not applicable"), url: "https://www.linkedin.com", username: "marketing@growpath.example", department: dept("Marketing"), sensitivity: pick("sensitivity", "Standard"), changed: 300 },
+    { ownerType: "company", platform: "Hosting panel (Demo)", category: pick("category", "Hosting & Servers"), environment: pick("environment", "Production"), url: "https://panel.hosting.example", username: "growpath", department: dept("IT"), sensitivity: pick("sensitivity", "Sensitive"), renewalDate: new Date(now + 90 * day), cost: "120 USD / year", changed: 60 },
+    { ownerType: "company", platform: "Company email (Demo)", category: pick("category", "Email"), environment: pick("environment", "Not applicable"), url: "https://outlook.office.com", username: "info@growpath.example", department: dept("Management"), sensitivity: pick("sensitivity", "Standard"), mfaMethod: pick("mfaMethod", "Email code"), changed: 15 },
   ];
 
   let added = 0;

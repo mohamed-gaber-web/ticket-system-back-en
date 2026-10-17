@@ -11,7 +11,6 @@ export const LOOKUP_TYPES = Object.freeze([
   "accessLevel",
   "mfaMethod",
   "sensitivity",
-  "department",
   "sendPurpose",
 ]);
 
@@ -30,7 +29,6 @@ export const ENTRY_LOOKUP_FIELDS = Object.freeze({
   accessLevel: "accessLevel",
   mfaMethod: "mfaMethod",
   sensitivity: "sensitivity",
-  department: "department",
 });
 
 export const SHARED_FIELDS = Object.freeze([
@@ -59,7 +57,8 @@ const TEXT_LIMITS = Object.freeze({
   cost: 100,
   notes: 5000,
 });
-const REF_FIELDS = Object.freeze(["client", "accountOwner", ...Object.keys(ENTRY_LOOKUP_FIELDS)]);
+// `department` refs the company's real Department list, not a VaultLookup.
+const REF_FIELDS = Object.freeze(["client", "accountOwner", "department", ...Object.keys(ENTRY_LOOKUP_FIELDS)]);
 const DATE_FIELDS = Object.freeze(["validUntil", "renewalDate"]);
 
 export const ENTRY_FIELD_LABELS = Object.freeze({
@@ -84,6 +83,7 @@ export const ENTRY_FIELD_LABELS = Object.freeze({
   renewalDate: "Renewal date",
   cost: "Cost",
   notes: "Notes",
+  attachments: "Attachments",
 });
 
 /** Default setup lists (spec §10, in English). `seedVault.js` and GET /lookups use them. */
@@ -102,7 +102,6 @@ export const DEFAULT_LOOKUPS = Object.freeze({
   accessLevel: ["System Administrator", "Power User", "Standard User", "Read Only"],
   mfaMethod: [{ name: "None", isNone: true }, "Microsoft Authenticator", "SMS", "Email code"],
   sensitivity: ["Standard", "Sensitive", { name: "Top Secret", requiresApproval: true }],
-  department: ["IT", "Finance", "Marketing", "HR", "Management"],
   sendPurpose: ["Onboarding", "Technical Support", "UAT Testing", "User Training", "Client Request"],
 });
 
@@ -248,6 +247,15 @@ export const lookupRefChecks = (data) =>
  */
 export const lookupRefErrors = (checks, found) =>
   checks.filter(({ id, type }) => found.get(String(id)) !== type).map(({ field }) => field);
+
+/**
+ * Whether a Department document may be set on an entry: it must exist and be
+ * active — or be the entry's current department (an edit that keeps a since
+ * deactivated department is not an error).
+ */
+export const isUsableDepartment = (department, currentId = null) =>
+  Boolean(department) &&
+  (department.isActive !== false || (currentId !== null && String(currentId) === String(department._id)));
 
 /** One readable sentence for a 400 on an entry form. */
 export const entryErrorMessage = (missing, invalid) => {
@@ -416,6 +424,93 @@ export const approvalCheck = (entries, approval = {}) => {
   };
 };
 
+// ── Attachments ───────────────────────────────────────────────────────────────
+
+/** GridFS `metadata.category` of an (encrypted) vault attachment. */
+export const VAULT_ATTACHMENT_CATEGORY = "vault-attachment";
+export const MAX_ATTACHMENTS = 10;
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** An uploaded file no entry claims within this long may be cleaned up. */
+export const ORPHAN_ATTACHMENT_MS = 24 * 60 * 60 * 1000;
+export const BLOCKED_EXTENSIONS = Object.freeze(["exe", "bat", "cmd", "com", "msi", "scr", "ps1", "vbs", "js", "jar"]);
+
+/** True for a file name whose extension is an executable we refuse to store. */
+export const isBlockedFileName = (name) => {
+  const match = /\.([^.\\/]+)$/.exec(String(name ?? "").trim().replace(/[.\s]+$/, ""));
+  return Boolean(match) && BLOCKED_EXTENSIONS.includes(match[1].toLowerCase());
+};
+
+const MIME_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/i;
+/** The client-declared type of an upload, when it is a plain `type/subtype`; else octet-stream. */
+export const safeContentType = (value) =>
+  typeof value === "string" && MIME_PATTERN.test(value.trim()) ? value.trim().toLowerCase() : "application/octet-stream";
+
+/** A stored file name: no path, no control characters, at most 255 characters. */
+export const safeFileName = (value) => {
+  const base = String(value ?? "").split(/[\\/]/).pop() ?? "";
+  // eslint-disable-next-line no-control-regex
+  const clean = base.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 255);
+  return clean || "file";
+};
+
+/**
+ * The `attachments` of an entry body → the requested file ids, in order.
+ * Accepts `[{ fileId }]` (the contract) or bare id strings; duplicates collapse.
+ * `null` clears the list. `undefined` = not sent (`ids` undefined).
+ */
+export const cleanAttachmentIds = (value) => {
+  if (value === undefined) return { ids: undefined };
+  if (value === null) return { ids: [] };
+  if (!Array.isArray(value)) return { error: true };
+  const ids = [];
+  for (const item of value) {
+    const id = typeof item === "string" ? item : item && typeof item === "object" ? item.fileId : undefined;
+    if (!isObjectIdString(id)) return { error: true };
+    const key = id.toLowerCase();
+    if (!ids.includes(key)) ids.push(key);
+  }
+  if (ids.length > MAX_ATTACHMENTS) return { error: true };
+  return { ids };
+};
+
+/**
+ * Rebuild an entry's attachment list from GridFS records — never from what the
+ * client sent. `files` = `uploads.files` records (any order) for `ids`. Every id
+ * must be a vault-attachment file, else `{ error: true }`.
+ */
+export const buildAttachmentList = (ids, files) => {
+  const byId = new Map((files ?? []).map((f) => [String(f._id).toLowerCase(), f]));
+  const list = [];
+  for (const id of ids) {
+    const file = byId.get(String(id).toLowerCase());
+    const meta = file?.metadata;
+    if (!file || meta?.category !== VAULT_ATTACHMENT_CATEGORY || meta?.encrypted !== true) return { error: true };
+    list.push({
+      fileId: file._id,
+      fileName: safeFileName(meta.originalName),
+      fileType: safeContentType(meta.contentType),
+      fileSize: Number.isFinite(Number(meta.size)) ? Number(meta.size) : 0,
+      uploadedBy: meta.uploadedBy ?? null,
+      uploadedAt: meta.uploadedAt ?? file.uploadDate ?? null,
+    });
+  }
+  return { list };
+};
+
+/** File ids on `before` that are no longer on `after` (to delete from GridFS). */
+export const removedAttachmentIds = (before = [], after = []) => {
+  const kept = new Set(after.map((a) => String(a.fileId)));
+  return before.map((a) => String(a.fileId)).filter((id) => !kept.has(id));
+};
+
+/** RFC 6266 `Content-Disposition: attachment` with an ASCII fallback and the UTF-8 name. */
+export const attachmentDisposition = (name) => {
+  const text = safeFileName(name);
+  const fallback = text.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  const encoded = encodeURIComponent(text).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+};
+
 // ── Computed entry fields & dashboard dates ───────────────────────────────────
 
 const keyToUtc = (key) => {
@@ -525,4 +620,19 @@ export const entryView = (entry, { now = new Date(), sendCount = 0, timeZone = V
   updatedAt: entry.updatedAt,
   ...entryComputed(entry, now, timeZone),
   sendCount,
+  attachmentCount: Array.isArray(entry.attachments) ? entry.attachments.length : 0,
 });
+
+/**
+ * An entry's attachments for the detail view (`uploadedBy` populated with
+ * `firstName lastName email`). Allow-listed like `entryView`.
+ */
+export const attachmentsView = (attachments) =>
+  (Array.isArray(attachments) ? attachments : []).map((a) => ({
+    fileId: a.fileId,
+    fileName: a.fileName,
+    fileType: a.fileType,
+    fileSize: a.fileSize,
+    uploadedAt: a.uploadedAt ?? null,
+    uploadedBy: a.uploadedBy && a.uploadedBy._id ? { _id: a.uploadedBy._id, name: personName(a.uploadedBy) } : null,
+  }));

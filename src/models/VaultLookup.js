@@ -4,7 +4,8 @@ import { LOOKUP_TYPES } from "../utils/vaultRules.js";
 /**
  * Every Credentials Vault setup list in one collection, keyed by `type`
  * (categories, environments, access levels, MFA methods, sensitivity levels,
- * company departments, send purposes). Admin-editable from Vault › Settings.
+ * send purposes). Departments are the company's real `Department` list, not a
+ * lookup; old `type: "department"` documents are never read. Admin-editable from Vault › Settings.
  */
 const vaultLookupSchema = new mongoose.Schema(
   {

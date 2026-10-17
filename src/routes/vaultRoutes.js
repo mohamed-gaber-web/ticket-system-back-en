@@ -3,7 +3,15 @@ import rateLimit from "express-rate-limit";
 import { protect, requireAdmin, requireModule } from "../middleware/authMiddleware.js";
 import { requireVaultConfigured } from "../utils/vaultCrypto.js";
 import { createLookup, deleteLookup, listLookups, updateLookup } from "../controllers/vault/lookupController.js";
-import { createClient, deleteClient, listClients, listUsers, updateClient } from "../controllers/vault/clientController.js";
+import {
+  createClient,
+  deleteClient,
+  listClients,
+  listDepartments,
+  listUsers,
+  updateClient,
+} from "../controllers/vault/clientController.js";
+import { downloadAttachment, receiveAttachment, uploadAttachment } from "../controllers/vault/attachmentController.js";
 import {
   createEntry,
   deleteEntry,
@@ -32,6 +40,7 @@ router.use(protect, requireVaultConfigured, requireModule("vault"), noStore);
 
 // Reveal and send hand out plaintext passwords: 30 each per 5 minutes per
 // employee — separate budgets, so revealing while preparing never blocks a send.
+// Attachment downloads share the reveal budget (same limiter instance).
 const sensitiveLimiter = (name) =>
   rateLimit({
     windowMs: 5 * 60 * 1000,
@@ -57,6 +66,11 @@ router.patch("/clients/:id", requireAdmin, updateClient);
 router.delete("/clients/:id", requireAdmin, deleteClient);
 
 router.get("/users", listUsers);
+router.get("/departments", listDepartments);
+
+// Files kept with an account: uploaded (encrypted) before the entry is saved,
+// then attached through POST/PATCH /entries { attachments: [{ fileId }] }.
+router.post("/attachments", requireAdmin, receiveAttachment, uploadAttachment);
 
 router.get("/entries", listEntries);
 router.get("/entries/:id", getEntry);
@@ -64,6 +78,7 @@ router.post("/entries", requireAdmin, createEntry);
 router.patch("/entries/:id", requireAdmin, updateEntry);
 router.delete("/entries/:id", requireAdmin, deleteEntry);
 router.post("/entries/:id/reveal", revealLimiter, revealPassword);
+router.get("/entries/:id/attachments/:fileId", revealLimiter, downloadAttachment);
 
 router.post("/send/preview", previewSend);
 router.post("/send", sendLimiter, sendCredentials);

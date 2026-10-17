@@ -1,5 +1,6 @@
 import Company from "../../models/Company.js";
 import Consultant from "../../models/Consltant.js";
+import Department from "../../models/Department.js";
 import VaultAccessLog from "../../models/VaultAccessLog.js";
 import VaultEntry from "../../models/VaultEntry.js";
 import VaultLookup from "../../models/VaultLookup.js";
@@ -8,40 +9,55 @@ import { escapeRegex } from "../../utils/escapeRegex.js";
 import { decrypt, encrypt } from "../../utils/vaultCrypto.js";
 import {
   OWNER_TYPES,
+  attachmentsView,
+  cleanAttachmentIds,
   cleanEntryInput,
   entryErrorMessage,
   entryView,
   isObjectIdString,
+  isUsableDepartment,
   lookupRefChecks,
   lookupRefErrors,
   parsePaging,
+  removedAttachmentIds,
 } from "../../utils/vaultRules.js";
+import { deleteAttachmentFiles, resolveAttachments } from "./attachmentController.js";
 import { ENTRY_POPULATE, clientIp, fail, ok, oid, sendCountsFor, serverError } from "./shared.js";
 
 const NOT_FOUND = "Account not found.";
 const DECRYPT_FAILED = "This password could not be decrypted. The vault key may have changed.";
 
 const loadView = async (id) => {
-  const entry = await VaultEntry.findOne({ _id: id, isDeleted: false }).populate(ENTRY_POPULATE).lean();
+  const entry = await VaultEntry.findOne({ _id: id, isDeleted: false })
+    .populate([...ENTRY_POPULATE, { path: "attachments.uploadedBy", select: "firstName lastName email" }])
+    .lean();
   if (!entry) return null;
   const counts = await sendCountsFor([String(entry._id)]);
-  return entryView(entry, { sendCount: counts.get(String(entry._id)) ?? 0 });
+  return {
+    ...entryView(entry, { sendCount: counts.get(String(entry._id)) ?? 0 }),
+    attachments: attachmentsView(entry.attachments),
+  };
 };
 
-/** Refs in cleaned data that don't exist (or are a lookup of the wrong type). */
-const badRefs = async (data) => {
+/**
+ * Refs in cleaned data that don't exist (or are a lookup of the wrong type).
+ * `currentDepartment`: the entry's stored department, which may stay even if inactive.
+ */
+const badRefs = async (data, currentDepartment = null) => {
   const checks = lookupRefChecks(data);
-  const [lookups, clientOk, ownerOk] = await Promise.all([
+  const [lookups, clientOk, ownerOk, department] = await Promise.all([
     checks.length
       ? VaultLookup.find({ _id: { $in: checks.map((c) => c.id) } }).select("type").lean()
       : [],
     isObjectIdString(data.client) ? Company.exists({ _id: data.client }) : true,
     isObjectIdString(data.accountOwner) ? Consultant.exists({ _id: data.accountOwner }) : true,
+    isObjectIdString(data.department) ? Department.findById(data.department).select("isActive").lean() : null,
   ]);
   const found = new Map(lookups.map((l) => [String(l._id), l.type]));
   const bad = lookupRefErrors(checks, found);
   if (!clientOk) bad.push("client");
   if (!ownerOk) bad.push("accountOwner");
+  if (isObjectIdString(data.department) && !isUsableDepartment(department, currentDepartment)) bad.push("department");
   return bad;
 };
 
@@ -125,11 +141,16 @@ export const createEntry = async (req, res) => {
   try {
     const { data, password, missing, invalid } = cleanEntryInput(req.body);
     if (missing.length || invalid.length) return validationFailure(res, missing, invalid);
+    const attachmentIds = cleanAttachmentIds(req.body?.attachments);
+    if (attachmentIds.error) return validationFailure(res, [], ["attachments"]);
     const bad = await badRefs(data);
     if (bad.length) return validationFailure(res, [], bad);
+    const attachments = await resolveAttachments(attachmentIds.ids ?? []);
+    if (attachments.error) return validationFailure(res, [], ["attachments"]);
 
     const created = await VaultEntry.create({
       ...data,
+      attachments: attachments.list,
       passwordEnc: encrypt(password),
       passwordChangedAt: new Date(),
       createdBy: req.user._id,
@@ -151,8 +172,17 @@ export const updateEntry = async (req, res) => {
     const existing = doc.toObject({ depopulate: true, virtuals: false });
     const { data, password, missing, invalid } = cleanEntryInput(req.body, existing);
     if (missing.length || invalid.length) return validationFailure(res, missing, invalid);
-    const bad = await badRefs(data);
+    const attachmentIds = cleanAttachmentIds(req.body?.attachments);
+    if (attachmentIds.error) return validationFailure(res, [], ["attachments"]);
+    const bad = await badRefs(data, existing.department ?? null);
     if (bad.length) return validationFailure(res, [], bad);
+    let removedFiles = [];
+    if (attachmentIds.ids !== undefined) {
+      const attachments = await resolveAttachments(attachmentIds.ids, doc._id);
+      if (attachments.error) return validationFailure(res, [], ["attachments"]);
+      removedFiles = removedAttachmentIds(existing.attachments ?? [], attachments.list);
+      doc.attachments = attachments.list;
+    }
 
     if (password !== undefined) {
       let current = null;
@@ -168,6 +198,8 @@ export const updateEntry = async (req, res) => {
     }
     doc.set({ ...data, updatedBy: req.user._id });
     await doc.save();
+    // Only once the entry no longer points at them.
+    await deleteAttachmentFiles(removedFiles);
     return ok(res, await loadView(doc._id));
   } catch (error) {
     return serverError(res, error, "Could not save the account");

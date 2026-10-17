@@ -56,6 +56,7 @@ import meRoutes from "./meRoutes.js";
 import proposalRoutes from "./proposalRoutes.js";
 import { guardProposalFiles } from "../controllers/proposalController.js";
 import vaultRoutes from "./vaultRoutes.js";
+import { guardVaultFiles } from "../controllers/vault/attachmentController.js";
 
 const router = express.Router();
 
@@ -208,6 +209,8 @@ router.use("/vault", vaultRoutes);
 // /consultants/:id/documents — the generic file routes refuse them.
 router.all(["/files/:id", "/files/:id/info"], guardHrFiles);
 router.all(["/files/:id", "/files/:id/info"], guardProposalFiles);
+// Vault attachments are encrypted and served only by /vault/entries/:id/attachments/:fileId.
+router.all(["/files/:id", "/files/:id/info"], guardVaultFiles);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

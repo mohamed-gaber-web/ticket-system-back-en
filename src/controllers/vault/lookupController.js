@@ -13,6 +13,9 @@ import { fail, ok, serverError } from "./shared.js";
 
 const DUPLICATE_MESSAGE = "This name already exists in the list.";
 const LOOKUP_FIELDS = "type name requiresApproval isNone sortOrder isActive";
+// Only the current list types: old `type: "department"` rows (departments are
+// now the company's Department list) stay in the DB but are never read.
+const knownTypes = () => ({ type: { $in: [...LOOKUP_TYPES] } });
 
 /**
  * Insert the default setup lists when the collection is completely empty, so a
@@ -20,7 +23,8 @@ const LOOKUP_FIELDS = "type name requiresApproval isNone sortOrder isActive";
  * the unique index turns the loser's inserts into ignored duplicates.
  */
 export const ensureDefaultLookups = async () => {
-  if ((await VaultLookup.estimatedDocumentCount()) > 0) return 0;
+  // Old "department" rows don't count: a collection holding only those is still empty.
+  if (await VaultLookup.exists(knownTypes())) return 0;
   try {
     const inserted = await VaultLookup.insertMany(defaultLookupDocs(), { ordered: false });
     return inserted.length;
@@ -74,7 +78,7 @@ export const listLookups = async (req, res) => {
     await ensureDefaultLookups();
 
     const [items, counts] = await Promise.all([
-      VaultLookup.find(type ? { type } : {})
+      VaultLookup.find(type ? { type } : knownTypes())
         .select(LOOKUP_FIELDS)
         .sort({ type: 1, sortOrder: 1, name: 1 })
         .lean(),
@@ -112,7 +116,7 @@ export const createLookup = async (req, res) => {
 export const updateLookup = async (req, res) => {
   try {
     if (!isObjectIdString(req.params.id)) return fail(res, 404, "Item not found.");
-    const doc = await VaultLookup.findById(req.params.id);
+    const doc = await VaultLookup.findOne({ _id: req.params.id, ...knownTypes() });
     if (!doc) return fail(res, 404, "Item not found.");
     const { data, error } = cleanLookupInput(req.body, { type: doc.type });
     if (error) return fail(res, 400, error);
@@ -129,7 +133,7 @@ export const updateLookup = async (req, res) => {
 export const deleteLookup = async (req, res) => {
   try {
     if (!isObjectIdString(req.params.id)) return fail(res, 404, "Item not found.");
-    const doc = await VaultLookup.findById(req.params.id);
+    const doc = await VaultLookup.findOne({ _id: req.params.id, ...knownTypes() });
     if (!doc) return fail(res, 404, "Item not found.");
     const usageCount = await usageOf(doc);
     if (usageCount > 0) return fail(res, 409, inUseMessage(usageCount), { usageCount });

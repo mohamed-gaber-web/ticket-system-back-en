@@ -1,5 +1,6 @@
 import Company from "../../models/Company.js";
 import Customer from "../../models/Customer.js";
+import Department from "../../models/Department.js";
 import CustomerSurvey from "../../models/CustomerSurvey.js";
 import Consultant from "../../models/Consltant.js";
 import Lead from "../../models/Lead.js";
@@ -128,5 +129,21 @@ export const listUsers = async (_req, res) => {
     );
   } catch (error) {
     return serverError(res, error, "Could not load the employees");
+  }
+};
+
+// GET /api/vault/departments — the company's departments for the company-account
+// select: active ones by name, plus any inactive one an entry still uses.
+export const listDepartments = async (_req, res) => {
+  try {
+    const used = await VaultEntry.distinct("department", { isDeleted: false, department: { $ne: null } });
+    const departments = await Department.find({ $or: [{ isActive: { $ne: false } }, { _id: { $in: used } }] })
+      .select("name")
+      .sort({ name: 1 })
+      .collation({ locale: "en", strength: 2 })
+      .lean();
+    return ok(res, departments.map((d) => ({ _id: d._id, name: d.name })));
+  } catch (error) {
+    return serverError(res, error, "Could not load the departments");
   }
 };

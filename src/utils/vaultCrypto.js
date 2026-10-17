@@ -18,6 +18,7 @@ import crypto from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12;
+const TAG_BYTES = 16;
 const KEY_BYTES = 32;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -55,10 +56,34 @@ export const decrypt = (stored, key = currentKey()) => {
   const parts = String(stored ?? "").split(":");
   if (parts.length !== 3) throw new Error("Malformed vault ciphertext");
   const [iv, tag, ciphertext] = parts.map((p) => Buffer.from(p, "base64"));
-  if (iv.length !== IV_BYTES || tag.length !== 16) throw new Error("Malformed vault ciphertext");
+  if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) throw new Error("Malformed vault ciphertext");
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+};
+
+/**
+ * Encrypt a file's bytes for storage (vault attachments): one buffer
+ * `iv (12) | authTag (16) | ciphertext`, same key and algorithm as `encrypt`.
+ */
+export const encryptBuffer = (plain, key = currentKey()) => {
+  if (!key) throw new Error("VAULT_ENC_KEY is missing or invalid");
+  if (!Buffer.isBuffer(plain)) throw new TypeError("Only buffers can be encrypted");
+  const iv = crypto.randomBytes(IV_BYTES);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]);
+};
+
+/** Decrypt a buffer written by `encryptBuffer`. Throws when malformed, tampered with or under another key. */
+export const decryptBuffer = (stored, key = currentKey()) => {
+  if (!key) throw new Error("VAULT_ENC_KEY is missing or invalid");
+  if (!Buffer.isBuffer(stored) || stored.length < IV_BYTES + TAG_BYTES) throw new Error("Malformed vault ciphertext");
+  const iv = stored.subarray(0, IV_BYTES);
+  const tag = stored.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(stored.subarray(IV_BYTES + TAG_BYTES)), decipher.final()]);
 };
 
 /** Startup check: a clear warning (never the key) when the vault can't run. */
