@@ -250,14 +250,9 @@ const getTasks = async (req, res) => {
 
     const match = { ...departmentScope(req, department) };
 
-    // "My tasks" — the default view for a plain employee on the client
-    if (mine === "true") {
-      match.$or = [
-        { assignedTo: req.user._id },
-        { responsible: req.user._id },
-        { createdBy: req.user._id },
-      ];
-    }
+    // "My tasks": only the tasks assigned to the caller. Tasks they are
+    // responsible for or created stay on the main Tasks list.
+    if (mine === "true") match.assignedTo = req.user._id;
 
     if (category) match.category = toObjectId(category);
 
@@ -279,7 +274,7 @@ const getTasks = async (req, res) => {
     else if (!filtering) match.parentTask = null;
 
     if (status) match.status = status;
-    if (assignedTo) match.assignedTo = toObjectId(assignedTo);
+    if (assignedTo && mine !== "true") match.assignedTo = toObjectId(assignedTo);
     const and = [];
     if (scheduledWeek) and.push(weekCoverFilter(parseInt(scheduledWeek)));
     const term = typeof search === "string" ? search.trim() : "";
