@@ -37,6 +37,9 @@ import {
   cleanCatalogInput,
   cleanProposalInput,
   cleanRejectionReason,
+  parseListParam,
+  PROPOSAL_COUNTRIES,
+  PROPOSAL_STATUSES,
   proposalContentChanged,
   proposalNumber,
   statusAfterSave,
@@ -153,11 +156,27 @@ export const listProposals = async (req, res, next) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
     const filter = {};
-    if (!isCrossTeamReader(req)) {
+    // Multi-select filters: proposal fields directly, opportunity fields through
+    // the scoped opportunity list.
+    const statuses = parseListParam(req.query.status, { allowed: PROPOSAL_STATUSES });
+    const countries = parseListParam(req.query.country, { allowed: PROPOSAL_COUNTRIES });
+    const preparedBy = parseListParam(req.query.preparedBy, { ids: true });
+    const owners = parseListParam(req.query.owner, { ids: true });
+    const sources = parseListParam(req.query.leadSource);
+    const industries = parseListParam(req.query.industry);
+    const leadFilters = {};
+    if (owners.length) leadFilters.assignedTo = { $in: owners.map((id) => new mongoose.Types.ObjectId(id)) };
+    if (sources.length) leadFilters.leadSource = { $in: sources };
+    if (industries.length) leadFilters.industrySector = { $in: industries };
+    if (!isCrossTeamReader(req) || Object.keys(leadFilters).length) {
       // Only opportunities carry proposals, so the scope is the caller's opportunities.
-      filter.opportunity = { $in: await Lead.find({ $and: [leadScopeFilter(req), { salesType: "Opportunity" }] }).distinct("_id") };
+      filter.opportunity = {
+        $in: await Lead.find({ $and: [leadFilters, { salesType: "Opportunity" }, leadScopeFilter(req)] }).distinct("_id"),
+      };
     }
-    if (req.query.status) filter.status = String(req.query.status);
+    if (statuses.length) filter.status = { $in: statuses };
+    if (countries.length) filter.country = { $in: countries };
+    if (preparedBy.length) filter.preparedBy = { $in: preparedBy.map((id) => new mongoose.Types.ObjectId(id)) };
     const q = String(req.query.q ?? "").trim().slice(0, 100);
     if (q) {
       const rx = new RegExp(escapeRegex(q), "i");
@@ -177,6 +196,48 @@ export const listProposals = async (req, res, next) => {
       ProposalCatalog.getSingleton(),
     ]);
     res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount), total, page, limit });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /proposals/filter-options — the values the list's multi-select filters
+ * offer, taken from the proposals (and their opportunities) the caller may see.
+ */
+export const getProposalFilterOptions = async (req, res, next) => {
+  try {
+    const scoped = isCrossTeamReader(req)
+      ? {}
+      : { opportunity: { $in: await Lead.find({ $and: [{ salesType: "Opportunity" }, leadScopeFilter(req)] }).distinct("_id") } };
+    const [preparedIds, opportunityIds] = await Promise.all([
+      Proposal.distinct("preparedBy", scoped),
+      Proposal.distinct("opportunity", scoped),
+    ]);
+    const leadMatch = { $and: [{ _id: { $in: opportunityIds } }, leadScopeFilter(req)] };
+    const [ownerIds, sources, industries] = await Promise.all([
+      Lead.distinct("assignedTo", leadMatch),
+      Lead.distinct("leadSource", leadMatch),
+      Lead.distinct("industrySector", leadMatch),
+    ]);
+    const people = await Consultant.find({ _id: { $in: [...preparedIds, ...ownerIds].filter(Boolean) } })
+      .select("firstName lastName email")
+      .lean();
+    const byId = new Map(people.map((p) => [String(p._id), { _id: p._id, name: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email }]));
+    const listOf = (ids) =>
+      ids.filter(Boolean).map((id) => byId.get(String(id))).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+    const clean = (values) => values.filter((v) => v && String(v).trim()).sort((a, b) => String(a).localeCompare(String(b)));
+    res.json({
+      success: true,
+      data: {
+        statuses: PROPOSAL_STATUSES,
+        countries: PROPOSAL_COUNTRIES,
+        owners: listOf(ownerIds),
+        preparedBy: listOf(preparedIds),
+        leadSources: clean(sources),
+        industries: clean(industries),
+      },
+    });
   } catch (err) {
     next(err);
   }

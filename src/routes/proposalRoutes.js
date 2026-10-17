@@ -7,6 +7,7 @@ import {
   createProposal,
   deleteProposal,
   getCatalog,
+  getProposalFilterOptions,
   getProposal,
   listCustomerOpportunities,
   listOpportunityProposals,
@@ -39,6 +40,7 @@ router.get("/opportunities/:id/proposals", guard, listOpportunityProposals);
 router.post("/opportunities/:id/proposals", guard, createProposal);
 
 router.get("/proposals", guard, listProposals);
+router.get("/proposals/filter-options", guard, getProposalFilterOptions);
 router.get("/proposals/:id", guard, getProposal);
 router.put("/proposals/:id", guard, saveProposal);
 router.delete("/proposals/:id", guard, deleteProposal);

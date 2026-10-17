@@ -413,3 +413,14 @@ test("save input derives pages from the layout", () => {
   assert.equal(out.pages.toc, true);
   assert.equal(out.layout.length, LAYOUT_KEYS.length);
 });
+
+test("proposal list multi-select filters: comma lists, repeated params, allowed values and ids only", async () => {
+  {
+    const { parseListParam, PROPOSAL_STATUSES } = await import("../src/utils/proposalRules.js");
+    assert.deepEqual(parseListParam("Draft, Approved,Draft"), ["Draft", "Approved"]);
+    assert.deepEqual(parseListParam(["Draft", "Sent,Bogus"], { allowed: PROPOSAL_STATUSES }), ["Draft", "Sent"]);
+    assert.deepEqual(parseListParam(["507f1f77bcf86cd799439011", "nope", "$gt"], { ids: true }), ["507f1f77bcf86cd799439011"]);
+    assert.deepEqual(parseListParam(undefined), []);
+    assert.equal(parseListParam(Array.from({ length: 80 }, (_, i) => `v${i}`).join(",")).length, 50);
+  }
+});
