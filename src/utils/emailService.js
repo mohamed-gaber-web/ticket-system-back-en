@@ -594,6 +594,12 @@ export const sendSensitiveEmail = async ({ to, subject, html, replyTo, consoleTe
     }).catch((err) => console.error("EmailLog save error:", err.message));
 
   if (!isGraphMailConfigured()) {
+    // Console mode is for local development only: in production a missing mail
+    // setup must fail loudly, never report credentials as delivered.
+    if (process.env.NODE_ENV === "production") {
+      logRow({ status: "failed", errorMessage: "Microsoft Graph mail is not configured" });
+      return { success: false, mode: "none", error: "Email is not configured on the server (Microsoft Graph)." };
+    }
     console.log(
       `📧 [console mail — Microsoft Graph not configured]\nTo: ${toLabel}\nReply-To: ${replyTo || "-"}\nSubject: ${subject}\n\n` +
         `${consoleText ?? "(body not shown)"}\n📧 [end of console mail]`

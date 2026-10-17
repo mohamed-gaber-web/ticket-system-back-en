@@ -46,7 +46,8 @@ export const listLogs = async (req, res) => {
       if (from) filter.sentAt.$gte = startOfDayKey(from, VAULT_TZ);
       if (to) filter.sentAt.$lt = startOfDayKey(addDaysKey(to, 1), VAULT_TZ);
     }
-    const term = typeof q === "string" ? escapeRegex(q).slice(0, 200) : "";
+    // Cut before escaping: cutting after could leave a lone backslash and break the regex.
+    const term = typeof q === "string" ? escapeRegex(q.trim().slice(0, 200)) : "";
     if (term) {
       const rx = { $regex: term, $options: "i" };
       filter.$or = [{ recipientName: rx }, { recipientEmail: rx }, { "entries.platform": rx }];

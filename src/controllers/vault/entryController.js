@@ -63,7 +63,8 @@ export const listEntries = async (req, res) => {
       if (!isObjectIdString(value)) return fail(res, 400, `Invalid ${field} filter.`);
       filter[field] = oid(value);
     }
-    const term = typeof q === "string" ? escapeRegex(q).slice(0, 200) : "";
+    // Cut before escaping: cutting after could leave a lone backslash and break the regex.
+    const term = typeof q === "string" ? escapeRegex(q.trim().slice(0, 200)) : "";
     if (term) {
       const rx = { $regex: term, $options: "i" };
       const clientIds = (await Company.find({ name: rx }).select("_id").limit(200).lean()).map((c) => c._id);

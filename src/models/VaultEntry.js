@@ -60,6 +60,5 @@ vaultEntrySchema.index({ client: 1 });
 vaultEntrySchema.index({ category: 1 });
 vaultEntrySchema.index({ environment: 1 });
 vaultEntrySchema.index({ sensitivity: 1 });
-vaultEntrySchema.index({ platform: "text", username: "text", project: "text" });
 
 export default mongoose.model("VaultEntry", vaultEntrySchema);

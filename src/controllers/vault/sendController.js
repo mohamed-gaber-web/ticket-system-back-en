@@ -8,6 +8,8 @@ import { approvalCheck, cleanSendInput, ownerLabelOf, personName } from "../../u
 import { ENTRY_POPULATE, fail, ok, serverError } from "./shared.js";
 
 const DELIVERY_FAILED = "The email could not be delivered. The attempt was recorded in the send log.";
+const PARTIAL_DELIVERY =
+  "The details email was delivered, but the passwords email failed. Don't resend the details: send the passwords again, or share them another way.";
 const DECRYPT_FAILED = "A selected account's password could not be decrypted. The vault key may have changed.";
 
 /**
@@ -94,20 +96,8 @@ export const sendCredentials = async (req, res) => {
     const masked = buildVaultEmail(input, { revealPasswords: false });
     passwords = null;
 
-    const common = { to: ctx.data.recipientEmail, replyTo: req.user.email, logMeta: { userId: req.user._id } };
-    let delivery = await sendSensitiveEmail({ ...common, subject: real.subject, html: real.html, consoleText: masked.text });
-    let deliveryError = delivery.success ? null : delivery.error;
-    if (delivery.success && real.passwordsEmail) {
-      delivery = await sendSensitiveEmail({
-        ...common,
-        subject: real.passwordsEmail.subject,
-        html: real.passwordsEmail.html,
-        consoleText: masked.passwordsEmail.text,
-      });
-      if (!delivery.success) deliveryError = `Second email (passwords) failed: ${delivery.error}`;
-    }
-    const deliveryStatus = deliveryError ? "failed" : "sent";
-
+    // The audit row is written BEFORE anything is sent: if the server stops
+    // mid-send the row stays "pending", but a delivered email is never unlogged.
     const log = await VaultSendLog.create({
       sentAt: new Date(),
       sentBy: req.user._id,
@@ -125,11 +115,37 @@ export const sendCredentials = async (req, res) => {
       approverName: ctx.approval.approverName,
       subject: masked.subject,
       bodyRedacted: redactedBody(masked),
-      deliveryStatus,
-      deliveryError: deliveryError ? String(deliveryError).slice(0, 1000) : null,
+      deliveryStatus: "pending",
     });
 
+    const common = { to: ctx.data.recipientEmail, replyTo: req.user.email, logMeta: { userId: req.user._id } };
+    let deliveryStatus = "sent";
+    let deliveryError = null;
+    const first = await sendSensitiveEmail({ ...common, subject: real.subject, html: real.html, consoleText: masked.text });
+    if (!first.success) {
+      deliveryStatus = "failed";
+      deliveryError = first.error;
+    } else if (real.passwordsEmail) {
+      const second = await sendSensitiveEmail({
+        ...common,
+        subject: real.passwordsEmail.subject,
+        html: real.passwordsEmail.html,
+        consoleText: masked.passwordsEmail.text,
+      });
+      if (!second.success) {
+        // The details already reached the recipient — say so, so nobody resends them.
+        deliveryStatus = "partial";
+        deliveryError = `The details email was delivered, but the passwords email failed: ${second.error}`;
+      }
+    }
+
+    await VaultSendLog.updateOne(
+      { _id: log._id },
+      { $set: { deliveryStatus, deliveryError: deliveryError ? String(deliveryError).slice(0, 1000) : null } }
+    ).catch((err) => console.error(`Vault send log ${log._id} could not be updated to ${deliveryStatus}:`, err.message));
+
     if (deliveryStatus === "failed") return fail(res, 502, DELIVERY_FAILED, { data: { logId: log._id } });
+    if (deliveryStatus === "partial") return fail(res, 502, PARTIAL_DELIVERY, { data: { logId: log._id } });
     return ok(res, { logId: log._id, deliveryStatus }, 201);
   } catch (error) {
     return serverError(res, error, "Could not send the credentials");

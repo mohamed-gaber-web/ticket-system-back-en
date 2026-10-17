@@ -371,3 +371,40 @@ describe("computed fields and dashboard dates", () => {
     assert.equal(view.sendCount, 0);
   });
 });
+
+describe("vault email delivery without Microsoft Graph", () => {
+  it("fails in production instead of pretending it sent", async () => {
+    const mongoose = (await import("mongoose")).default;
+    mongoose.set("bufferCommands", false); // the EmailLog write fails fast and is swallowed
+    const { sendSensitiveEmail } = await import("../src/utils/emailService.js");
+    const saved = { NODE_ENV: process.env.NODE_ENV, MS_CLIENT_ID: process.env.MS_CLIENT_ID };
+    delete process.env.MS_CLIENT_ID;
+    const log = console.log;
+    console.log = () => {};
+    try {
+      process.env.NODE_ENV = "production";
+      const prod = await sendSensitiveEmail({ to: "x@example.com", subject: "s", html: "<p>h</p>", consoleText: "t" });
+      assert.equal(prod.success, false);
+      process.env.NODE_ENV = "development";
+      const dev = await sendSensitiveEmail({ to: "x@example.com", subject: "s", html: "<p>h</p>", consoleText: "t" });
+      assert.equal(dev.success, true);
+      assert.equal(dev.mode, "console");
+    } finally {
+      console.log = log;
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+});
+
+describe("vault search terms", () => {
+  it("cutting before escaping never leaves a lone backslash", async () => {
+    const { escapeRegex } = await import("../src/utils/escapeRegex.js");
+    const q = `${"a".repeat(199)}.`;
+    const term = escapeRegex(q.trim().slice(0, 200));
+    assert.doesNotThrow(() => new RegExp(term));
+    assert.ok(new RegExp(term).test(q));
+  });
+});

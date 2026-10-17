@@ -30,15 +30,19 @@ const noStore = (_req, res, next) => {
 
 router.use(protect, requireVaultConfigured, requireModule("vault"), noStore);
 
-// Reveal and send hand out plaintext passwords: 30 per 5 minutes per employee.
-const sensitiveLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  limit: 30,
-  keyGenerator: (req) => `vault:${req.user._id}`,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, message: "Too many requests. Please wait a few minutes and try again." },
-});
+// Reveal and send hand out plaintext passwords: 30 each per 5 minutes per
+// employee — separate budgets, so revealing while preparing never blocks a send.
+const sensitiveLimiter = (name) =>
+  rateLimit({
+    windowMs: 5 * 60 * 1000,
+    limit: 30,
+    keyGenerator: (req) => `vault:${name}:${req.user._id}`,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, message: "Too many requests. Please wait a few minutes and try again." },
+  });
+const revealLimiter = sensitiveLimiter("reveal");
+const sendLimiter = sensitiveLimiter("send");
 
 router.get("/dashboard", getDashboard);
 
@@ -59,10 +63,10 @@ router.get("/entries/:id", getEntry);
 router.post("/entries", requireAdmin, createEntry);
 router.patch("/entries/:id", requireAdmin, updateEntry);
 router.delete("/entries/:id", requireAdmin, deleteEntry);
-router.post("/entries/:id/reveal", sensitiveLimiter, revealPassword);
+router.post("/entries/:id/reveal", revealLimiter, revealPassword);
 
 router.post("/send/preview", previewSend);
-router.post("/send", sensitiveLimiter, sendCredentials);
+router.post("/send", sendLimiter, sendCredentials);
 
 router.get("/logs", listLogs);
 router.get("/logs/:id", getLog);

@@ -29,7 +29,10 @@ const vaultSendLogSchema = new mongoose.Schema({
   approverName: { type: String, default: null },
   subject: String,
   bodyRedacted: String,
-  deliveryStatus: { type: String, enum: ["sent", "failed"], default: "sent" },
+  // pending = recorded before the first email went out and never confirmed (the
+  // server stopped mid-send); partial = the details email went out but the
+  // separate passwords email did not.
+  deliveryStatus: { type: String, enum: ["pending", "sent", "partial", "failed"], default: "pending" },
   deliveryError: { type: String, default: null },
 });
 
