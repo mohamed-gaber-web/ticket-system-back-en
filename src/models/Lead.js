@@ -522,6 +522,16 @@ leadSchema.index({ salesType: 1 });
 leadSchema.index({ account: 1 });
 // The three stage tabs list one stage of the caller's teams, newest first.
 leadSchema.index({ team: 1, salesType: 1, createdAt: -1 });
+// Dashboard conversions per period, team-scoped. Partial: only converted records
+// carry the date, so the indexes stay small and a cross-team read scans few keys.
+leadSchema.index(
+  { team: 1, convertedToLeadAt: 1 },
+  { partialFilterExpression: { convertedToLeadAt: { $exists: true } } }
+);
+leadSchema.index(
+  { team: 1, convertedToOpportunityAt: 1 },
+  { partialFilterExpression: { convertedToOpportunityAt: { $exists: true } } }
+);
 leadSchema.index({ entityType: 1 });
 leadSchema.index({ industrySector: 1 });
 // Unique, but sparse so legacy leads without a customerId don't collide on null.

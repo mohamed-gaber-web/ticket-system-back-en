@@ -12,6 +12,7 @@ import {
 } from "../controllers/leadController.js";
 import { changeLeadStatus, getLeadStatusHistory } from "../controllers/leadStatusController.js";
 import { bulkUpdateLeads } from "../controllers/leadBulkController.js";
+import { getLeadDashboard } from "../controllers/leadDashboardController.js";
 import { getLeadAccounts, getLeadAccountContacts } from "../controllers/leadAccountController.js";
 import { addCall, getCallsByLead, updateCall, deleteCall } from "../controllers/callLogController.js";
 import {
@@ -55,6 +56,8 @@ router.post("/bulk", requireTeleSalesWrite, bulkUpdateLeads);
 router.post("/backfill-customer-ids", requireAdmin, backfillCustomerIds);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
+// Dashboard v2: period KPIs (+ previous period), funnel, leaderboard, trend, action lists.
+router.get("/dashboard", getLeadDashboard);
 // Existing-customer lookups for the lead form — static paths, above /:id.
 // Writers only: the contacts carry customer PII that read-only roles never need.
 router.get("/accounts", requireTeleSalesWrite, getLeadAccounts);

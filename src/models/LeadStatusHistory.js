@@ -55,6 +55,8 @@ const leadStatusHistorySchema = mongoose.Schema(
 );
 
 leadStatusHistorySchema.index({ lead: 1, changedAt: -1 });
+// The dashboard narrows history by status and period before reaching the lead.
+leadStatusHistorySchema.index({ newStatus: 1, changedAt: -1 });
 
 leadStatusHistorySchema.virtual("changedBy", {
   refPath: "changedByUserModel",
