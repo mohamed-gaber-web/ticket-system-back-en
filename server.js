@@ -17,6 +17,7 @@ import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
 import { seedIndustrySectors } from "./src/utils/seedIndustrySectors.js";
 import { seedCountries } from "./src/utils/seedCountries.js";
 import { initSocket } from "./src/socket/io.js";
+import { warnIfVaultUnconfigured } from "./src/utils/vaultCrypto.js";
 
 // Load environment variables
 dotenv.config();
@@ -28,6 +29,10 @@ console.log("MS_CLIENT_ID:", !!process.env.MS_CLIENT_ID);
 console.log("MS_CLIENT_SECRET:", !!process.env.MS_CLIENT_SECRET);
 console.log("MS_EMAIL_FROM:", process.env.MS_EMAIL_FROM || "NOT SET");
 console.log("=================");
+
+// Credentials Vault: warn (never crash) when VAULT_ENC_KEY is missing/invalid;
+// the /api/vault routes then answer 503.
+warnIfVaultUnconfigured();
 
 const PORT = process.env.PORT || 8000;
 

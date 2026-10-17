@@ -555,6 +555,69 @@ export const sendCustomEmail = async ({
 };
 
 // ---------------------------------------------------------------------------
+// Sensitive email (Credentials Vault) — passwords in the body
+// ---------------------------------------------------------------------------
+
+/** Is the Microsoft Graph mailer set up (app registration + a sender mailbox)? */
+export const isGraphMailConfigured = () => Boolean(process.env.MS_CLIENT_ID && senderMailbox());
+
+/**
+ * Send an email whose body holds secrets (vault credentials). Unlike every other
+ * send it leaves NO copy in the shared mailbox: one-shot Graph /sendMail with
+ * `saveToSentItems: false`, never a draft, never tracked. The EmailLog row keeps
+ * the subject only — never the body.
+ *
+ * When Graph is not configured (local dev) it runs in "console" mode: prints the
+ * mail with `consoleText` — which the caller must pass already masked — and
+ * reports success, so the flow works without a mailbox. The `html` (which holds
+ * the real passwords) is never printed.
+ *
+ * @param {object} params
+ * @param {string} params.to
+ * @param {string} params.subject
+ * @param {string} params.html          Body, values already HTML-escaped by the caller.
+ * @param {string} [params.replyTo]     The sending employee's address.
+ * @param {string} [params.consoleText] Masked body to print in console mode.
+ * @param {object} [params.logMeta]     { userId } for EmailLog.
+ * @returns {Promise<{ success: boolean, mode: "graph"|"console", messageId?: string, error?: string }>}
+ */
+export const sendSensitiveEmail = async ({ to, subject, html, replyTo, consoleText, logMeta = {} }) => {
+  const toLabel = Array.isArray(to) ? to.join(", ") : to;
+  const logRow = (fields) =>
+    EmailLog.create({
+      to: toLabel,
+      subject,
+      templateName: "vault-credentials",
+      relatedUser: logMeta.userId || undefined,
+      relatedUserType: logMeta.userId ? USER_TYPES.EMPLOYEE : undefined,
+      ...fields,
+    }).catch((err) => console.error("EmailLog save error:", err.message));
+
+  if (!isGraphMailConfigured()) {
+    console.log(
+      `📧 [console mail — Microsoft Graph not configured]\nTo: ${toLabel}\nReply-To: ${replyTo || "-"}\nSubject: ${subject}\n\n` +
+        `${consoleText ?? "(body not shown)"}\n📧 [end of console mail]`
+    );
+    logRow({ status: "sent", messageId: "console" });
+    return { success: true, mode: "console", messageId: "console" };
+  }
+
+  try {
+    const info = await sendViaMicrosoftGraph(senderMailbox(), to, subject, html, {
+      replyTo,
+      saveToSentItems: false,
+    });
+    console.log(`✅ Vault email sent to ${toLabel} - ${info.messageId}`);
+    logRow({ status: "sent", messageId: info.messageId });
+    return { success: true, mode: "graph", messageId: info.messageId };
+  } catch (error) {
+    console.error(`❌ Vault email failed to ${toLabel}:`, error.message);
+    logRow({ status: "failed", errorMessage: error.message });
+    return { success: false, mode: "graph", error: error.message };
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Helper — extract category / module / service-type from a ticket object
 // Works whether the fields are populated objects or plain ID strings
 // ---------------------------------------------------------------------------

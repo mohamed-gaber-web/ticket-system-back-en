@@ -262,6 +262,8 @@ describe("privileged accounts (hr / admin module holders)", () => {
     assert.equal(holdsPrivilegedModule(consultantWithAdmin), true);
     assert.equal(holdsPrivilegedModule(user("admin")), true);
     assert.equal(holdsPrivilegedModule(user("sales")), false);
+    // The vault reveals stored passwords, so its holders are admin-managed too.
+    assert.equal(holdsPrivilegedModule(user("consultant", { modules: ["tickets", "vault"] })), true);
   });
 
   it("a manager cannot manage (e.g. reset the password of) a family member holding HR", () => {
