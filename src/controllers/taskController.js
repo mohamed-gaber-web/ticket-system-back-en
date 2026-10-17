@@ -11,6 +11,7 @@ import {
   taskDelay,
 } from "../utils/weeklyTaskDigest.js";
 import Department from "../models/Department.js";
+import { parseListParam } from "../utils/listParam.js";
 // Whitelist of sortable fields → actual document path used by the aggregation $sort.
 // Guards against injection and lets the client sort on populated names + computed delay.
 const SORT_FIELDS = {
@@ -32,6 +33,7 @@ const SORT_FIELDS = {
 };
 
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
+const TASK_STATUSES = ["pending", "in_progress", "done"];
 
 /** The caller's primary department, as an ObjectId (or null). */
 const callerDepartmentId = (req) => {
@@ -54,11 +56,14 @@ const inCallerDepartments = (req, task) =>
  * department sees nothing, never everything.
  */
 const departmentScope = (req, requested) => {
-  if (isAdmin(req.user)) return requested ? { department: toObjectId(requested) } : {};
+  // `requested` is one id or a multi-select list ("a,b"); non-admins only get
+  // the requested departments that are theirs, else all of theirs.
+  const wanted = parseListParam(requested, { ids: true });
+  if (isAdmin(req.user)) return wanted.length ? { department: { $in: wanted.map(toObjectId) } } : {};
   const own = callerDepartmentIds(req);
   if (own.length === 0) return { _id: { $in: [] } };
-  if (requested && own.includes(String(requested))) return { department: toObjectId(requested) };
-  return { department: { $in: own.map(toObjectId) } };
+  const picked = wanted.filter((id) => own.includes(id));
+  return { department: { $in: (picked.length ? picked : own).map(toObjectId) } };
 };
 
 /** Is this employee named on the task — assignee, responsible, or creator? */
@@ -238,6 +243,7 @@ const getTasks = async (req, res) => {
       category,
       status,
       assignedTo,
+      responsible,
       scheduledWeek,
       startDate,
       endDate,
@@ -247,6 +253,11 @@ const getTasks = async (req, res) => {
       order,
       mine,
     } = req.query;
+    // Multi-select filters: comma lists (a single value still works).
+    const statuses = parseListParam(status, { allowed: TASK_STATUSES });
+    const categories = parseListParam(category, { ids: true });
+    const assignees = parseListParam(assignedTo, { ids: true });
+    const responsibles = parseListParam(responsible, { ids: true });
 
     const match = { ...departmentScope(req, department) };
 
@@ -254,7 +265,7 @@ const getTasks = async (req, res) => {
     // responsible for or created stay on the main Tasks list.
     if (mine === "true") match.assignedTo = req.user._id;
 
-    if (category) match.category = toObjectId(category);
+    if (categories.length) match.category = { $in: categories.map(toObjectId) };
 
     const from = toDate(startDate);
     const to = toDate(endDate);
@@ -269,12 +280,14 @@ const getTasks = async (req, res) => {
     // plain list shows top-level tasks only, but once the caller filters (my
     // tasks, assignee, status, search…) matching subtasks are listed too —
     // a subtask assigned to someone must not hide behind its main task.
-    const filtering = mine === "true" || category || startDate || endDate || status || assignedTo || scheduledWeek || search;
+    const filtering =
+      mine === "true" || categories.length || startDate || endDate || statuses.length || assignees.length || responsibles.length || scheduledWeek || search;
     if (parentTask) match.parentTask = toObjectId(parentTask);
     else if (!filtering) match.parentTask = null;
 
-    if (status) match.status = status;
-    if (assignedTo && mine !== "true") match.assignedTo = toObjectId(assignedTo);
+    if (statuses.length) match.status = { $in: statuses };
+    if (assignees.length && mine !== "true") match.assignedTo = { $in: assignees.map(toObjectId) };
+    if (responsibles.length) match.responsible = { $in: responsibles.map(toObjectId) };
     const and = [];
     if (scheduledWeek) and.push(weekCoverFilter(parseInt(scheduledWeek)));
     const term = typeof search === "string" ? search.trim() : "";
