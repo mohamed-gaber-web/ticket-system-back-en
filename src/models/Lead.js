@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import "./Counter.js";
 import { LEAD_STATUSES, VALUE_CURRENCIES, VALUE_SOURCES, DEFAULT_VALUE_CURRENCY } from "../config/leadStatusWorkflow.js";
 
 // ── Spec enum value lists (see tele-sales lead field specification) ────────────
@@ -455,50 +456,42 @@ leadSchema.virtual("attachments", {
 });
 
 // ── Customer ID generation (CUST-YYYY-NNNNN) ──────────────────────────────────
-
-/** Highest sequence number already used for `year` (0 when none). */
-async function highestCustomerSeq(LeadModel, year) {
-  const last = await LeadModel
-    .findOne({ customerId: new RegExp(`^CUST-${year}-\\d{5}$`) })
-    .sort({ customerId: -1 }) // fixed-width zero-padded → lexicographic === numeric
-    .select("customerId")
-    .lean();
-  if (last?.customerId) return parseInt(last.customerId.split("-").pop(), 10) || 0;
-  return 0;
-}
+// Numbers come from an atomic per-year Counter ("customerId:<year>"), so
+// concurrent creates and imports never hand out the same ID. The sequence is
+// zero-padded to 5 digits and simply grows past 99999 (CUST-2026-100000), so
+// never find the "last" ID by sorting strings or matching \d{5} — that is what
+// re-issued CUST-2026-100000 to every import after the 100,000th lead.
 
 const formatCustomerId = (year, seq) => `CUST-${year}-${String(seq).padStart(5, "0")}`;
 
-/**
- * Reserve `count` sequential customer IDs for the current year, skipping any that
- * already exist. Used by bulk import (insertMany bypasses the pre-save hook).
- * One query loads the year's existing IDs; generation is then in-memory.
- */
-leadSchema.statics.reserveCustomerIds = async function (count) {
-  const year = new Date().getFullYear();
-  const existing = await this.find({ customerId: new RegExp(`^CUST-${year}-\\d{5}$`) })
-    .select("customerId")
-    .lean();
-  const used = new Set(existing.map((d) => d.customerId));
-  let maxSeq = 0;
-  for (const d of existing) {
-    const n = parseInt(d.customerId.split("-").pop(), 10);
-    if (n > maxSeq) maxSeq = n;
-  }
+/** Highest sequence number already used for `year`, read numerically (0 when none). */
+async function highestCustomerSeq(LeadModel, year) {
+  const prefix = `CUST-${year}-`;
+  const [row] = await LeadModel.aggregate([
+    { $match: { customerId: new RegExp(`^${prefix}\\d+$`) } },
+    { $group: { _id: null, max: { $max: { $toLong: { $substrCP: ["$customerId", prefix.length, 20] } } } } },
+  ]);
+  return Number(row?.max ?? 0);
+}
 
-  let seq = maxSeq + 1;
-  const ids = [];
-  for (let i = 0; i < count; i++) {
-    let candidate = formatCustomerId(year, seq);
-    while (used.has(candidate)) {
-      seq += 1;
-      candidate = formatCustomerId(year, seq);
-    }
-    used.add(candidate);
-    ids.push(candidate);
-    seq += 1;
+/**
+ * Reserve `count` consecutive customer IDs for the current year. Used by bulk
+ * import (insertMany bypasses the pre-save hook) and by the pre-save hook.
+ */
+leadSchema.statics.reserveCustomerIds = async function (count, year = new Date().getFullYear()) {
+  if (!(count > 0)) return [];
+  const Counter = mongoose.model("Counter");
+  const key = `customerId:${year}`;
+  // First use of the year's counter: start it after the IDs already stored.
+  // $max keeps this safe when two requests seed at once.
+  if (!(await Counter.exists({ _id: key }))) {
+    const highest = await highestCustomerSeq(this, year);
+    await Counter.updateOne({ _id: key }, { $max: { seq: highest } }, { upsert: true }).catch((err) => {
+      if (err?.code !== 11000) throw err; // a concurrent upsert created it first
+    });
   }
-  return ids;
+  const { seq } = await Counter.findOneAndUpdate({ _id: key }, { $inc: { seq: count } }, { new: true }).lean();
+  return Array.from({ length: count }, (_, i) => formatCustomerId(year, seq - count + 1 + i));
 };
 
 // Prices are USD only. A record still carrying an older currency (EGP, SAR…)
@@ -511,15 +504,7 @@ leadSchema.pre("validate", function () {
 // Single-document creates (Lead.create / doc.save) get their ID here.
 leadSchema.pre("save", async function () {
   if (!this.isNew || this.customerId) return;
-  const LeadModel = mongoose.model("Lead");
-  const year = new Date().getFullYear();
-  let seq = (await highestCustomerSeq(LeadModel, year)) + 1;
-  let candidate = formatCustomerId(year, seq);
-  while (await LeadModel.exists({ customerId: candidate })) {
-    seq += 1;
-    candidate = formatCustomerId(year, seq);
-  }
-  this.customerId = candidate;
+  [this.customerId] = await mongoose.model("Lead").reserveCustomerIds(1);
 });
 
 leadSchema.index({ status: 1 });

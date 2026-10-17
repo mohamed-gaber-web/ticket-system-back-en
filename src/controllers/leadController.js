@@ -486,29 +486,19 @@ export const backfillCustomerIds = async (req, res) => {
       return res.status(200).json({ success: true, message: "All leads already have a customerId", updated: 0 });
     }
 
-    // Seed per-year counters from IDs that already exist.
-    const existing = await Lead.find({ customerId: /^CUST-\d{4}-\d{5}$/ }).select("customerId").lean();
-    const used = new Set(existing.map((d) => d.customerId));
-    const maxSeqByYear = {};
-    for (const d of existing) {
-      const [, y, seq] = d.customerId.split("-");
-      const n = parseInt(seq, 10);
-      if (!maxSeqByYear[y] || n > maxSeqByYear[y]) maxSeqByYear[y] = n;
-    }
-
-    const pad = (n) => String(n).padStart(5, "0");
-    const ops = [];
+    // Number each creation year's leads from that year's counter, oldest first.
+    const byYear = new Map();
     for (const lead of missing) {
       const year = lead.createdAt ? new Date(lead.createdAt).getFullYear() : new Date().getFullYear();
-      let seq = (maxSeqByYear[year] || 0) + 1;
-      let candidate = `CUST-${year}-${pad(seq)}`;
-      while (used.has(candidate)) {
-        seq += 1;
-        candidate = `CUST-${year}-${pad(seq)}`;
-      }
-      used.add(candidate);
-      maxSeqByYear[year] = seq;
-      ops.push({ updateOne: { filter: { _id: lead._id }, update: { $set: { customerId: candidate } } } });
+      if (!byYear.has(year)) byYear.set(year, []);
+      byYear.get(year).push(lead);
+    }
+    const ops = [];
+    for (const [year, leads] of byYear) {
+      const ids = await Lead.reserveCustomerIds(leads.length, year);
+      leads.forEach((lead, i) => {
+        ops.push({ updateOne: { filter: { _id: lead._id }, update: { $set: { customerId: ids[i] } } } });
+      });
     }
 
     const result = await Lead.bulkWrite(ops, { ordered: false });
