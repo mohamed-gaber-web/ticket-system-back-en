@@ -1,11 +1,12 @@
-// Deletes the tasks of a number range that nobody is assigned to.
+// Deletes the tasks of a number range that nobody is assigned to or responsible for.
 //
 //   node src/scripts/deleteUnassignedTasks.js --from 48 --to 113            # report only (default)
 //   node src/scripts/deleteUnassignedTasks.js --from 48 --to 113 --apply    # delete
 //   (--year 2026 picks the TASK-<year>-NNNNN series; default: the current year)
 //
 // A task in the range is deleted only when ALL of these hold:
-//   - it has no assignee (`assignedTo` empty, or pointing at an employee that no longer exists);
+//   - it has no assignee and no responsible (`assignedTo` / `responsible` empty, or pointing at
+//     an employee that no longer exists);
 //   - it has no comments and no attachments (that would be real work);
 //   - none of its subtasks would be left behind — every subtask is itself being deleted.
 // Everything else in the range is listed with the reason it was kept. Nothing
@@ -50,7 +51,7 @@ const run = async () => {
     .sort((a, b) => numberOf(a.taskNumber) - numberOf(b.taskNumber));
 
   const ids = inRange.map((t) => t._id);
-  const assigneeIds = inRange.map((t) => t.assignedTo).filter(Boolean);
+  const assigneeIds = inRange.flatMap((t) => [t.assignedTo, t.responsible]).filter(Boolean);
   const [liveEmployees, comments, attachments, children] = await Promise.all([
     Consultant.find({ _id: { $in: assigneeIds } }).distinct("_id"),
     TaskComment.aggregate([{ $match: { task: { $in: ids } } }, { $group: { _id: "$task", n: { $sum: 1 } } }]),
@@ -73,6 +74,7 @@ const run = async () => {
   for (const t of inRange) {
     const id = String(t._id);
     if (t.assignedTo && live.has(String(t.assignedTo))) reasons.set(id, "assigned");
+    else if (t.responsible && live.has(String(t.responsible))) reasons.set(id, "has a responsible");
     else if (commentCount.get(id)) reasons.set(id, `${commentCount.get(id)} comment(s)`);
     else if (attachmentCount.get(id)) reasons.set(id, `${attachmentCount.get(id)} attachment(s)`);
   }
@@ -93,7 +95,7 @@ const run = async () => {
   const kept = inRange.filter((t) => reasons.has(String(t._id)));
 
   console.log(`Tasks in the range: ${inRange.length}`);
-  console.log(`To delete (no assignee): ${toDelete.length}`);
+  console.log(`To delete (no assignee, no responsible): ${toDelete.length}`);
   for (const t of toDelete) console.log(`  - ${t.taskNumber}  ${String(t.name ?? "").slice(0, 60)}  [${t.status}]`);
   console.log(`Kept: ${kept.length}`);
   for (const t of kept) console.log(`  - ${t.taskNumber}  ${String(t.name ?? "").slice(0, 60)}  → ${reasons.get(String(t._id))}`);
