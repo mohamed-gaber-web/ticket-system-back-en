@@ -194,7 +194,7 @@ export const canManageMarketing = (actor) =>
   isAdmin(actor) || managedFamiliesOf(actor).includes("marketing");
 
 /** Modules that open other people's data — holding one makes an account admin-managed. */
-export const PRIVILEGED_MODULES = Object.freeze(["admin", "hr"]);
+export const PRIVILEGED_MODULES = Object.freeze(["admin", "hr", "vault"]);
 
 /** Does this employee hold a privileged module (by role default or override)? */
 export const holdsPrivilegedModule = (user) =>
@@ -208,7 +208,7 @@ export const holdsPrivilegedModule = (user) =>
  * own family — never another manager, never an admin, never someone from a
  * different family.
  *
- * Nobody but an admin manages an account that holds a privileged module (`hr`,
+ * Nobody but an admin manages an account that holds a privileged module (`hr`, `vault`,
  * `admin`): resetting its password would hand the actor that access.
  */
 export const canManageEmployee = (actor, target) => {

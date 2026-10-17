@@ -26,7 +26,19 @@ export const ROLES = Object.freeze([
   "developer_manager",
 ]);
 
-export const MODULES = Object.freeze(["tickets", "telesales", "tasks", "admin", "development", "hr", "marketing", "proposals"]);
+// `vault` (Credentials Vault) is like `hr`: no role opens it by default — admins
+// have every module, anyone else only when an admin ticks it on their record.
+export const MODULES = Object.freeze([
+  "tickets",
+  "telesales",
+  "tasks",
+  "admin",
+  "development",
+  "hr",
+  "marketing",
+  "proposals",
+  "vault",
+]);
 
 /** What each role opens when the admin has not overridden `modules`. */
 export const ROLE_DEFAULT_MODULES = Object.freeze({

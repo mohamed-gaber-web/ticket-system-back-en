@@ -55,6 +55,7 @@ import marketingRoutes from "./marketingRoutes.js";
 import meRoutes from "./meRoutes.js";
 import proposalRoutes from "./proposalRoutes.js";
 import { guardProposalFiles } from "../controllers/proposalController.js";
+import vaultRoutes from "./vaultRoutes.js";
 
 const router = express.Router();
 
@@ -200,6 +201,9 @@ router.use("/marketing", marketingRoutes);
 
 // The signed-in employee's My Home page
 router.use("/me", meRoutes);
+
+// Credentials Vault: encrypted client/company logins, audited sends and reveals
+router.use("/vault", vaultRoutes);
 // HR documents live in the same GridFS bucket but are only ever served through
 // /consultants/:id/documents — the generic file routes refuse them.
 router.all(["/files/:id", "/files/:id/info"], guardHrFiles);
