@@ -1,0 +1,440 @@
+{
+  "settings": {
+    "company": "Grow Path",
+    "internalEmail": "",
+    "senderEmail": "",
+    "contractPrefix": "GP-C-",
+    "rates": {
+      "SAR": 13,
+      "USD": 48
+    },
+    "document": {
+      "paper": "designed",
+      "watermark": true,
+      "phone": "+20 10 50 966 978",
+      "email": "info@growpath.net",
+      "web": "www.growpath.net",
+      "footAddr": "Crystal Plaza Towers\nSuite 8 Plot No. B - Area DA\nKattameya - Cairo - Egypt",
+      "topMm": 45,
+      "bottomMm": 30,
+      "title": "Service Agreement",
+      "legalName": "Grow Path for Digital Solutions",
+      "legalForm": "Limited Liability Company",
+      "cr": "230727",
+      "crOffice": "Cairo Investment Commercial Registry Office",
+      "taxNo": "606-709-761",
+      "address": "Building 33, 2nd Floor, Heliopolis Gardens, Sheraton, El Nozha, Cairo, Egypt",
+      "signer": "Walid Fawzy Mohamed Heikal",
+      "signerTitle": "Project Manager",
+      "bank": "",
+      "showVat": true,
+      "vatEG": 14,
+      "vatSA": 15,
+      "preamble": "Whereas the First Party is a Microsoft certified partner specialised in implementing and supporting Microsoft Dynamics and enterprise resource planning (ERP) systems, and has the experience and technical staff needed to carry out the subject of this Agreement.\nAnd whereas the Second Party wishes to engage the First Party to carry out the work set out in this Agreement, having reviewed and accepted the technical and financial proposal submitted by the First Party.\nNow, therefore, the two Parties, having full legal capacity to contract and act, have agreed as follows:",
+      "payTerms": "The First Party shall issue an electronic tax invoice for each installment in accordance with the applicable tax regulations, and the Second Party shall pay invoices due within no more than 10 working days from receiving them.\nThe amounts in the payment schedule exclude value added tax (VAT), which shall be added at the legally applicable rate when the invoice is issued.\nPayment shall be made by bank transfer to the First Party's account, and an installment is only considered paid once it has actually been credited to that account.\nIf the Second Party is more than 60 days late in paying from the due date, the First Party may, after written notice, suspend non-critical work or services until payment is made, and the execution periods shall be extended by the length of the suspension without any liability on the First Party.",
+      "usdTerm": "This Agreement is priced in US dollars, and the Second Party may pay in Egyptian pounds at the Central Bank of Egypt exchange rate on the actual date of payment.",
+      "lawEG": "the laws of the Arab Republic of Egypt",
+      "courtEG": "the competent courts of Cairo",
+      "lawSA": "the laws and regulations in force in the Kingdom of Saudi Arabia",
+      "courtSA": "the competent courts of Riyadh"
+    }
+  },
+  "contractTypes": [
+    {
+      "key": "impl",
+      "name": "Implementation Project",
+      "color": "#17694D",
+      "billingMode": "phases",
+      "phases": [
+        {
+          "name": "Project kick-off (Mobilization & Kick-off)",
+          "pct": 25,
+          "anchor": "start",
+          "offset": 0
+        },
+        {
+          "name": "Execution phase completed (Execution)",
+          "pct": 25,
+          "anchor": "start",
+          "offset": 45
+        },
+        {
+          "name": "Deployment phase completed (Deployment)",
+          "pct": 25,
+          "anchor": "delivery",
+          "offset": -30
+        },
+        {
+          "name": "Go-live",
+          "pct": 15,
+          "anchor": "delivery",
+          "offset": 0
+        },
+        {
+          "name": "Two months after go-live",
+          "pct": 10,
+          "anchor": "delivery",
+          "offset": 60
+        }
+      ],
+      "periodMonths": 3,
+      "payInAdvance": true,
+      "renewable": false,
+      "renewalUpliftPct": 0,
+      "needsGuarantee": false,
+      "defaultScope": "Analysing the business requirements and preparing the Functional Design Document (FDD) for approval by the Second Party.\nSetting up and configuring the system for the agreed modules according to the approved design and the technical proposal.\nDeveloping the customisations, reports and integrations expressly included in the approved design.\nMigrating the opening data (master data and balances) after the Second Party has prepared it in the approved templates.\nSupporting user acceptance testing (UAT) and training the key users.\nSupporting go-live and the post go-live support period (Hypercare) for two months.",
+      "paymentTerms": "Each installment becomes due when its phase is approved by the Second Party signing the acceptance record, or when the review period set out in the Delivery and Acceptance clause has passed.\nThe project is considered delivered and the work completed once the financial data and reports (trial balance, balance sheet and income statement) are produced from the system for one financial period (one month).\nInstallments due after go-live become due on their dates in the payment schedule without any further approval."
+    },
+    {
+      "key": "small",
+      "name": "Small Project",
+      "color": "#2D5C8A",
+      "billingMode": "phases",
+      "phases": [
+        {
+          "name": "Advance payment",
+          "pct": 60,
+          "anchor": "start",
+          "offset": 0
+        },
+        {
+          "name": "On delivery",
+          "pct": 40,
+          "anchor": "delivery",
+          "offset": 0
+        }
+      ],
+      "periodMonths": 3,
+      "payInAdvance": true,
+      "renewable": false,
+      "renewalUpliftPct": 0,
+      "needsGuarantee": false,
+      "defaultScope": "Carrying out the work described in the subject of this Agreement according to the approved technical proposal.\nTesting the work with the Second Party and delivering it against an acceptance record.",
+      "paymentTerms": "The advance payment is due when this Agreement is signed and work starts only after it has been paid; the second payment is due on delivery and the signing of the acceptance record."
+    },
+    {
+      "key": "sla",
+      "name": "SLA Contract",
+      "color": "#9C6410",
+      "billingMode": "recurring",
+      "phases": [],
+      "periodMonths": 3,
+      "payInAdvance": true,
+      "renewable": true,
+      "renewalUpliftPct": 15,
+      "needsGuarantee": false,
+      "defaultScope": "Products covered by support: Microsoft Dynamics 365 Finance & Operations, and the developments and customisations implemented on it (D365 Development & Customization).\nTechnical and functional support: unlimited, through the ticketing system, email and remote sessions.\nDevelopment and change hours: 15 hours per month; unused hours do not carry over to the following month.\nFunctional training: 15 hours during the term of the Agreement.\nSecurity and permissions management: unlimited.\nFunctional consulting: unlimited, within the current use of the system.\nResponse times: a design report for development requests within 3–5 working days, support requests handled within 1–2 working days, and critical incidents that stop work within 4 working hours.\nSupport hours are Sunday to Thursday, excluding public holidays.\nSupport does not cover system implementation, additional modules or developments beyond the package hours; these are handled through a separate change request.",
+      "paymentTerms": "The fee for the first period ({{period_months}} months) is paid in advance when this Agreement is signed, and the service fee is then collected every {{period_months}} months in advance at the start of each period.\nThe Agreement is renewed by written agreement of both Parties at least 30 days before it ends, and an annual increase of {{uplift_pct}}% applies on renewal.\nThe First Party's commitment to the service levels depends on the Second Party paying the installments of this Agreement on time."
+    },
+    {
+      "key": "lic",
+      "name": "License Renewal",
+      "color": "#7A4E9E",
+      "billingMode": "renewal",
+      "phases": [],
+      "periodMonths": 12,
+      "payInAdvance": true,
+      "renewable": true,
+      "renewalUpliftPct": 10,
+      "needsGuarantee": true,
+      "defaultScope": "Supplying the Microsoft subscriptions described in the subject of this Agreement through the Microsoft Cloud Solution Provider (CSP) program for the stated period.\nManaging the subscriptions, assigning licenses to users and tracking renewal dates.\nThe Second Party accepts the Microsoft Customer Agreement as a condition for activating the subscriptions.",
+      "paymentTerms": "The subscription value is paid in full in advance before the start date of the period and is non-refundable once activated.\nThe licenses are considered delivered as soon as they are activated on the Second Party's account or the license file is provided to the Second Party.\nThe subscription renews for an equal period unless the Second Party gives notice that it does not wish to renew at least 30 days before it ends, at the Microsoft prices in force at the time of renewal.\nAdding users during the period is charged pro rata for the remaining term, and the number of subscriptions may not be reduced before the end of the period, in line with Microsoft policy."
+    }
+  ],
+  "clauses": [
+    {
+      "order": 1,
+      "title": "Obligations of the First Party",
+      "body": "To carry out the work according to best professional practice, the implementation methodology approved by Microsoft, and in good faith.\nTo provide a qualified team of functional and technical consultants and to appoint a project manager as the main point of contact with the Second Party.\nTo provide periodic reports on progress, risks and the decisions required from the Second Party.\nTo train the Second Party's key users to use the system within the agreed scope.\nTo comply with the Second Party's information security and system access policies once notified of them in writing.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 2,
+      "title": "Obligations of the Second Party",
+      "body": "To appoint its own project manager and key users for each department, with decision-making authority and enough time for the project, and to name them in writing when work starts.\nTo provide the First Party with all necessary information, data and documents on the agreed dates, and to confirm that they are correct and complete; the First Party is not responsible for any delay or shortfall caused by missing or late information.\nTo provide a suitable workspace for the First Party's team when working on its premises, internet access, the printers needed to review project reports and documents, and the permissions needed to access the systems, including remote access.\nTo provide transport and accommodation for the First Party's team if the work requires presence outside Greater Cairo.\nTo review and approve the deliverables, or give written comments on them, within the periods set out in this Agreement.\nTo manage change with its internal users and ensure they use the system, this being the Second Party's responsibility.\nTo pay the amounts due on time according to the payment schedule.\nAny delay caused by the Second Party not meeting its obligations extends the execution period by the length of the delay, and the First Party may claim the cost of any additional time.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 3,
+      "title": "Out of Scope",
+      "body": "Changes: all new or additional changes to the program code, functions, data entry screens, forms or reports are out of scope unless expressly included in the scope of work.\nIntegration: any integration of any kind with other programs, applications, third-party software or electronic portals is out of scope unless expressly included.\nAdditional training: any training not provided for in this Agreement is charged on a time and materials basis at an additional cost.\nAdditional modules: implementing any module not mentioned in the scope of work is outside the implementation scope.\nAny of the above is carried out under a written change request that sets out the cost and duration and is signed by both Parties before work starts.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 4,
+      "title": "Assumptions and Working Arrangements",
+      "body": "The working week is five days, Sunday to Thursday, at 6 working hours per day, excluding Ramadan and public holidays.\nThe place of work is Cairo, and part of the work may be carried out remotely provided this does not affect the quality of the work.\nThe workflows in the proposed solution are the standard workflows already designed in the system unless stated otherwise.\nThe key users are trained for the number of days set in the project plan; if any of them leaves or is replaced, the Second Party bears the cost of the additional training.\nClosure policy: the Second Party shall decide on requirements, system design and the questions raised within 3 working days of being asked, and shall review and approve the main topics within no more than 5 working days of their submission.\nIf the Second Party does not respond within the above review periods, the topics raised are considered automatically approved.\nUser acceptance testing (UAT): the Second Party names the testing team before testing starts and provides practical test cases to be used as the main reference for acceptance; testing is carried out by its team under the First Party's supervision.",
+      "appliesTo": [
+        "impl",
+        "small"
+      ]
+    },
+    {
+      "order": 5,
+      "title": "Delivery and Acceptance",
+      "body": "The First Party delivers the deliverables of each phase with an acceptance record, and the Second Party shall review them within 10 working days of delivery.\nThe deliverables are considered accepted if the Second Party signs the acceptance record, if the review period passes without specific written comments, or if the system starts to be used in live operation.\nA service report signed by the Second Party or any of its authorised employees is considered approval of the technical services it describes.\nComments that do not materially affect operations do not prevent approval of the phase, and the First Party shall resolve them during the warranty or support period.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 6,
+      "title": "Warranty",
+      "body": "The First Party warrants that the work carried out conforms to the agreed scope for 90 days from go-live or acceptance, and shall fix any errors in the configuration or developments it carried out free of charge during that period.\nThe warranty does not cover errors caused by changes made by the Second Party or any other party, misuse, Microsoft updates to the platform, or the Second Party's infrastructure and hardware.\nThe Microsoft Dynamics 365 platform and its licenses are subject to the terms and warranties issued by Microsoft, and the First Party gives no warranty beyond them.",
+      "appliesTo": [
+        "impl",
+        "small"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "Confidentiality",
+      "body": "During the term of this Agreement and after it ends, each Party shall not disclose to others or use any non-public information about the other Party obtained because of this Agreement, including but not limited to trade secrets, financial information, data, software and source code, designs, plans, customers, business systems, and internal policies and procedures.\nThe First Party shall include an equivalent confidentiality clause in any contract it concludes with others relating to the services under this Agreement.\nThe Second Party shall not disclose any information about the First Party's prices, contracts or fees, and shall deal with the First Party's employees only through the First Party.\nThis clause remains in force for five years after this Agreement ends or is terminated for any reason.\nThe confidentiality obligation does not cover information that is publicly available, or that the law or a court requires to be disclosed.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 8,
+      "title": "Intellectual Property and Use of Name",
+      "body": "The intellectual property rights in the Microsoft Dynamics 365 platform and its tools remain the property of Microsoft, and their use is subject to Microsoft's license terms.\nThe Second Party owns its data and documents, the documents and reports delivered to it that are funded under this Agreement, and the right to use the developments made specifically for it once the full value of this Agreement has been paid.\nThe First Party retains ownership of its tools, software, libraries, methodologies and trademark that existed before this Agreement, which are its trade secrets; it grants the Second Party the right to use them within the system implemented for it, without the right to sell or license them to others, and the First Party may use the experience it gains in other engagements without disclosing the Second Party's information.\nNeither Party shall use the other Party's name or trademark except as needed to perform this Agreement or with prior written consent.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 9,
+      "title": "Personal Data Protection",
+      "body": "The First Party shall handle the Second Party's personal data in accordance with the personal data protection legislation in force in the Second Party's country.\nThe First Party shall not copy the Second Party's data outside the approved working environments except as needed to perform this Agreement, and shall delete any temporary copies once they are no longer needed.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 10,
+      "title": "Indemnity and Limitation of Liability",
+      "body": "Each Party shall indemnify the other Party for direct damage resulting from its breach of its obligations under this Agreement, including any litigation costs awarded.\nThe total liability of the First Party for any claim arising from this Agreement shall not exceed the amounts actually paid by the Second Party during the twelve months before the claim.\nNeither Party is liable for indirect damage, including loss of profit, loss of data or business interruption, except in cases of fraud or gross negligence.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 11,
+      "title": "Non-Solicitation of Employees",
+      "body": "The Second Party shall not, directly or indirectly, hire, engage or make a job offer to any of the First Party's employees during the term of this Agreement and for five years from the date the employee leaves the First Party; the First Party is bound by the same condition towards the Second Party's employees.\nIf either Party breaches this clause, the affected Party may terminate the Agreement and claim the remaining contract fees and appropriate compensation.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 12,
+      "title": "Force Majeure",
+      "body": "Neither Party is liable for any delay or failure in performance caused by circumstances beyond its control, including but not limited to war, blockade, riots, revolutions, boycotts, economic and political sanctions, fire, epidemics, floods, earthquakes, government decisions and a general outage of Microsoft cloud services.\nThe affected Party shall notify the other Party in writing within 7 days of the force majeure event, and the execution period shall be extended by its duration so that both Parties can meet their obligations.\nIf the force majeure event lasts more than 60 days, either Party may terminate the Agreement, with payment for the work carried out up to the date of termination.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 13,
+      "title": "Breach of Contract",
+      "body": "If either Party breaches one or more clauses of this Agreement, the affected Party shall notify the other Party in writing, describing the breach with evidence, and the breaching Party shall remedy it within no more than 30 days of the notice.\nIf the breach cannot be remedied within that period, the affected Party may terminate the Agreement in accordance with the Termination clause.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 14,
+      "title": "Termination",
+      "body": "This Agreement ends when both Parties have fulfilled their obligations or when its term expires; either Party may terminate it by reasoned written notice in the following cases: a material breach that could not be remedied under the Breach of Contract clause, the other Party's insolvency, bankruptcy or liquidation, or proof that it violated integrity rules such as paying bribes or breaking the law.\nThe First Party may terminate the Agreement or suspend work if the Second Party is more than 90 days late in paying any installment due.\nThe Second Party may terminate the Agreement for reasons of its own by written notice at least 30 days in advance.\nIn all cases of termination, the Second Party shall pay the First Party's dues for the work carried out up to the date of termination according to the payment schedule, including the current phase in proportion to the work completed, and the value of the licenses and subscriptions contracted with Microsoft.\nOn termination, each Party shall return or destroy the other Party's documents and confidential information.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 15,
+      "title": "Assignment and Subcontracting",
+      "body": "Neither Party may assign this Agreement or any of its rights and obligations to others without the prior written consent of the other Party.\nThe First Party may engage specialised consultants to carry out parts of the work after notifying the Second Party, while remaining fully responsible to the Second Party for all services and for any error or shortcoming on their part.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 16,
+      "title": "Notices and Correspondence",
+      "body": "The two Parties agree that the addresses stated at the beginning of this Agreement are their chosen addresses for all correspondence and notices; notices shall be in writing and delivered by hand against a receipt, by registered mail, or by each Party's approved email address, and take legal effect from the date they are received.\nIf either Party changes its address, it shall notify the other Party of the new address by registered letter with acknowledgement of receipt within two weeks of the change; otherwise correspondence sent to the previous address is considered valid and effective.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 17,
+      "title": "Governing Law and Dispute Resolution",
+      "body": "This Agreement is governed by and construed in accordance with {{governing_law}}, which apply to every matter not specifically provided for in this Agreement or in the correspondence agreed between the Parties during its performance.\nAny dispute arising from the conclusion, performance, interpretation, termination, validity or invalidity of this Agreement shall first be settled amicably within 30 days of either Party notifying the other of it; failing that, {{dispute_venue}} shall have jurisdiction.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 18,
+      "title": "Capacity to Contract",
+      "body": "By signing this Agreement, each Party confirms that it has the legal capacity to enter into it and that its signing representative is authorised to sign on its behalf, and this Agreement is binding on both Parties.",
+      "appliesTo": "ALL"
+    },
+    {
+      "order": 19,
+      "title": "General Provisions",
+      "body": "The Second Party confirms that it has read and understood this Agreement and agrees to be bound by it; this Agreement and its annexes form the entire agreement between the Parties and supersede all previous written or unwritten proposals, agreements and correspondence regarding its subject.\nNo amendment to this Agreement or cancellation of any of its clauses is valid unless made in writing and signed by both Parties.\nIf any clause of this Agreement is held invalid, the validity of the remaining clauses is not affected.\nThis Agreement is made in two original copies, one for each Party to act upon when needed.",
+      "appliesTo": "ALL"
+    }
+  ],
+  "emailTemplates": [
+    {
+      "key": "t1",
+      "name": "Reminder before due date",
+      "subject": "Reminder: payment due on {{due_date}} — {{contract}}",
+      "body": "Dear {{customer}},\n\nThis is a friendly reminder that the installment \"{{installment}}\" of {{amount}} under contract {{contract_no}} ({{contract}}) is due on {{due_date}}, in {{days_left}} days.\n\nWe would appreciate it if you could arrange payment on time and send us a copy of the transfer for our records.\n\nKind regards,\nFinance Department — {{company}}"
+    },
+    {
+      "key": "t2",
+      "name": "Overdue payment",
+      "subject": "Overdue payment: {{installment}} — {{contract_no}}",
+      "body": "Dear {{customer}},\n\nWe would like to bring to your attention that the installment \"{{installment}}\" under contract {{contract_no}} was due on {{due_date}}, and the remaining {{remaining}} has been overdue for {{days_late}} days.\n\nPlease arrange payment as soon as possible or contact us to agree on a payment date.\n\nKind regards,\nFinance Department — {{company}}"
+    },
+    {
+      "key": "t3",
+      "name": "Internal escalation",
+      "subject": "[Internal] {{days_late}} days late — {{customer}}",
+      "body": "To {{account_manager}},\n\nThe customer {{customer}} is late in paying \"{{installment}}\" (contract {{contract_no}}), with {{remaining}} outstanding for {{days_late}} days.\nAction required: contact the customer's senior management directly and agree a written payment date within one week."
+    },
+    {
+      "key": "t4",
+      "name": "Renewal offer to the customer",
+      "subject": "Renewal of {{contract}} — ends {{end_date}}",
+      "body": "Dear {{customer}},\n\nContract {{contract_no}} ({{contract}}) ends on {{end_date}}, in {{days_left}} days.\nTo keep the service running without interruption, please confirm that you wish to renew, and we will send you the quotation for the new period.\n\nKind regards,\n{{account_manager}} — {{company}}"
+    },
+    {
+      "key": "t5",
+      "name": "Internal renewal alert",
+      "subject": "[Internal] Renewal in {{days_left}} days — {{customer}}",
+      "body": "To {{account_manager}},\n\nContract {{contract_no}} ({{contract}}) for {{customer}} ends on {{end_date}}, with a value of {{contract_value}}.\nThe renewal has not been recorded yet. Please confirm the position with the customer."
+    },
+    {
+      "key": "t6",
+      "name": "Contract signature reminder",
+      "subject": "Reminder: signing contract {{contract_no}} — {{contract}}",
+      "body": "Dear {{customer}},\n\nWe sent you contract {{contract_no}} ({{contract}}) on {{sent_date}}. We would appreciate it if you could review and sign it and return a signed copy to us, or let us know of any comments you have.\n\nKind regards,\n{{account_manager}} — {{company}}"
+    },
+    {
+      "key": "t7",
+      "name": "Internal: unsigned contract",
+      "subject": "[Internal] Contract unsigned for {{days_since_sent}} days — {{customer}}",
+      "body": "To {{account_manager}},\n\nContract {{contract_no}} ({{contract}}), worth {{contract_value}}, was sent to {{customer}} on {{sent_date}} and has not been signed yet.\nAction required: contact the customer and agree a date for signing."
+    },
+    {
+      "key": "t8",
+      "name": "Internal: cheque deposit",
+      "subject": "[Internal] Cheque {{cheque_no}} due {{cheque_date}} — {{customer}}",
+      "body": "To the Finance Department,\n\nCheque no. {{cheque_no}} drawn on {{bank}} for {{cheque_amount}} from {{customer}} (contract {{contract_no}}) is due on {{cheque_date}}.\nPlease prepare it for deposit on time."
+    }
+  ],
+  "reminderRules": [
+    {
+      "key": "r1",
+      "active": true,
+      "trigger": "due",
+      "days": 7,
+      "recipient": "client",
+      "templateKey": "t1",
+      "contractTypes": []
+    },
+    {
+      "key": "r2",
+      "active": true,
+      "trigger": "overdue",
+      "days": 3,
+      "recipient": "client",
+      "templateKey": "t2",
+      "contractTypes": []
+    },
+    {
+      "key": "r3",
+      "active": true,
+      "trigger": "overdue",
+      "days": 15,
+      "recipient": "both",
+      "templateKey": "t2",
+      "contractTypes": []
+    },
+    {
+      "key": "r4",
+      "active": true,
+      "trigger": "overdue",
+      "days": 30,
+      "recipient": "internal",
+      "templateKey": "t3",
+      "contractTypes": []
+    },
+    {
+      "key": "r5",
+      "active": true,
+      "trigger": "renewal",
+      "days": 60,
+      "recipient": "client",
+      "templateKey": "t4",
+      "contractTypes": [
+        "sla",
+        "lic"
+      ]
+    },
+    {
+      "key": "r6",
+      "active": true,
+      "trigger": "renewal",
+      "days": 30,
+      "recipient": "both",
+      "templateKey": "t4",
+      "contractTypes": [
+        "sla",
+        "lic"
+      ]
+    },
+    {
+      "key": "r7",
+      "active": true,
+      "trigger": "renewal",
+      "days": 14,
+      "recipient": "internal",
+      "templateKey": "t5",
+      "contractTypes": [
+        "sla",
+        "lic"
+      ]
+    },
+    {
+      "key": "r8",
+      "active": true,
+      "trigger": "sign",
+      "days": 7,
+      "recipient": "client",
+      "templateKey": "t6",
+      "contractTypes": []
+    },
+    {
+      "key": "r9",
+      "active": true,
+      "trigger": "sign",
+      "days": 14,
+      "recipient": "internal",
+      "templateKey": "t7",
+      "contractTypes": []
+    },
+    {
+      "key": "r10",
+      "active": true,
+      "trigger": "cheque",
+      "days": 3,
+      "recipient": "internal",
+      "templateKey": "t8",
+      "contractTypes": []
+    }
+  ],
+  "placeholders": [
+    "customer",
+    "contact",
+    "account_manager",
+    "company",
+    "contract_no",
+    "contract",
+    "contract_value",
+    "start_date",
+    "end_date",
+    "installment",
+    "amount",
+    "remaining",
+    "due_date",
+    "days_late",
+    "days_left",
+    "cheque_no",
+    "bank",
+    "cheque_amount",
+    "cheque_date",
+    "sent_date",
+    "days_since_sent"
+  ]
+}

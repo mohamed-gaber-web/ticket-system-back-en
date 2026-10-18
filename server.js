@@ -13,6 +13,7 @@ import { startMeetingReminderCron } from "./src/utils/meetingReminderCron.js";
 import { startLeadInboxCron } from "./src/utils/leadInboxSync.js";
 import { startEmailCampaignCron } from "./src/utils/emailCampaign.js";
 import { startWeeklyTaskDigestCron } from "./src/utils/weeklyTaskDigest.js";
+import { startCollectReminderCron } from "./src/controllers/collect/reminderController.js";
 import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
 import { seedIndustrySectors } from "./src/utils/seedIndustrySectors.js";
 import { seedCountries } from "./src/utils/seedCountries.js";
@@ -189,6 +190,9 @@ const startServer = async () => {
 
       // Weekly task reminder e-mail — Sundays 10:00 Cairo time
       startWeeklyTaskDigestCron();
+
+      // Grow Path Collect reminders — daily 08:00 Cairo, sends only in auto mode
+      startCollectReminderCron();
     });
   } catch (error) {
     console.error("Failed to start server:", error);
