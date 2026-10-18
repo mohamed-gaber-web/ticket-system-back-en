@@ -93,7 +93,10 @@ export const getMeta = async (req, res) => {
 export const listPosts = async (req, res) => {
   try {
     const { view, month } = parseView(req.query, currentMonth());
-    const posts = await loadPosts(buildPostFilter(req.query));
+    const filter = buildPostFilter(req.query);
+    // Month view only lists posts pulled that month — let the index do that work.
+    if (view === "month" && month) filter["snapshots.month"] = month;
+    const posts = await loadPosts(filter);
     const rows = posts.map((p) => postRow(p, view, month)).filter(Boolean);
     res.json({
       success: true,

@@ -129,6 +129,22 @@ export const latestOf = (snapshots) => {
 
 // ── Input cleaning (manual API) ──────────────────────────────────────────────
 
+/** Upper bound for any metric — far above any real post, blocks absurd values. */
+export const MAX_METRIC = 1e13;
+
+/**
+ * A post link: http(s) only. A bare "facebook.com/…" gets https://; anything
+ * else (javascript:, data:, mailto:…) is dropped, so a stored link is always
+ * safe to render as an href.
+ */
+export const safeLink = (v) => {
+  const s = String(v ?? "").trim().slice(0, 1000);
+  if (!s) return "";
+  if (/^https?:\/\/[^\s]+$/i.test(s)) return s;
+  if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(s)) return `https://${s}`;
+  return null;
+};
+
 /** Metrics from a request body: each null/blank or a number ≥ 0; anything else is a 400. */
 export const cleanMetrics = (input = {}) => {
   const out = {};
@@ -139,7 +155,7 @@ export const cleanMetrics = (input = {}) => {
       continue;
     }
     const num = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
-    if (!Number.isFinite(num) || num < 0) throw new InputError(`${k} must be a number of 0 or more`);
+    if (!Number.isFinite(num) || num < 0 || num > MAX_METRIC) throw new InputError(`${k} must be a number of 0 or more`);
     out[k] = num;
   }
   return out;
@@ -181,7 +197,11 @@ export const cleanPostMeta = (body = {}, { partial = false } = {}) => {
   }
   if (!partial || has("category")) out.category = str(body.category, 100);
   if (!partial || has("boosted")) out.boosted = body.boosted === true || body.boosted === "true";
-  if (!partial || has("link")) out.link = str(body.link, 1000);
+  if (!partial || has("link")) {
+    const link = safeLink(body.link);
+    if (link === null) throw new InputError("The post link must start with http:// or https://");
+    out.link = link;
+  }
   if (has("externalId")) out.externalId = str(body.externalId, 200);
   if (!partial || has("notes")) out.notes = str(body.notes, 2000);
   return out;
@@ -212,14 +232,15 @@ export const normExternalId = (s) => norm(s);
 /** Mongo filter from the common query params (§4): platform, type, category, from, to, q. */
 export const buildPostFilter = (q = {}) => {
   const f = {};
+  // Query values are strings; arrays/objects (?platform[$ne]=x) never match a vocabulary entry.
   if (PLATFORMS.includes(q.platform)) f.platform = q.platform;
   if (CONTENT_TYPES.includes(q.type)) f.type = q.type;
   if (typeof q.category === "string" && q.category !== "") f.category = q.category === "—" ? "" : q.category;
   const range = {};
-  if (DATE_RE.test(String(q.from ?? ""))) range.$gte = q.from;
-  if (DATE_RE.test(String(q.to ?? ""))) range.$lte = q.to;
+  if (typeof q.from === "string" && DATE_RE.test(q.from)) range.$gte = q.from;
+  if (typeof q.to === "string" && DATE_RE.test(q.to)) range.$lte = q.to;
   if (Object.keys(range).length) f.publishDate = range;
-  const search = escapeRegex(q.q);
+  const search = typeof q.q === "string" ? escapeRegex(q.q.slice(0, 100)) : "";
   if (search) f.$or = [{ title: { $regex: search, $options: "i" } }, { category: { $regex: search, $options: "i" } }];
   return f;
 };
@@ -227,7 +248,7 @@ export const buildPostFilter = (q = {}) => {
 /** `view` + `month` from a query; month view needs a valid month. */
 export const parseView = (q = {}, fallbackMonth = null) => {
   const view = q.view === "month" ? "month" : "cumulative";
-  const month = MONTH_RE.test(String(q.month ?? "")) ? q.month : fallbackMonth;
+  const month = typeof q.month === "string" && MONTH_RE.test(q.month) ? q.month : fallbackMonth;
   return { view, month };
 };
 
@@ -477,7 +498,7 @@ export const cleanImportTitle = (title, platform, date) => {
 const importNumber = (v) => {
   if (v == null || v === "") return null;
   const num = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(num) && num >= 0 ? num : null;
+  return Number.isFinite(num) && num >= 0 && num <= MAX_METRIC ? num : null;
 };
 
 /** A client-built import row, bounded and typed. */
@@ -489,7 +510,7 @@ export const cleanImportRow = (row = {}, i = 0) => {
   return {
     rowIndex: Number.isInteger(idx) && idx >= 0 ? idx : i,
     title: str(row?.title, 500),
-    link: str(row?.link, 1000),
+    link: safeLink(row?.link) ?? "",
     externalId: str(row?.externalId, 200),
     date: DATE_RE.test(date) ? date : "",
     platformRaw: str(row?.platformRaw, 100),
@@ -612,8 +633,13 @@ export const classifyImport = (posts, rawRows, { month, mode, defaults }) => {
 
 // ── CSV export (§6) ──────────────────────────────────────────────────────────
 
+/**
+ * One CSV cell. Text starting with = + - @ (or tab / CR) is prefixed with a
+ * quote so Excel never runs an imported title as a formula (CSV injection).
+ */
 export const csvCell = (v) => {
-  const s = v == null ? "" : String(v);
+  let s = v == null ? "" : String(v);
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 

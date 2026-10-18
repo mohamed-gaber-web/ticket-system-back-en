@@ -333,3 +333,41 @@ describe("who may write", () => {
     assert.equal(canWriteSocial(override), false);
   });
 });
+
+describe("review fixes: input hardening", () => {
+  it("links: http(s) only, bare domains get https://, scripts are refused", async () => {
+    const { safeLink } = await import("../src/utils/socialLogic.js");
+    assert.equal(safeLink("https://www.facebook.com/p/1"), "https://www.facebook.com/p/1");
+    assert.equal(safeLink("facebook.com/growpath/posts/1"), "https://facebook.com/growpath/posts/1");
+    assert.equal(safeLink(""), "");
+    assert.equal(safeLink("javascript:alert(1)"), null);
+    assert.equal(safeLink("data:text/html,<b>x</b>"), null);
+    assert.throws(() => cleanPostMeta({ link: "javascript:alert(1)" }, { partial: true }), /http/);
+    const { items } = classifyImport([], [row({ title: "x", platformRaw: "x", date: "2026-10-01", link: "javascript:alert(1)", metrics: { reach: 1 } })], opts());
+    assert.equal(items[0].link, "");
+  });
+
+  it("CSV cells that look like formulas are neutralised", async () => {
+    const { csvCell } = await import("../src/utils/socialLogic.js");
+    assert.equal(csvCell("=HYPERLINK(\"http://x\")"), "\"'=HYPERLINK(\"\"http://x\"\")\"");
+    assert.equal(csvCell("+1"), "'+1");
+    assert.equal(csvCell("-2+3"), "'-2+3");
+    assert.equal(csvCell("@SUM(A1)"), "'@SUM(A1)");
+    assert.equal(csvCell("Normal title"), "Normal title");
+    assert.equal(csvCell(-5), "-5");
+    assert.equal(csvCell("12 tips"), "12 tips");
+  });
+
+  it("array/object query params never reach the Mongo filter", async () => {
+    const { parseView } = await import("../src/utils/socialLogic.js");
+    const f = buildPostFilter({ platform: { $ne: "x" }, from: ["2026-01-01"], to: { $gt: "" }, q: ["a"], category: { $ne: "" } });
+    assert.deepEqual(f, {});
+    assert.equal(parseView({ view: "month", month: ["2026-10"] }, "2026-09").month, "2026-09");
+  });
+
+  it("metrics above the cap are refused", () => {
+    assert.throws(() => cleanMetrics({ reach: 1e20 }), /reach/);
+    const { items } = classifyImport([], [row({ title: "x", platformRaw: "x", date: "2026-10-01", metrics: { reach: 1e20, likes: 3 } })], opts());
+    assert.equal(items[0].values.reach, null);
+  });
+});

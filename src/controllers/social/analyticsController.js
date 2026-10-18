@@ -78,7 +78,8 @@ export const getCompare = async (req, res) => {
 export const getBatch = async (req, res) => {
   try {
     const month = req.query.month ? cleanMonth(req.query.month) : currentMonth();
-    const posts = await loadPosts({ ...buildPostFilter(req.query), publishDate: { $lte: `${month}-31` } });
+    // Published by the pull month — ANDed with the user's from/to range, never replacing it.
+    const posts = await loadPosts({ $and: [buildPostFilter(req.query), { publishDate: { $lte: `${month}-31` } }] });
     res.json({ success: true, data: { month, ...batchRows(posts, month) } });
   } catch (error) {
     fail(res, error, "Failed to load the monthly pull");
