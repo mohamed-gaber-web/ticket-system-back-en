@@ -52,6 +52,7 @@ import messageTemplateRoutes from "./messageTemplateRoutes.js";
 import companySettingsRoutes from "./companySettingsRoutes.js";
 import salesAssistantRoutes from "./salesAssistantRoutes.js";
 import marketingRoutes from "./marketingRoutes.js";
+import socialRoutes from "./socialRoutes.js";
 import meRoutes from "./meRoutes.js";
 import proposalRoutes from "./proposalRoutes.js";
 import { guardProposalFiles } from "../controllers/proposalController.js";
@@ -200,6 +201,8 @@ router.use("/", proposalRoutes);
 
 // Marketing: CSP surveys and the email campaign
 router.use("/marketing", marketingRoutes);
+// Marketing › Social Media: Social Pulse (results per post, pulled monthly)
+router.use("/social", socialRoutes);
 
 // The signed-in employee's My Home page
 router.use("/me", meRoutes);

@@ -193,6 +193,13 @@ export const canManageEmployees = (actor) => isManagerOrAdmin(actor) || isHr(act
 export const canManageMarketing = (actor) =>
   isAdmin(actor) || managedFamiliesOf(actor).includes("marketing");
 
+/**
+ * Marketing › Social Pulse: who records results (posts, monthly pulls,
+ * imports). Admins and the marketing roles; anyone else holding the
+ * `marketing` module (an admin override) reads the dashboard only.
+ */
+export const canWriteSocial = (actor) => isAdmin(actor) || familiesOf(actor).includes("marketing");
+
 /** Modules that open other people's data — holding one makes an account admin-managed. */
 export const PRIVILEGED_MODULES = Object.freeze(["admin", "hr", "vault", "collect"]);
 
@@ -286,6 +293,11 @@ export const requireMarketingManager = (req, res, next) =>
   isEmployee(req) && canManageMarketing(req.user)
     ? next()
     : forbid(res, "Marketing manager or administrator access required.");
+
+export const requireSocialWrite = (req, res, next) =>
+  isEmployee(req) && canWriteSocial(req.user)
+    ? next()
+    : forbid(res, "Only the marketing team can change social media results.");
 
 /** Pass when the employee may open ANY of the named modules. */
 export const requireModule = (...modules) => (req, res, next) => {
