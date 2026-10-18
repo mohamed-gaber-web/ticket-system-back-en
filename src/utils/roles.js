@@ -28,6 +28,7 @@ export const ROLES = Object.freeze([
 
 // `vault` (Credentials Vault) is like `hr`: no role opens it by default — admins
 // have every module, anyone else only when an admin ticks it on their record.
+// `collect` (Grow Path Collect — contracts, collections, cheques) works the same way.
 export const MODULES = Object.freeze([
   "tickets",
   "telesales",
@@ -38,6 +39,7 @@ export const MODULES = Object.freeze([
   "marketing",
   "proposals",
   "vault",
+  "collect",
 ]);
 
 /** What each role opens when the admin has not overridden `modules`. */

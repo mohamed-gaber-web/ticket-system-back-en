@@ -39,6 +39,28 @@ const companySchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // Grow Path Collect — the customer's billing and legal identity, printed in
+  // the contract's parties section. Set = the company is on the Collect
+  // customer list (null otherwise). Contact name/email are the fields above.
+  collect: {
+    type: new mongoose.Schema(
+      {
+        country: { type: String, trim: true, maxlength: 100, default: "مصر" },
+        currency: { type: String, enum: ["EGP", "SAR", "USD"], default: "EGP" },
+        accountManager: { type: String, trim: true, maxlength: 200, default: "" },
+        legalForm: { type: String, trim: true, maxlength: 200, default: "" },
+        cr: { type: String, trim: true, maxlength: 100, default: "" },
+        crOffice: { type: String, trim: true, maxlength: 200, default: "" },
+        taxNo: { type: String, trim: true, maxlength: 100, default: "" },
+        address: { type: String, trim: true, maxlength: 500, default: "" },
+        signer: { type: String, trim: true, maxlength: 200, default: "" },
+        signerTitle: { type: String, trim: true, maxlength: 200, default: "" },
+        isDemo: { type: Boolean, default: false },
+      },
+      { _id: false }
+    ),
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

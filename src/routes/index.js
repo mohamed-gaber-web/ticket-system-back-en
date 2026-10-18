@@ -56,6 +56,7 @@ import meRoutes from "./meRoutes.js";
 import proposalRoutes from "./proposalRoutes.js";
 import { guardProposalFiles } from "../controllers/proposalController.js";
 import vaultRoutes from "./vaultRoutes.js";
+import collectRoutes from "./collectRoutes.js";
 import { guardVaultFiles } from "../controllers/vault/attachmentController.js";
 
 const router = express.Router();
@@ -205,6 +206,9 @@ router.use("/me", meRoutes);
 
 // Credentials Vault: encrypted client/company logins, audited sends and reveals
 router.use("/vault", vaultRoutes);
+
+// Grow Path Collect: contracts, collections, cheques, signatures and reminders
+router.use("/collect", collectRoutes);
 // HR documents live in the same GridFS bucket but are only ever served through
 // /consultants/:id/documents — the generic file routes refuse them.
 router.all(["/files/:id", "/files/:id/info"], guardHrFiles);
