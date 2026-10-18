@@ -347,23 +347,32 @@ export const renewContract = async (req, res) => {
     });
     const uplift = req.body?.upliftPct ?? def.upliftPct;
     const value = renewedValue(old.value, uplift);
-    const no = await allocateNo("");
-    const today = todayOf(await getSettings());
-    const draft = { ...fields, value, deliveryDate: null };
-    const doc = await CollectContract.create({
-      ...draft,
-      no,
-      typeKey: type.key,
-      status: "active",
-      renewedFrom: old._id,
-      installments: generateInstallments(draft, type),
-      document: old.document ? { ...old.document, version: 1, copiedFrom: null, updatedAt: new Date() } : null,
-      signature: { status: "draft", log: [{ date: today, text: "عقد تجديد — بانتظار الإرسال للعميل", by: req.user._id }] },
-      createdBy: req.user._id,
-      updatedBy: req.user._id,
-    });
-    await CollectContract.updateOne({ _id: old._id }, { $set: { status: "renewed", updatedBy: req.user._id } });
-    await sendDetail(res, doc._id, 201, `تم إنشاء عقد التجديد ${no}`);
+    // Claim the renewal first (active → renewed, atomically) so two clicks or
+    // two users can never create two renewal contracts.
+    const claimed = await CollectContract.updateOne({ _id: old._id, status: "active" }, { $set: { status: "renewed", updatedBy: req.user._id } });
+    if (!claimed.modifiedCount) throw new InputError("تم تجديد هذا العقد بالفعل أو تغيّرت حالته");
+    let doc;
+    try {
+      const no = await allocateNo("");
+      const today = todayOf(await getSettings());
+      const draft = { ...fields, value, deliveryDate: null };
+      doc = await CollectContract.create({
+        ...draft,
+        no,
+        typeKey: type.key,
+        status: "active",
+        renewedFrom: old._id,
+        installments: generateInstallments(draft, type),
+        document: old.document ? { ...old.document, version: 1, copiedFrom: null, updatedAt: new Date() } : null,
+        signature: { status: "draft", log: [{ date: today, text: "عقد تجديد — بانتظار الإرسال للعميل", by: req.user._id }] },
+        createdBy: req.user._id,
+        updatedBy: req.user._id,
+      });
+    } catch (error) {
+      await CollectContract.updateOne({ _id: old._id, status: "renewed" }, { $set: { status: "active" } });
+      throw error;
+    }
+    await sendDetail(res, doc._id, 201, `تم إنشاء عقد التجديد ${doc.no}`);
   } catch (error) {
     fail(res, error, "تعذر تجديد العقد");
   }

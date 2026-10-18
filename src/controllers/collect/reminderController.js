@@ -10,13 +10,13 @@ import { CollectEmailTemplate, CollectReminderLog, CollectReminderRule, fail, is
 // each mail and presses "تم الإرسال". Auto mode: a daily job (08:00 Cairo)
 // sends the outbox through the app's mailer and logs each result.
 
-const buildFor = async (ctx) => {
-  const [rules, templates, logs] = await Promise.all([
-    CollectReminderRule.find().lean(),
-    CollectEmailTemplate.find().lean(),
-    CollectReminderLog.find().select("dedupeKey").lean(),
-  ]);
-  return buildMails({
+/**
+ * The outbox and upcoming mails for a loaded context. Mails are built first and
+ * only THEIR dedupe keys are looked up in the log (the log only ever grows).
+ */
+export const buildFor = async (ctx) => {
+  const [rules, templates] = await Promise.all([CollectReminderRule.find().lean(), CollectEmailTemplate.find().lean()]);
+  const args = {
     rules,
     templatesByKey: new Map(templates.map((t) => [t.key, t])),
     contracts: ctx.contracts,
@@ -24,9 +24,14 @@ const buildFor = async (ctx) => {
     cheques: ctx.cheques,
     customersById: ctx.customersById,
     settings: ctx.settings,
-    sentKeys: new Set(logs.map((l) => l.dedupeKey)),
     today: ctx.today,
-  });
+  };
+  const all = buildMails({ ...args, sentKeys: new Set() });
+  const keys = [...new Set([...all.outbox, ...all.upcoming].map((m) => m.dedupeKey))];
+  if (!keys.length) return all;
+  const sent = new Set((await CollectReminderLog.find({ dedupeKey: { $in: keys } }).select("dedupeKey").lean()).map((l) => l.dedupeKey));
+  if (!sent.size) return all;
+  return buildMails({ ...args, sentKeys: sent });
 };
 
 // GET /collect/reminders/outbox

@@ -5,7 +5,7 @@ import { escapeRegex } from "../../utils/escapeRegex.js";
 import { cleanCustomer, cleanRule, cleanSettings, cleanTemplate, cleanType, newTypeKey } from "../../utils/collect/rules.js";
 import { addDays } from "../../utils/collect/dates.js";
 import { isPaid, lateDays, needsGuarantee } from "../../utils/collect/calc.js";
-import { buildMails } from "../../utils/collect/reminders.js";
+import { buildFor } from "./reminderController.js";
 import {
   CollectContract,
   CollectContractType,
@@ -34,7 +34,7 @@ const settingsView = (s) => ({ ...s, _id: undefined, __v: undefined, smtpConfigu
 // GET /collect/settings
 export const getCollectSettings = async (_req, res) => {
   try {
-    res.json({ success: true, data: settingsView(await getSettings()) });
+    res.json({ success: true, data: settingsView(await getSettings({ withImages: true })) });
   } catch (error) {
     fail(res, error, "تعذر تحميل الإعدادات");
   }
@@ -93,22 +93,7 @@ export const computeBadges = async (ctx) => {
     (q) => q.kind === "payment" && q.status === "held" && q.dueDate && q.dueDate <= addDays(today, 7)
   ).length;
   const missingGuarantee = contracts.filter((c) => needsGuarantee(c, typesByKey.get(c.typeKey), cheques)).length;
-  const [rules, templates, logs] = await Promise.all([
-    CollectReminderRule.find().lean(),
-    CollectEmailTemplate.find().lean(),
-    CollectReminderLog.find().select("dedupeKey").lean(),
-  ]);
-  const { outbox } = buildMails({
-    rules,
-    templatesByKey: new Map(templates.map((t) => [t.key, t])),
-    contracts,
-    typesByKey,
-    cheques,
-    customersById: ctx.customersById,
-    settings: ctx.settings,
-    sentKeys: new Set(logs.map((l) => l.dedupeKey)),
-    today,
-  });
+  const { outbox } = await buildFor(ctx);
   return {
     collection: overdueInst,
     signatures: followUps + returned + payDue + missingGuarantee,
@@ -210,7 +195,13 @@ export const listCustomers = async (req, res) => {
       CollectContract.aggregate([{ $group: { _id: "$customer", n: { $sum: 1 } } }]),
     ]);
     const used = new Map(usage.map((u) => [String(u._id), u.n]));
-    res.json({ success: true, data: companies.map((c) => ({ ...customerView(c), contractCount: used.get(String(c._id)) ?? 0 })) });
+    // Companies outside Collect (the editor's picker) expose only their name:
+    // the contacts of every ticketing customer are not this module's business.
+    const view = (c) =>
+      c.collect || used.has(String(c._id))
+        ? { ...customerView(c), contractCount: used.get(String(c._id)) ?? 0 }
+        : { id: String(c._id), name: c.name, currency: "EGP", inCollect: false, contractCount: 0 };
+    res.json({ success: true, data: companies.map(view) });
   } catch (error) {
     fail(res, error, "تعذر تحميل العملاء");
   }
@@ -227,8 +218,9 @@ export const createCustomer = async (req, res) => {
     if (existing?.collect) throw new InputError("هذا العميل موجود بالفعل في قائمة العملاء");
     const company = existing ?? new Company({ name: data.name });
     company.collect = data.collect;
-    if (data.contactName) company.contactName = data.contactName;
-    if (data.contactEmail) company.contactEmail = data.contactEmail;
+    // An existing ticketing company keeps its contact details; only blanks are filled.
+    if (data.contactName && !company.contactName) company.contactName = data.contactName;
+    if (data.contactEmail && !company.contactEmail) company.contactEmail = data.contactEmail;
     await company.save();
     res.status(201).json({ success: true, data: customerView(company.toObject()) });
   } catch (error) {
@@ -241,8 +233,11 @@ export const updateCustomer = async (req, res) => {
     if (!isObjectId(req.params.id)) return notFound(res);
     const data = cleanCustomer(req.body);
     const company = await Company.findById(req.params.id);
-    if (!company) return notFound(res);
+    // Only companies on the Collect list (or holding a contract) are this module's to edit.
+    if (!company || (!company.collect && !(await CollectContract.exists({ customer: company._id })))) return notFound(res);
     if (data.name !== company.name) {
+      // The name is the ticketing company's identity (ticket numbers, the vault…).
+      if (!isAdmin(req.user)) throw new InputError("تغيير اسم الشركة متاح للمدير فقط");
       const clash = await Company.exists({ _id: { $ne: company._id }, name: { $regex: `^${escapeRegex(data.name)}$`, $options: "i" } });
       if (clash) throw new InputError("يوجد عميل آخر بنفس الاسم");
       company.name = data.name;

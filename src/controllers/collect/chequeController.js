@@ -58,12 +58,16 @@ export const listCheques = async (_req, res) => {
 
 const validateRefs = async (data) => {
   if (!isObjectId(data.contract)) throw new InputError("العقد غير موجود");
-  const c = await CollectContract.findById(data.contract).select("customer installments._id").lean();
+  const c = await CollectContract.findById(data.contract).select("customer currency installments._id").lean();
   if (!c) throw new InputError("العقد غير موجود");
   if (data.installmentId && !c.installments.some((i) => String(i._id) === data.installmentId)) {
     throw new InputError("الدفعة المختارة لا تتبع هذا العقد");
   }
   if (data.kind === "guarantee") data.installmentId = null;
+  // Clearing posts the cheque amount on the installment: both must be in the contract's currency.
+  if (data.installmentId && data.currency !== c.currency) {
+    throw new InputError(`عملة الشيك لازم تكون ${c.currency} (عملة العقد) لربطه بدفعة`);
+  }
   return c;
 };
 

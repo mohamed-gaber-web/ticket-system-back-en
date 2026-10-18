@@ -52,8 +52,15 @@ export const defaultClauses = () =>
     .map((c) => ({ title: c.title, body: c.body, appliesTo: c.appliesTo === "ALL" ? ["ALL"] : c.appliesTo }));
 
 /** The singleton, created with the defaults on first read. */
-export const getSettings = async () => {
-  const found = await CollectSettings.findOne({ key: "collect" }).lean();
+/**
+ * The settings singleton. The letterhead images (data URIs up to ~2 MB each) are
+ * left out unless `withImages` — only the settings screen and the export need
+ * them, and almost every request reads the settings.
+ */
+export const getSettings = async ({ withImages = false } = {}) => {
+  const query = CollectSettings.findOne({ key: "collect" });
+  if (!withImages) query.select("-document.logo -document.mark");
+  const found = await query.lean();
   if (found) return found;
   try {
     return (await CollectSettings.create(defaultSettingsDoc())).toObject();
@@ -109,19 +116,23 @@ export const customerView = (c) =>
       }
     : null;
 
-/** Everything the screens aggregate over, loaded once per request. */
+/**
+ * Everything the screens aggregate over, loaded once per request. With a
+ * `contractFilter`, only the cheques of those contracts are loaded; customers
+ * are always just the companies the loaded contracts belong to.
+ */
 export const loadContext = async ({ contractFilter = {} } = {}) => {
   await ensureSeeded();
-  const [settings, types, contracts, cheques] = await Promise.all([
+  const filtered = Object.keys(contractFilter).length > 0;
+  const [settings, types, contracts, allCheques] = await Promise.all([
     getSettings(),
     CollectContractType.find().sort({ order: 1, createdAt: 1 }).lean(),
     CollectContract.find(contractFilter).lean(),
-    CollectCheque.find().lean(),
+    filtered ? null : CollectCheque.find().lean(),
   ]);
+  const cheques = allCheques ?? (await CollectCheque.find({ contract: { $in: contracts.map((c) => c._id) } }).lean());
   const ids = [...new Set(contracts.map((c) => String(c.customer)))];
-  const companies = await Company.find({ $or: [{ _id: { $in: ids } }, { collect: { $ne: null } }] })
-    .select(CUSTOMER_FIELDS)
-    .lean();
+  const companies = ids.length ? await Company.find({ _id: { $in: ids } }).select(CUSTOMER_FIELDS).lean() : [];
   const customersById = new Map(companies.map((c) => [String(c._id), c]));
   const typesByKey = new Map(types.map((t) => [t.key, t]));
   return { settings, today: todayOf(settings), types, typesByKey, contracts, cheques, customersById };

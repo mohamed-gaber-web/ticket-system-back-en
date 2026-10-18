@@ -1,7 +1,18 @@
 import { InputError } from "../../utils/inputError.js";
-import { addDays } from "../../utils/collect/dates.js";
+import { addDays, isDate } from "../../utils/collect/dates.js";
 import { generateInstallments } from "../../utils/collect/calc.js";
-import { cleanContract, cleanRule, cleanSettings, cleanTemplate, cleanType, formatContractNo } from "../../utils/collect/rules.js";
+import {
+  cleanContract,
+  cleanCustomer,
+  cleanDocument,
+  cleanInstallments,
+  cleanRule,
+  cleanSettings,
+  cleanTemplate,
+  cleanType,
+  formatContractNo,
+} from "../../utils/collect/rules.js";
+import { SIGNATURE_STATUSES } from "../../models/CollectContract.js";
 import {
   CollectCheque,
   CollectContract,
@@ -26,11 +37,46 @@ import {
 
 const strip = ({ _id, __v, createdAt, updatedAt, ...rest }) => rest;
 
+const MAX_IMPORT_CONTRACTS = 5000;
+const isObj = (v) => v != null && typeof v === "object" && !Array.isArray(v);
+const dateOr = (v, fallback = null) => (isDate(v) ? v : fallback);
+
+/** Installments (with payments), the clause copy and the signature of an imported contract — cleaned. */
+const importedContractParts = (c, i) => {
+  const label = `العقد ${i + 1}`;
+  const list = cleanInstallments(Array.isArray(c.installments) ? c.installments : []) ?? [];
+  const rawInst = Array.isArray(c.installments) ? c.installments : [];
+  const installments = list.map(({ _id, ...inst }, k) => ({
+    ...inst,
+    payments: (Array.isArray(rawInst[k]?.payments) ? rawInst[k].payments : []).slice(0, 500).map((p) => {
+      const amount = Number(p?.amount);
+      if (!isDate(p?.date) || !Number.isFinite(amount) || amount < 0) throw new InputError(`${label}: تحصيل غير صحيح`);
+      return { date: p.date, amount, method: String(p.method ?? "").trim().slice(0, 100) || "تحويل بنكي" };
+    }),
+  }));
+  const document = isObj(c.document)
+    ? { ...cleanDocument(c.document), version: Math.max(1, Math.round(Number(c.document.version) || 1)), copiedFrom: null, updatedAt: new Date() }
+    : null;
+  const sig = isObj(c.signature) ? c.signature : {};
+  const signature = {
+    status: SIGNATURE_STATUSES.includes(sig.status) ? sig.status : "original",
+    sentAt: dateOr(sig.sentAt),
+    signedAt: dateOr(sig.signedAt),
+    originalAt: dateOr(sig.originalAt),
+    followUpDate: dateOr(sig.followUpDate),
+    log: (Array.isArray(sig.log) ? sig.log : [])
+      .filter(isObj)
+      .slice(-200)
+      .map((l) => ({ date: dateOr(l.date, ""), text: String(l.text ?? "").slice(0, 2000) })),
+  };
+  return { installments, document, signature };
+};
+
 // GET /collect/export
 export const exportData = async (_req, res) => {
   try {
     const [settings, types, templates, rules, companies, contracts, cheques] = await Promise.all([
-      getSettings(),
+      getSettings({ withImages: true }),
       CollectContractType.find().lean(),
       CollectEmailTemplate.find().lean(),
       CollectReminderRule.find().lean(),
@@ -98,13 +144,21 @@ export const importData = async (req, res) => {
     const templates = (d.emailTemplates ?? []).map((t) => ({ key: String(t.key ?? ""), ...cleanTemplate(t) }));
     const rules = (d.reminderRules ?? []).map((r) => ({ key: String(r.key ?? ""), ...cleanRule(r) }));
     const settings = d.settings ? cleanSettings(d.settings) : null;
-    const customers = (d.customers ?? []).map((c) => ({ name: String(c.name ?? "").trim(), raw: c })).filter((c) => c.name);
+    if (d.contracts.length > MAX_IMPORT_CONTRACTS) throw new InputError(`الملف يحتوي على أكثر من ${MAX_IMPORT_CONTRACTS} عقد`);
+    // Every value is cleaned BEFORE anything is deleted, so a bad file never
+    // leaves the module half-imported. Nothing is stored as-is from the file.
+    const customers = (Array.isArray(d.customers) ? d.customers : [])
+      .filter(isObj)
+      .map((c) => cleanCustomer(c))
+      .map((c) => ({ name: c.name, data: c }));
     const contracts = d.contracts.map((c, i) => {
+      if (!isObj(c)) throw new InputError(`العقد ${i + 1}: بيانات غير صحيحة`);
       if (!typeKeys.has(c.typeKey)) throw new InputError(`العقد ${i + 1}: نوع غير معروف`);
-      if (!c.customer) throw new InputError(`العقد ${i + 1}: بدون عميل`);
+      const customer = typeof c.customer === "string" ? c.customer.trim().slice(0, 200) : "";
+      if (!customer) throw new InputError(`العقد ${i + 1}: بدون عميل`);
       const fields = cleanContract({ ...c, customer: "x", type: "x" });
       if (!fields.no) throw new InputError(`العقد ${i + 1}: بدون رقم`);
-      return { raw: c, fields };
+      return { raw: c, fields, customer, ...importedContractParts(c, i) };
     });
     const nos = contracts.map(({ fields }) => fields.no);
     const dup = nos.find((no, i) => nos.indexOf(no) !== i);
@@ -127,49 +181,37 @@ export const importData = async (req, res) => {
     await Promise.all([CollectContract.deleteMany({}), CollectCheque.deleteMany({}), CollectReminderLog.deleteMany({})]);
 
     const companyId = new Map();
-    const ensureCompany = async (name, raw = {}) => {
+    const ensureCompany = async (name, data = null) => {
       if (companyId.has(name)) return companyId.get(name);
       let c = await Company.findOne({ name });
       if (!c) c = new Company({ name });
-      c.collect = {
-        country: raw.country || c.collect?.country || "مصر",
-        currency: ["EGP", "SAR", "USD"].includes(raw.currency) ? raw.currency : c.collect?.currency || "EGP",
-        accountManager: raw.accountManager ?? "",
-        legalForm: raw.legalForm ?? "",
-        cr: raw.cr ?? "",
-        crOffice: raw.crOffice ?? "",
-        taxNo: raw.taxNo ?? "",
-        address: raw.address ?? "",
-        signer: raw.signer ?? "",
-        signerTitle: raw.signerTitle ?? "",
-      };
-      if (raw.contactName) c.contactName = raw.contactName;
-      if (raw.email) c.contactEmail = raw.email;
+      if (data) {
+        c.collect = data.collect;
+        if (data.contactName && !c.contactName) c.contactName = data.contactName;
+        if (data.contactEmail && !c.contactEmail) c.contactEmail = data.contactEmail;
+      } else if (!c.collect) {
+        c.collect = { currency: "EGP" };
+      }
       await c.save();
       companyId.set(name, c._id);
       return c._id;
     };
-    for (const c of customers) await ensureCompany(c.name, c.raw);
+    for (const c of customers) await ensureCompany(c.name, c.data);
 
     const typeIds = new Map((await CollectContractType.find().select("key").lean()).map((t) => [t.key, t._id]));
     const idByNo = new Map();
     const created = [];
-    for (const { raw, fields } of contracts) {
+    for (const { raw, fields, customer, installments, document, signature } of contracts) {
       const doc = await CollectContract.create({
         ...fields,
         no: fields.no,
-        customer: await ensureCompany(String(raw.customer)),
+        customer: await ensureCompany(customer),
         type: typeIds.get(raw.typeKey),
         typeKey: raw.typeKey,
         status: ["active", "closed", "renewed", "cancelled"].includes(raw.status) ? raw.status : "active",
-        installments: (raw.installments ?? []).map((i) => ({
-          name: i.name,
-          dueDate: i.dueDate,
-          amount: Number(i.amount) || 0,
-          payments: (i.payments ?? []).map((p) => ({ date: p.date, amount: Number(p.amount) || 0, method: p.method || "تحويل بنكي" })),
-        })),
-        document: raw.document ?? null,
-        signature: raw.signature ?? { status: "original", log: [] },
+        installments,
+        document,
+        signature,
         createdBy: req.user._id,
       });
       idByNo.set(doc.no, doc);
@@ -179,24 +221,27 @@ export const importData = async (req, res) => {
       if (raw.renewedFrom && idByNo.has(raw.renewedFrom)) await CollectContract.updateOne({ _id: doc._id }, { $set: { renewedFrom: idByNo.get(raw.renewedFrom)._id } });
     }
     let chequeCount = 0;
-    for (const q of d.cheques ?? []) {
-      const c = idByNo.get(q.contract);
+    for (const q of (Array.isArray(d.cheques) ? d.cheques : []).filter(isObj)) {
+      const c = idByNo.get(String(q.contract ?? ""));
       if (!c) continue;
       const inst = Number.isInteger(q.installmentIndex) && q.installmentIndex >= 0 ? c.installments[q.installmentIndex] : null;
       await CollectCheque.create({
         contract: c._id,
         customer: c.customer,
         kind: q.kind === "guarantee" ? "guarantee" : "payment",
-        number: String(q.number ?? "—"),
-        bank: q.bank ?? "",
-        amount: Number(q.amount) || 0,
+        number: String(q.number ?? "—").slice(0, 60) || "—",
+        bank: String(q.bank ?? "").slice(0, 120),
+        amount: Math.max(0, Number(q.amount) || 0),
         currency: ["EGP", "SAR", "USD"].includes(q.currency) ? q.currency : c.currency,
-        dueDate: q.dueDate ?? null,
-        receivedDate: q.receivedDate ?? null,
+        dueDate: dateOr(q.dueDate),
+        receivedDate: dateOr(q.receivedDate),
         status: ["held", "deposited", "cleared", "returned", "released"].includes(q.status) ? q.status : "held",
         installmentId: inst?._id ?? null,
-        notes: q.notes ?? "",
-        log: Array.isArray(q.log) ? q.log.map((l) => ({ date: l.date, status: l.status })) : [],
+        notes: String(q.notes ?? "").slice(0, 2000),
+        log: (Array.isArray(q.log) ? q.log : [])
+          .filter(isObj)
+          .slice(-100)
+          .map((l) => ({ date: dateOr(l.date, ""), status: String(l.status ?? "").slice(0, 20) })),
       });
       chequeCount++;
     }
