@@ -7,7 +7,7 @@ import { buildMails } from "../../utils/collect/reminders.js";
 import { CollectEmailTemplate, CollectReminderLog, CollectReminderRule, fail, isObjectId, loadContext } from "./shared.js";
 
 // Grow Path Collect — the reminder outbox (§6). Manual mode: the user sends
-// each mail and presses "تم الإرسال". Auto mode: a daily job (08:00 Cairo)
+// each mail and presses "Mark as sent". Auto mode: a daily job (08:00 Cairo)
 // sends the outbox through the app's mailer and logs each result.
 
 /**
@@ -52,7 +52,7 @@ export const getOutbox = async (_req, res) => {
       },
     });
   } catch (error) {
-    fail(res, error, "تعذر تحميل التذكيرات");
+    fail(res, error, "Could not load the reminders");
   }
 };
 
@@ -74,7 +74,7 @@ const logRow = (m, extra) => ({
 export const markSent = async (req, res) => {
   try {
     const keys = new Set((Array.isArray(req.body?.dedupeKeys) ? req.body.dedupeKeys : []).map(String));
-    if (!keys.size) throw new InputError("لا توجد رسائل محددة");
+    if (!keys.size) throw new InputError("No messages selected");
     const ctx = await loadContext();
     const { outbox } = await buildFor(ctx);
     const picked = outbox.filter((m) => keys.has(m.dedupeKey));
@@ -90,9 +90,9 @@ export const markSent = async (req, res) => {
         { ordered: false }
       );
     }
-    res.json({ success: true, data: { marked: picked.length }, message: `تم تسجيل ${picked.length} رسالة كمُرسلة` });
+    res.json({ success: true, data: { marked: picked.length }, message: `${picked.length} message(s) marked as sent` });
   } catch (error) {
-    fail(res, error, "تعذر تسجيل الإرسال");
+    fail(res, error, "Could not record the send");
   }
 };
 
@@ -111,11 +111,11 @@ export const getLog = async (_req, res) => {
         channel: l.channel,
         error: l.error,
         contractId: l.contract ? String(l.contract) : null,
-        by: l.sentBy ? `${l.sentBy.firstName ?? ""} ${l.sentBy.lastName ?? ""}`.trim() : "النظام",
+        by: l.sentBy ? `${l.sentBy.firstName ?? ""} ${l.sentBy.lastName ?? ""}`.trim() : "System",
       })),
     });
   } catch (error) {
-    fail(res, error, "تعذر تحميل سجل الإرسال");
+    fail(res, error, "Could not load the send log");
   }
 };
 
@@ -147,7 +147,7 @@ export const runAutoReminders = async ({ force = false } = {}) => {
     const r = await sendCustomEmail({
       to: m.to,
       subject: m.subject,
-      bodyHtml: `<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;line-height:1.7">${escapeHtml(m.body).replace(/\n/g, "<br>")}</div>`,
+      bodyHtml: `<div dir="ltr" style="font-family:Segoe UI,Arial,Helvetica,sans-serif;line-height:1.6">${escapeHtml(m.body).replace(/\n/g, "<br>")}</div>`,
       from: ctx.settings.senderEmail || null,
     });
     if (r.success) sent++;

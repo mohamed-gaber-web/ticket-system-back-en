@@ -4,11 +4,11 @@ import { CHEQUE_STATUSES, chequeClearingPayment, toEGP } from "../../utils/colle
 import { cleanCheque } from "../../utils/collect/rules.js";
 import { CollectCheque, CollectContract, chequeView, contractSummary, fail, getSettings, isObjectId, loadContext, notFound, todayOf } from "./shared.js";
 
-// Grow Path Collect — cheques (guarantee / payment) and the "التوقيع والشيكات"
+// Grow Path Collect — cheques (guarantee / payment) and the "Signatures & cheques"
 // screen (§3.4, §8, §9.7). Clearing a payment cheque linked to an installment
 // posts a payment once (chequeClearingPayment).
 
-const NOT_FOUND = "الشيك غير موجود";
+const NOT_FOUND = "Cheque not found";
 
 /** Post the clearing payment of a payment cheque, at most once. */
 const postClearingPayment = async (cheque, userId, today) => {
@@ -52,21 +52,21 @@ export const listCheques = async (_req, res) => {
       .sort((a, b) => String(a.dueDate ?? "9999").localeCompare(String(b.dueDate ?? "9999")));
     res.json({ success: true, data: rows, today: ctx.today });
   } catch (error) {
-    fail(res, error, "تعذر تحميل الشيكات");
+    fail(res, error, "Could not load the cheques");
   }
 };
 
 const validateRefs = async (data) => {
-  if (!isObjectId(data.contract)) throw new InputError("العقد غير موجود");
+  if (!isObjectId(data.contract)) throw new InputError("Contract not found");
   const c = await CollectContract.findById(data.contract).select("customer currency installments._id").lean();
-  if (!c) throw new InputError("العقد غير موجود");
+  if (!c) throw new InputError("Contract not found");
   if (data.installmentId && !c.installments.some((i) => String(i._id) === data.installmentId)) {
-    throw new InputError("الدفعة المختارة لا تتبع هذا العقد");
+    throw new InputError("The chosen installment doesn't belong to this contract");
   }
   if (data.kind === "guarantee") data.installmentId = null;
   // Clearing posts the cheque amount on the installment: both must be in the contract's currency.
   if (data.installmentId && data.currency !== c.currency) {
-    throw new InputError(`عملة الشيك لازم تكون ${c.currency} (عملة العقد) لربطه بدفعة`);
+    throw new InputError(`To link it to an installment, the cheque must be in ${c.currency} (the contract currency)`);
   }
   return c;
 };
@@ -80,15 +80,15 @@ export const createCheque = async (req, res) => {
     const q = await CollectCheque.create({ ...data, customer: c.customer, log: [{ date: today, status: data.status, by: req.user._id }] });
     let posted = null;
     if (q.status === "cleared") posted = await postClearingPayment(q.toObject(), req.user._id, today);
-    res.status(201).json({ success: true, data: await oneView(q._id), message: posted ? "تم تسجيل الشيك وتحصيل قيمته" : "تم تسجيل الشيك" });
+    res.status(201).json({ success: true, data: await oneView(q._id), message: posted ? "Cheque recorded and collected" : "Cheque recorded" });
   } catch (error) {
-    fail(res, error, "تعذر حفظ الشيك");
+    fail(res, error, "Could not save the cheque");
   }
 };
 
 /** Apply a status change (log + clearing payment). Returns { posted, returned }. */
 const changeStatus = async (q, status, userId, today) => {
-  if (!CHEQUE_STATUSES.includes(status)) throw new InputError("حالة غير صحيحة");
+  if (!CHEQUE_STATUSES.includes(status)) throw new InputError("Invalid status");
   if (q.status === status) return { posted: null };
   const from = q.status;
   q.status = status;
@@ -111,9 +111,9 @@ export const updateCheque = async (req, res) => {
     Object.assign(q, fields, { customer: c.customer });
     await q.save();
     const r = await changeStatus(q, status, req.user._id, today);
-    res.json({ success: true, data: await oneView(q._id), message: r.posted ? "تم حفظ الشيك وتحصيل قيمته" : "تم حفظ الشيك" });
+    res.json({ success: true, data: await oneView(q._id), message: r.posted ? "Cheque saved and collected" : "Cheque saved" });
   } catch (error) {
-    fail(res, error, "تعذر حفظ الشيك");
+    fail(res, error, "Could not save the cheque");
   }
 };
 
@@ -126,13 +126,13 @@ export const setChequeStatus = async (req, res) => {
     const today = todayOf(await getSettings());
     const r = await changeStatus(q, req.body?.status, req.user._id, today);
     const message = r.posted
-      ? `تم تحصيل ${Math.round(r.posted.amount).toLocaleString("en")} على الدفعة المرتبطة`
+      ? `${Math.round(r.posted.amount).toLocaleString("en")} collected on the linked installment`
       : r.returned
-        ? "تم تسجيل الشيك كمرتجع"
-        : "تم تحديث حالة الشيك";
+        ? "Cheque marked as returned"
+        : "Cheque status updated";
     res.json({ success: true, data: await oneView(q._id), message, posted: !!r.posted, returned: !!r.returned });
   } catch (error) {
-    fail(res, error, "تعذر تحديث حالة الشيك");
+    fail(res, error, "Could not update the cheque status");
   }
 };
 
@@ -142,9 +142,9 @@ export const deleteCheque = async (req, res) => {
     if (!isObjectId(req.params.id)) return notFound(res, NOT_FOUND);
     const q = await CollectCheque.findByIdAndDelete(req.params.id).lean();
     if (!q) return notFound(res, NOT_FOUND);
-    res.json({ success: true, message: "تم حذف الشيك" });
+    res.json({ success: true, message: "Cheque deleted" });
   } catch (error) {
-    fail(res, error, "تعذر حذف الشيك");
+    fail(res, error, "Could not delete the cheque");
   }
 };
 
@@ -191,6 +191,6 @@ export const getSignatures = async (_req, res) => {
       },
     });
   } catch (error) {
-    fail(res, error, "تعذر تحميل التوقيعات والشيكات");
+    fail(res, error, "Could not load signatures and cheques");
   }
 };

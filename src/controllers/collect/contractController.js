@@ -46,8 +46,8 @@ import {
 // per-contract clause copy and signature tracking (GROW_PATH_COLLECT_SPEC.md
 // §2.4, §3, §7.4, §8, §9.3–9.5).
 
-const NOT_FOUND = "العقد غير موجود";
-const HAS_PAYMENTS = "يوجد تحصيلات مسجلة";
+const NOT_FOUND = "Contract not found";
+const HAS_PAYMENTS = "Payments have been recorded";
 
 /**
  * Load a contract, apply `mutate(doc)` and save. A concurrent save fails with a
@@ -130,7 +130,7 @@ export const listContracts = async (req, res) => {
       today: ctx.today,
     });
   } catch (error) {
-    fail(res, error, "تعذر تحميل العقود");
+    fail(res, error, "Could not load the contracts");
   }
 };
 
@@ -140,7 +140,7 @@ export const nextContractNo = async (_req, res) => {
     const s = await getSettings();
     res.json({ success: true, data: { no: formatContractNo(s.contractPrefix, s.nextContractNo) } });
   } catch (error) {
-    fail(res, error, "تعذر تحميل رقم العقد");
+    fail(res, error, "Could not load the contract number");
   }
 };
 
@@ -150,7 +150,7 @@ export const getContract = async (req, res) => {
     if (!isObjectId(req.params.id)) return notFound(res, NOT_FOUND);
     await sendDetail(res, req.params.id);
   } catch (error) {
-    fail(res, error, "تعذر تحميل العقد");
+    fail(res, error, "Could not load the contract");
   }
 };
 
@@ -159,7 +159,7 @@ const allocateNo = async (requested) => {
   const s = await getSettings();
   const preview = formatContractNo(s.contractPrefix, s.nextContractNo);
   if (requested && requested !== preview) {
-    if (await CollectContract.exists({ no: requested })) throw new InputError(`رقم العقد ${requested} مستخدم بالفعل`);
+    if (await CollectContract.exists({ no: requested })) throw new InputError(`Contract number ${requested} is already in use`);
     return requested;
   }
   for (let i = 0; i < 20; i++) {
@@ -167,14 +167,14 @@ const allocateNo = async (requested) => {
     const no = formatContractNo(before.contractPrefix, before.nextContractNo);
     if (!(await CollectContract.exists({ no }))) return no;
   }
-  throw new InputError("تعذر تخصيص رقم عقد جديد");
+  throw new InputError("Could not allocate a new contract number");
 };
 
 const resolveRefs = async (data) => {
-  if (!isObjectId(data.customer) || !(await Company.exists({ _id: data.customer }))) throw new InputError("العميل غير موجود");
-  if (!isObjectId(data.type)) throw new InputError("نوع العقد غير موجود");
+  if (!isObjectId(data.customer) || !(await Company.exists({ _id: data.customer }))) throw new InputError("Customer not found");
+  if (!isObjectId(data.type)) throw new InputError("Contract type not found");
   const type = await CollectContractType.findById(data.type).lean();
-  if (!type) throw new InputError("نوع العقد غير موجود");
+  if (!type) throw new InputError("Contract type not found");
   return type;
 };
 
@@ -194,15 +194,15 @@ export const createContract = async (req, res) => {
       no,
       typeKey: type.key,
       installments,
-      signature: { status: "draft", log: [{ date: today, text: "تم إنشاء العقد — بانتظار الإرسال للعميل", by: req.user._id }] },
+      signature: { status: "draft", log: [{ date: today, text: "Contract created — waiting to be sent to the customer", by: req.user._id }] },
       createdBy: req.user._id,
       updatedBy: req.user._id,
     });
     // A customer picked from all companies joins the Collect list.
     await Company.updateOne({ _id: data.customer, collect: null }, { $set: { collect: { currency: data.currency } } });
-    await sendDetail(res, doc._id, 201, `تم إنشاء العقد ${no}`);
+    await sendDetail(res, doc._id, 201, `Contract ${no} created`);
   } catch (error) {
-    fail(res, error, "تعذر حفظ العقد");
+    fail(res, error, "Could not save the contract");
   }
 };
 
@@ -215,9 +215,9 @@ export const updateContract = async (req, res) => {
     const incoming = cleanInstallments(req.body.installments);
     const saved = await mutateContract(req.params.id, async (d) => {
       const paidSome = hasPayments(d);
-      if (paidSome && data.currency !== d.currency) throw new InputError("لا يمكن تغيير العملة بعد تسجيل تحصيلات");
+      if (paidSome && data.currency !== d.currency) throw new InputError("The currency can't be changed after payments have been recorded");
       if (data.no && data.no !== d.no) {
-        if (await CollectContract.exists({ no: data.no, _id: { $ne: d._id } })) throw new InputError(`رقم العقد ${data.no} مستخدم بالفعل`);
+        if (await CollectContract.exists({ no: data.no, _id: { $ne: d._id } })) throw new InputError(`Contract number ${data.no} is already in use`);
         d.no = data.no;
       }
       const fields = { ...data };
@@ -226,9 +226,9 @@ export const updateContract = async (req, res) => {
       if (incoming) d.installments = mergeInstallments(d.installments.map((i) => i.toObject()), incoming);
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    await sendDetail(res, saved._id, 200, "تم حفظ العقد");
+    await sendDetail(res, saved._id, 200, "Contract saved");
   } catch (error) {
-    fail(res, error, "تعذر حفظ العقد");
+    fail(res, error, "Could not save the contract");
   }
 };
 
@@ -239,16 +239,16 @@ export const deleteContract = async (req, res) => {
     const c = await CollectContract.findById(req.params.id).lean();
     if (!c) return notFound(res, NOT_FOUND);
     if (hasPayments(c)) {
-      return res.status(409).json({ success: false, message: "لا يمكن حذف عقد عليه تحصيلات — يمكنك إلغاؤه بدلًا من الحذف" });
+      return res.status(409).json({ success: false, message: "A contract with payments can't be deleted — cancel it instead" });
     }
     await Promise.all([
       CollectContract.deleteOne({ _id: c._id }),
       CollectCheque.deleteMany({ contract: c._id }),
       CollectReminderLog.deleteMany({ contract: c._id }),
     ]);
-    res.json({ success: true, message: `تم حذف العقد ${c.no}` });
+    res.json({ success: true, message: `Contract ${c.no} deleted` });
   } catch (error) {
-    fail(res, error, "تعذر حذف العقد");
+    fail(res, error, "Could not delete the contract");
   }
 };
 
@@ -263,9 +263,9 @@ export const regenerateInstallments = async (req, res) => {
       d.updatedBy = req.user._id;
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    await sendDetail(res, saved._id, 200, "تم توليد الدفعات");
+    await sendDetail(res, saved._id, 200, "Installments generated");
   } catch (error) {
-    fail(res, error, "تعذر توليد الدفعات");
+    fail(res, error, "Could not generate the installments");
   }
 };
 
@@ -276,18 +276,18 @@ export const addPayment = async (req, res) => {
     const today = todayOf(await getSettings());
     const pay = cleanPayment(req.body, today);
     const saved = await mutateContract(req.params.id, (d) => {
-      if (d.status === "cancelled") throw new InputError("العقد ملغي");
+      if (d.status === "cancelled") throw new InputError("The contract is cancelled");
       const inst = d.installments.id(req.params.instId);
-      if (!inst) throw new InputError("الدفعة غير موجودة");
+      if (!inst) throw new InputError("Installment not found");
       const left = remaining(inst.toObject());
-      if (pay.amount > left + PAID_TOLERANCE) throw new InputError(`المبلغ أكبر من المتبقي (${Math.round(left)})`);
+      if (pay.amount > left + PAID_TOLERANCE) throw new InputError(`The amount is more than what is left (${Math.round(left)})`);
       inst.payments.push({ ...pay, by: req.user._id });
       d.updatedBy = req.user._id;
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    await sendDetail(res, saved._id, 201, "تم تسجيل التحصيل");
+    await sendDetail(res, saved._id, 201, "Payment recorded");
   } catch (error) {
-    fail(res, error, "تعذر تسجيل التحصيل");
+    fail(res, error, "Could not record the payment");
   }
 };
 
@@ -298,14 +298,14 @@ export const deletePayment = async (req, res) => {
     const saved = await mutateContract(req.params.id, (d) => {
       const inst = d.installments.id(req.params.instId);
       const pay = inst?.payments.id(req.params.payId);
-      if (!pay) throw new InputError("التحصيل غير موجود");
+      if (!pay) throw new InputError("Payment not found");
       pay.deleteOne();
       d.updatedBy = req.user._id;
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    await sendDetail(res, saved._id, 200, "تم حذف التحصيل");
+    await sendDetail(res, saved._id, 200, "Payment deleted");
   } catch (error) {
-    fail(res, error, "تعذر حذف التحصيل");
+    fail(res, error, "Could not delete the payment");
   }
 };
 
@@ -314,16 +314,16 @@ export const setContractStatus = async (req, res) => {
   try {
     if (!isObjectId(req.params.id)) return notFound(res, NOT_FOUND);
     const status = req.body?.status;
-    if (!["active", "closed", "cancelled"].includes(status)) throw new InputError("حالة غير صحيحة");
+    if (!["active", "closed", "cancelled"].includes(status)) throw new InputError("Invalid status");
     const saved = await mutateContract(req.params.id, (d) => {
       d.status = status;
       d.updatedBy = req.user._id;
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    const msg = { active: "تمت إعادة تفعيل العقد", closed: "تم إغلاق العقد كمكتمل", cancelled: "تم إلغاء العقد" }[status];
+    const msg = { active: "Contract reactivated", closed: "Contract closed as completed", cancelled: "Contract cancelled" }[status];
     await sendDetail(res, saved._id, 200, msg);
   } catch (error) {
-    fail(res, error, "تعذر تغيير حالة العقد");
+    fail(res, error, "Could not change the contract status");
   }
 };
 
@@ -333,9 +333,9 @@ export const renewContract = async (req, res) => {
     if (!isObjectId(req.params.id)) return notFound(res, NOT_FOUND);
     const old = await CollectContract.findById(req.params.id).lean();
     if (!old) return notFound(res, NOT_FOUND);
-    if (old.status !== "active") throw new InputError("يمكن تجديد العقود السارية فقط");
+    if (old.status !== "active") throw new InputError("Only active contracts can be renewed");
     const type = await CollectContractType.findById(old.type).lean();
-    if (!type?.renewable) throw new InputError("نوع هذا العقد غير قابل للتجديد");
+    if (!type?.renewable) throw new InputError("This contract type isn't renewable");
     const def = renewalDefaults(old, type);
     const fields = cleanContract({
       ...old,
@@ -350,7 +350,7 @@ export const renewContract = async (req, res) => {
     // Claim the renewal first (active → renewed, atomically) so two clicks or
     // two users can never create two renewal contracts.
     const claimed = await CollectContract.updateOne({ _id: old._id, status: "active" }, { $set: { status: "renewed", updatedBy: req.user._id } });
-    if (!claimed.modifiedCount) throw new InputError("تم تجديد هذا العقد بالفعل أو تغيّرت حالته");
+    if (!claimed.modifiedCount) throw new InputError("This contract was already renewed or its status changed");
     let doc;
     try {
       const no = await allocateNo("");
@@ -364,7 +364,7 @@ export const renewContract = async (req, res) => {
         renewedFrom: old._id,
         installments: generateInstallments(draft, type),
         document: old.document ? { ...old.document, version: 1, copiedFrom: null, updatedAt: new Date() } : null,
-        signature: { status: "draft", log: [{ date: today, text: "عقد تجديد — بانتظار الإرسال للعميل", by: req.user._id }] },
+        signature: { status: "draft", log: [{ date: today, text: "Renewal contract — waiting to be sent to the customer", by: req.user._id }] },
         createdBy: req.user._id,
         updatedBy: req.user._id,
       });
@@ -372,9 +372,9 @@ export const renewContract = async (req, res) => {
       await CollectContract.updateOne({ _id: old._id, status: "renewed" }, { $set: { status: "active" } });
       throw error;
     }
-    await sendDetail(res, doc._id, 201, `تم إنشاء عقد التجديد ${doc.no}`);
+    await sendDetail(res, doc._id, 201, `Renewal contract ${doc.no} created`);
   } catch (error) {
-    fail(res, error, "تعذر تجديد العقد");
+    fail(res, error, "Could not renew the contract");
   }
 };
 
@@ -405,8 +405,8 @@ export const initDocument = async (req, res) => {
     if (req.body?.fromContractId) {
       const from = req.body.fromContractId;
       const source = isObjectId(from) ? await CollectContract.findById(from).select("no customer document").lean() : null;
-      if (!source?.document) throw new InputError("العقد المصدر ليس له بنود مخصصة");
-      if (String(source.customer) !== String(c.customer)) throw new InputError("العقد المصدر لعميل آخر");
+      if (!source?.document) throw new InputError("The source contract has no customised clauses");
+      if (String(source.customer) !== String(c.customer)) throw new InputError("The source contract belongs to another customer");
       const { title, preamble, typeTerms, payTerms, clauses } = source.document;
       draft = { title, preamble, typeTerms, payTerms, clauses, copiedFrom: source.no };
     } else if (c.document) {
@@ -416,7 +416,7 @@ export const initDocument = async (req, res) => {
     }
     res.json({ success: true, data: { draft, global, scope: c.scope || type?.defaultScope || "", notes: c.notes ?? "" } });
   } catch (error) {
-    fail(res, error, "تعذر تجهيز بنود العقد");
+    fail(res, error, "Could not prepare the contract clauses");
   }
 };
 
@@ -435,9 +435,9 @@ export const saveDocument = async (req, res) => {
       d.updatedBy = req.user._id;
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    await sendDetail(res, saved._id, 200, `تم حفظ بنود العقد — إصدار ${version}`);
+    await sendDetail(res, saved._id, 200, `Contract clauses saved — version ${version}`);
   } catch (error) {
-    fail(res, error, "تعذر حفظ بنود العقد");
+    fail(res, error, "Could not save the contract clauses");
   }
 };
 
@@ -450,9 +450,9 @@ export const resetDocument = async (req, res) => {
       d.updatedBy = req.user._id;
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    await sendDetail(res, saved._id, 200, "تم الرجوع للنموذج العام");
+    await sendDetail(res, saved._id, 200, "Back to the standard template");
   } catch (error) {
-    fail(res, error, "تعذر الرجوع للنموذج العام");
+    fail(res, error, "Could not go back to the standard template");
   }
 };
 
@@ -471,9 +471,9 @@ export const moveSignature = async (req, res) => {
       d.updatedBy = req.user._id;
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    await sendDetail(res, saved._id, 200, "تم تحديث حالة التوقيع");
+    await sendDetail(res, saved._id, 200, "Signature status updated");
   } catch (error) {
-    fail(res, error, "تعذر تحديث حالة التوقيع");
+    fail(res, error, "Could not update the signature status");
   }
 };
 
@@ -488,9 +488,9 @@ export const addFollowUp = async (req, res) => {
       d.updatedBy = req.user._id;
     });
     if (!saved) return notFound(res, NOT_FOUND);
-    await sendDetail(res, saved._id, 200, "تم تسجيل المتابعة");
+    await sendDetail(res, saved._id, 200, "Follow-up recorded");
   } catch (error) {
-    fail(res, error, "تعذر تسجيل المتابعة");
+    fail(res, error, "Could not record the follow-up");
   }
 };
 

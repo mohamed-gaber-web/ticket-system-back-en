@@ -7,7 +7,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { addDays, addMonths, arDate, diffDays, isDate } from "../src/utils/collect/dates.js";
+import { addDays, addMonths, diffDays, fmtDate, isDate } from "../src/utils/collect/dates.js";
 import {
   buildAnalytics,
   chequeClearingPayment,
@@ -50,7 +50,7 @@ describe("dates", () => {
   it("counts whole days and formats Arabic dates", () => {
     assert.equal(diffDays("2026-03-01", "2026-02-27"), 2);
     assert.equal(addDays("2026-12-31", 1), "2027-01-01");
-    assert.equal(arDate("2026-10-11"), "11 أكتوبر 2026");
+    assert.equal(fmtDate("2026-10-11"), "11 October 2026");
     assert.equal(isDate("2026-02-30"), false);
   });
 });
@@ -79,7 +79,7 @@ describe("installment generation (§3.2)", () => {
         ["2026-08-01", 90000],
       ]
     );
-    assert.match(list[0].name, /^الفترة 1 \(نوفمبر 2025 – يناير 2026\)$/);
+    assert.match(list[0].name, /^Period 1 \(November 2025 – January 2026\)$/);
   });
 
   it("pays in arrears at the period end, defaults to 12 months, and fixes rounding on the last one", () => {
@@ -94,7 +94,7 @@ describe("installment generation (§3.2)", () => {
   it("renewal = one installment for the whole value at the start", () => {
     assert.deepEqual(
       generateInstallments({ value: 250000, startDate: "2026-03-01" }, T.lic).map((i) => [i.name, i.dueDate, i.amount]),
-      [["قيمة الفترة", "2026-03-01", 250000]]
+      [["Period value", "2026-03-01", 250000]]
     );
   });
 });
@@ -102,10 +102,12 @@ describe("installment generation (§3.2)", () => {
 describe("installment status and totals (§3.1)", () => {
   const today = "2026-10-11";
   it("labels paid, late, partial, soon and scheduled", () => {
-    assert.equal(instStatus({ amount: 100, dueDate: "2026-01-01", payments: [{ amount: 99.6 }] }, today).label, "مسدد");
-    assert.equal(instStatus({ amount: 100, dueDate: "2026-10-01", payments: [{ amount: 50 }] }, today).label, "متأخر 10 يوم");
-    assert.equal(instStatus({ amount: 100, dueDate: "2026-12-01", payments: [{ amount: 50 }] }, today).label, "جزئي");
-    assert.equal(instStatus({ amount: 100, dueDate: "2026-10-20", payments: [] }, today).label, "خلال 9 يوم");
+    assert.equal(instStatus({ amount: 100, dueDate: "2026-01-01", payments: [{ amount: 99.6 }] }, today).label, "Paid");
+    assert.equal(instStatus({ amount: 100, dueDate: "2026-10-01", payments: [{ amount: 50 }] }, today).label, "10 days late");
+    assert.equal(instStatus({ amount: 100, dueDate: "2026-12-01", payments: [{ amount: 50 }] }, today).label, "Partial");
+    assert.equal(instStatus({ amount: 100, dueDate: "2026-10-20", payments: [] }, today).label, "Due in 9 days");
+    assert.equal(instStatus({ amount: 100, dueDate: "2026-10-12", payments: [] }, today).label, "Due in 1 day");
+    assert.equal(instStatus({ amount: 100, dueDate: "2026-10-10", payments: [] }, today).label, "1 day late");
     assert.equal(instStatus({ amount: 100, dueDate: "2027-01-01", payments: [] }, today).key, "scheduled");
   });
 
@@ -172,7 +174,7 @@ describe("analytics (§4)", () => {
   const a = buildAnalytics({
     contracts,
     types: [
-      { key: "impl", name: "تنفيذ", color: "#000" },
+      { key: "impl", name: "Implementation", color: "#000" },
       { key: "sla", name: "SLA", color: "#111" },
     ],
     customers: new Map([
@@ -207,20 +209,20 @@ describe("reminder engine (§6)", () => {
   const contract = {
     _id: "k1",
     no: "GP-C-0001",
-    name: "عقد",
+    name: "Contract",
     customer: "c1",
     typeKey: "impl",
     status: "active",
     value: 1000,
     currency: "EGP",
-    installments: [{ _id: "i1", name: "دفعة 1", amount: 1000, dueDate: "2026-09-21", payments: [] }],
+    installments: [{ _id: "i1", name: "Installment 1", amount: 1000, dueDate: "2026-09-21", payments: [] }],
   };
   const base = {
     templatesByKey: templates,
     contracts: [contract],
     typesByKey: new Map(),
     cheques: [],
-    customersById: new Map([["c1", { name: "عميل", contactEmail: "a@b.co" }]]),
+    customersById: new Map([["c1", { name: "ACME", contactEmail: "a@b.co" }]]),
     settings: { company: "Grow Path", internalEmail: "" },
   };
 
@@ -228,8 +230,9 @@ describe("reminder engine (§6)", () => {
     const { outbox } = buildMails({ ...base, rules, sentKeys: new Set(), today: "2026-10-11" });
     assert.equal(outbox.length, 1);
     assert.equal(outbox[0].ruleKey, "r3");
-    assert.match(outbox[0].body, /منذ 20 يوم/);
-    assert.match(outbox[0].toText, /البريد الداخلي غير محدد/);
+    assert.match(outbox[0].body, /overdue for 20 days/);
+    assert.match(outbox[0].body, /^Dear ACME,/);
+    assert.equal(outbox[0].toText, "a@b.co, (internal email not set)");
   });
 
   it("marking it sent removes it; a later rule appears when today moves forward", () => {
@@ -255,12 +258,12 @@ describe("reminder engine (§6)", () => {
     assert.equal(buildMails({ ...args, today: "2026-10-07" }).outbox.length, 0);
     const out = buildMails({ ...args, today: "2026-10-08" }).outbox;
     assert.equal(out.length, 1);
-    assert.match(out[0].body, /1 أكتوبر 2026/);
+    assert.match(out[0].body, /on 1 October 2026/);
   });
 
   it("replaces known placeholders and leaves unknown ones", () => {
-    assert.equal(fill("{{العميل}} — {{غير_معروف}}", { "العميل": "ACME" }), "ACME — {{غير_معروف}}");
-    assert.equal(money(1250000, "EGP"), "1,250,000 ج.م");
+    assert.equal(fill("{{customer}} — {{unknown_token}}", { customer: "ACME" }), "ACME — {{unknown_token}}");
+    assert.equal(money(1250000, "EGP"), "1,250,000 EGP");
   });
 });
 
@@ -268,7 +271,7 @@ describe("cheques and guarantees (§3.4)", () => {
   const inst = { _id: "i1", amount: 1000, payments: [{ amount: 300 }] };
   it("clearing a payment cheque posts min(amount, remaining) once", () => {
     const q = { _id: "q1", kind: "payment", number: "77", amount: 900 };
-    assert.deepEqual(chequeClearingPayment(q, inst, "2026-10-11"), { date: "2026-10-11", amount: 700, method: "شيك 77", chequeId: "q1" });
+    assert.deepEqual(chequeClearingPayment(q, inst, "2026-10-11"), { date: "2026-10-11", amount: 700, method: "Cheque 77", chequeId: "q1" });
     assert.equal(chequeClearingPayment(q, { ...inst, payments: [{ amount: 700, chequeId: "q1" }] }, "2026-10-11"), null);
     assert.equal(chequeClearingPayment(q, { ...inst, payments: [{ amount: 1000 }] }, "2026-10-11"), null);
     assert.equal(chequeClearingPayment({ ...q, kind: "guarantee" }, inst, "2026-10-11"), null);
@@ -293,16 +296,16 @@ describe("renewal (§3.3)", () => {
 describe("signature workflow (§8)", () => {
   it("only allows the listed moves, stamps dates and logs", () => {
     let s = { status: "draft", log: [] };
-    assert.throws(() => applySignatureMove(s, { status: "signed", date: "2026-10-01" }), /لا يمكن الانتقال/);
-    s = applySignatureMove(s, { status: "sent", date: "2026-10-01", followUpDate: "2026-10-08", note: "عن طريق البريد" }, { version: 3 });
+    assert.throws(() => applySignatureMove(s, { status: "signed", date: "2026-10-01" }), /can't be reached/);
+    s = applySignatureMove(s, { status: "sent", date: "2026-10-01", followUpDate: "2026-10-08", note: "by email" }, { version: 3 });
     assert.equal(s.sentAt, "2026-10-01");
-    assert.equal(s.log.at(-1).text, "أُرسل العقد للعميل (إصدار 3) — عن طريق البريد");
+    assert.equal(s.log.at(-1).text, "Contract sent to the customer (version 3) — by email");
     s = applySignatureMove(s, { status: "signed", date: "2026-10-05" });
     s = applySignatureMove(s, { status: "original", date: "2026-10-09", followUpDate: "2026-10-20" });
     assert.equal(s.followUpDate, null);
     s = applySignatureMove(s, { status: "draft", date: "2026-10-10" });
     assert.equal(s.sentAt, null);
-    assert.throws(() => applyFollowUp({ status: "sent", log: [] }, { note: "" }, { today: "2026-10-10" }), /ملاحظة/);
+    assert.throws(() => applyFollowUp({ status: "sent", log: [] }, { note: "" }, { today: "2026-10-10" }), /follow-up note/);
   });
 });
 
@@ -314,14 +317,14 @@ describe("input rules", () => {
 
   it("an installment with payments can't be removed; payments always come from the database", () => {
     const stored = [{ _id: "a", name: "x", amount: 10, dueDate: "2026-01-01", payments: [{ amount: 5 }] }];
-    assert.throws(() => mergeInstallments(stored, []), /عليها تحصيلات/);
+    assert.throws(() => mergeInstallments(stored, []), /has recorded payments/);
     const out = mergeInstallments(stored, [{ _id: "a", name: "y", amount: 12, dueDate: "2026-01-02" }]);
     assert.equal(out[0].payments.length, 1);
     assert.equal(out[0].name, "y");
   });
 
   it("validates contract dates and settings", () => {
-    assert.throws(() => cleanContract({ name: "x", customer: "c", type: "t", value: 1, startDate: "2026-05-01", endDate: "2026-04-01" }), /قبل تاريخ البداية/);
+    assert.throws(() => cleanContract({ name: "x", customer: "c", type: "t", value: 1, startDate: "2026-05-01", endDate: "2026-04-01" }), /before the start date/);
     assert.throws(() => cleanSettings({ document: { logo: "data:text/html;base64,AAAA" } }), /PNG/);
     assert.equal(cleanSettings({ simulatedToday: "" }).simulatedToday, null);
     assert.equal(formatContractNo("GP-C-", 16), "GP-C-0016");

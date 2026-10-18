@@ -1,4 +1,4 @@
-import { addDays, addMonths, arMonthYear, diffDays, monthKey, yearOf } from "./dates.js";
+import { addDays, addMonths, monthYear, diffDays, monthKey, yearOf } from "./dates.js";
 
 /**
  * Grow Path Collect — core calculations (GROW_PATH_COLLECT_SPEC.md §3, §4, §5),
@@ -9,7 +9,7 @@ import { addDays, addMonths, arMonthYear, diffDays, monthKey, yearOf } from "./d
 
 export const CURRENCIES = ["EGP", "SAR", "USD"];
 export const CONTRACT_STATUSES = ["active", "closed", "renewed", "cancelled"];
-export const PAY_METHODS = ["تحويل بنكي", "شيك", "إنستاباي", "سداد", "نقدي"];
+export const PAY_METHODS = ["Bank transfer", "Cheque", "InstaPay", "SADAD", "Cash"];
 
 /** Rounding tolerance: an installment is paid when what is left is ≤ 0.5. */
 export const PAID_TOLERANCE = 0.5;
@@ -28,11 +28,11 @@ export const toEGP = (v, cur, rates = {}) => (cur === "EGP" || !cur ? Number(v) 
 /** The installment status chip (§3.1). */
 export const instStatus = (inst, today) => {
   const late = lateDays(inst, today);
-  if (isPaid(inst)) return { key: "paid", label: "مسدد", tone: "ok", days: 0 };
-  if (late > 0) return { key: "late", label: `متأخر ${late} يوم`, tone: "crit", days: late };
-  if (paid(inst) > 0) return { key: "partial", label: "جزئي", tone: "info", days: -late };
-  if (-late <= 30) return { key: "soon", label: `خلال ${-late} يوم`, tone: "warn", days: -late };
-  return { key: "scheduled", label: "مجدول", tone: "neutral", days: -late };
+  if (isPaid(inst)) return { key: "paid", label: "Paid", tone: "ok", days: 0 };
+  if (late > 0) return { key: "late", label: late === 1 ? "1 day late" : `${late} days late`, tone: "crit", days: late };
+  if (paid(inst) > 0) return { key: "partial", label: "Partial", tone: "info", days: -late };
+  if (-late <= 30) return { key: "soon", label: late === 0 ? "Due today" : late === -1 ? "Due in 1 day" : `Due in ${-late} days`, tone: "warn", days: -late };
+  return { key: "scheduled", label: "Scheduled", tone: "neutral", days: -late };
 };
 
 /** Value, collected, remaining and overdue of one contract (own currency). */
@@ -52,7 +52,7 @@ export const contractTotals = (c, today) => {
 
 // ── Installment generation (§3.2) ────────────────────────────────────────────
 
-const arPeriod = (from, to) => `${arMonthYear(from)} – ${arMonthYear(to)}`;
+const periodLabel = (from, to) => `${monthYear(from)} – ${monthYear(to)}`;
 
 /**
  * The schedule a contract type produces. The rounding difference goes to the
@@ -92,26 +92,26 @@ export const generateInstallments = (contract, type) => {
     out = list.map((s, k) => {
       const periodEnd = addDays(addMonths(start, period * (k + 1)), -1);
       return {
-        name: `الفترة ${k + 1} (${arPeriod(s, periodEnd)})`,
+        name: `Period ${k + 1} (${periodLabel(s, periodEnd)})`,
         dueDate: type.payInAdvance === false ? periodEnd : s,
         amount: Math.round(value / n),
       };
     });
   } else {
-    out = [{ name: "قيمة الفترة", dueDate: start, amount: Math.round(value) }];
+    out = [{ name: "Period value", dueDate: start, amount: Math.round(value) }];
   }
   if (out.length) out[out.length - 1].amount += Math.round(value) - sum(out, (i) => i.amount);
   return out.map((i) => ({ ...i, payments: [] }));
 };
 
-/** "4 دفعات متساوية كل 3 شهور…" — the billing summary under the editor fields. */
+/** "Equal installments every 3 months…" — the billing summary under the editor fields. */
 export const billingSummary = (type) => {
   if (!type) return "";
   if (type.billingMode === "recurring") {
-    return `دفعات متساوية كل ${type.periodMonths} شهور، ${type.payInAdvance === false ? "في نهاية كل فترة" : "مقدمًا في بداية كل فترة"}`;
+    return `Equal installments every ${type.periodMonths} months, ${type.payInAdvance === false ? "at the end of each period" : "in advance at the start of each period"}`;
   }
-  if (type.billingMode === "renewal") return "دفعة واحدة مقدمًا عن كامل الفترة";
-  return `${(type.phases ?? []).length} دفعات مرتبطة بمراحل التنفيذ`;
+  if (type.billingMode === "renewal") return "One payment in advance for the whole period";
+  return `${(type.phases ?? []).length} installments linked to the project phases`;
 };
 
 // ── Renewal (§3.3) ───────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ export const chequeClearingPayment = (cheque, inst, today) => {
   if ((inst.payments ?? []).some((p) => p.chequeId && idOf(p.chequeId) === idOf(cheque))) return null;
   const amount = Math.min(Number(cheque.amount) || 0, remaining(inst));
   if (amount <= 0) return null;
-  return { date: today, amount, method: `شيك ${cheque.number}`, chequeId: cheque._id ?? cheque.id };
+  return { date: today, amount, method: `Cheque ${cheque.number}`, chequeId: cheque._id ?? cheque.id };
 };
 
 /** A license (needsGuarantee) contract that is active and holds no guarantee cheque. */
@@ -303,12 +303,12 @@ export const buildAnalytics = ({ contracts, types, customers, rates, today, year
     .filter((x) => x.value > 0)
     .sort((a, b) => b.value - a.value);
 
-  const upcoming = [{ key: "late", label: "متأخر", value: overdue, late: true }];
+  const upcoming = [{ key: "late", label: "Overdue", value: overdue, late: true }];
   for (let k = 0; k < 6; k++) {
     const m = monthKey(addMonths(`${thisMonth}-01`, k));
     upcoming.push({
       key: m,
-      label: arMonthYear(`${m}-01`),
+      label: monthYear(`${m}-01`),
       value: sum(
         allInst.filter(({ i }) => monthKey(i.dueDate) === m && lateDays(i, today) <= 0),
         ({ c, i }) => egp(remaining(i), c)

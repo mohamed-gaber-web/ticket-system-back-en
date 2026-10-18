@@ -15,7 +15,7 @@ export const SIGNATURE_STATUSES = ["draft", "sent", "review", "signed", "origina
 const paymentSchema = new mongoose.Schema({
   date: { type: String, required: true },
   amount: { type: Number, required: true, min: 0 },
-  method: { type: String, trim: true, maxlength: 100, default: "تحويل بنكي" },
+  method: { type: String, trim: true, maxlength: 100, default: "Bank transfer" },
   chequeId: { type: ObjectId, ref: "CollectCheque", default: null },
   by: { type: ObjectId, ref: "Consultant" },
   createdAt: { type: Date, default: Date.now },

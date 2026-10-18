@@ -45,7 +45,7 @@ const companySchema = new mongoose.Schema({
   collect: {
     type: new mongoose.Schema(
       {
-        country: { type: String, trim: true, maxlength: 100, default: "مصر" },
+        country: { type: String, trim: true, maxlength: 100, default: "Egypt" },
         currency: { type: String, enum: ["EGP", "SAR", "USD"], default: "EGP" },
         accountManager: { type: String, trim: true, maxlength: 200, default: "" },
         legalForm: { type: String, trim: true, maxlength: 200, default: "" },

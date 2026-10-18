@@ -1,4 +1,4 @@
-import { addDays, arDate, diffDays } from "./dates.js";
+import { addDays, diffDays, fmtDate } from "./dates.js";
 import { isPaid, remaining } from "./calc.js";
 
 /**
@@ -14,22 +14,22 @@ export const TRIGGERS = ["due", "overdue", "renewal", "sign", "cheque"];
 export const RECIPIENTS = ["client", "internal", "both"];
 
 export const TRIGGER_LABELS = {
-  due: "قبل الاستحقاق",
-  overdue: "بعد التأخير",
-  renewal: "قبل انتهاء العقد",
-  sign: "بعد إرسال العقد",
-  cheque: "قبل تاريخ الشيك",
+  due: "Before due date",
+  overdue: "After due date",
+  renewal: "Before contract end",
+  sign: "After contract sent",
+  cheque: "Before cheque date",
 };
 
 const FAMILY = { due: "due", overdue: "overdue", renewal: "ren", sign: "sign", cheque: "cheque" };
 
-export const CURRENCY_LABELS = { EGP: "ج.م", SAR: "ر.س", USD: "$" };
+export const CURRENCY_LABELS = { EGP: "EGP", SAR: "SAR", USD: "USD" };
 
 const n0 = (v) => new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(Math.round(Number(v) || 0));
 export const money = (v, cur) => `${n0(v)} ${CURRENCY_LABELS[cur] ?? cur ?? ""}`.trim();
 
-export const NO_CLIENT_EMAIL = "(بدون بريد للعميل)";
-export const NO_INTERNAL_EMAIL = "(البريد الداخلي غير محدد)";
+export const NO_CLIENT_EMAIL = "(no customer email)";
+export const NO_INTERNAL_EMAIL = "(internal email not set)";
 
 const idOf = (x) => String(x?._id ?? x?.id ?? x ?? "");
 
@@ -45,42 +45,42 @@ export const fill = (text, vars) =>
  */
 export const placeholderVars = ({ contract, inst, cheque, customer, settings, ref }) => {
   const v = {
-    "العميل": customer?.name ?? "",
-    "جهة_الاتصال": customer?.contactName ?? "",
-    "مدير_الحساب": customer?.collect?.accountManager ?? "",
-    "الشركة": settings?.company ?? "",
+    customer: customer?.name ?? "",
+    contact: customer?.contactName ?? "",
+    account_manager: customer?.collect?.accountManager ?? "",
+    company: settings?.company ?? "",
   };
   if (contract) {
     Object.assign(v, {
-      "رقم_العقد": contract.no,
-      "العقد": contract.name,
-      "قيمة_العقد": money(contract.value, contract.currency),
-      "تاريخ_البداية": arDate(contract.startDate),
-      "تاريخ_الانتهاء": arDate(contract.endDate),
+      contract_no: contract.no,
+      contract: contract.name,
+      contract_value: money(contract.value, contract.currency),
+      start_date: fmtDate(contract.startDate),
+      end_date: fmtDate(contract.endDate),
     });
-    if (contract.endDate) v["الأيام_المتبقية"] = diffDays(contract.endDate, ref);
+    if (contract.endDate) v.days_left = diffDays(contract.endDate, ref);
     const sentAt = contract.signature?.sentAt;
     if (sentAt) {
-      v["تاريخ_الإرسال"] = arDate(sentAt);
-      v["أيام_منذ_الإرسال"] = diffDays(ref, sentAt);
+      v.sent_date = fmtDate(sentAt);
+      v.days_since_sent = diffDays(ref, sentAt);
     }
   }
   if (inst) {
     Object.assign(v, {
-      "القسط": inst.name,
-      "المبلغ": money(inst.amount, contract?.currency),
-      "المتبقي": money(remaining(inst), contract?.currency),
-      "تاريخ_الاستحقاق": arDate(inst.dueDate),
-      "أيام_التأخير": Math.max(0, diffDays(ref, inst.dueDate)),
-      "الأيام_المتبقية": Math.max(0, diffDays(inst.dueDate, ref)),
+      installment: inst.name,
+      amount: money(inst.amount, contract?.currency),
+      remaining: money(remaining(inst), contract?.currency),
+      due_date: fmtDate(inst.dueDate),
+      days_late: Math.max(0, diffDays(ref, inst.dueDate)),
+      days_left: Math.max(0, diffDays(inst.dueDate, ref)),
     });
   }
   if (cheque) {
     Object.assign(v, {
-      "رقم_الشيك": cheque.number,
-      "البنك": cheque.bank ?? "",
-      "قيمة_الشيك": money(cheque.amount, cheque.currency),
-      "تاريخ_الشيك": arDate(cheque.dueDate),
+      cheque_no: cheque.number,
+      bank: cheque.bank ?? "",
+      cheque_amount: money(cheque.amount, cheque.currency),
+      cheque_date: fmtDate(cheque.dueDate),
     });
   }
   return v;
@@ -161,7 +161,7 @@ export const recipientsFor = (recipient, customer, settings) => {
     if (e) to.push(e);
     labels.push(e || NO_INTERNAL_EMAIL);
   }
-  return { to, toText: labels.join("، "), missing: labels.some((l) => l === NO_CLIENT_EMAIL || l === NO_INTERNAL_EMAIL) };
+  return { to, toText: labels.join(", "), missing: labels.some((l) => l === NO_CLIENT_EMAIL || l === NO_INTERNAL_EMAIL) };
 };
 
 /**

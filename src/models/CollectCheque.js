@@ -1,9 +1,8 @@
 import mongoose from "mongoose";
 
-// Grow Path Collect — a guarantee cheque (شيك ضمان) or payment cheque (شيك
-// سداد). A payment cheque linked to an installment posts a payment once when it
-// moves to `cleared` (chequeClearingPayment in calc.js). Every status change is
-// logged.
+// Grow Path Collect — a guarantee cheque or a payment cheque. A payment cheque
+// linked to an installment posts a payment once when it moves to `cleared`
+// (chequeClearingPayment in calc.js). Every status change is logged.
 
 const { ObjectId } = mongoose.Schema.Types;
 

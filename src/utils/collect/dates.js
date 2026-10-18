@@ -48,30 +48,30 @@ export const COLLECT_TZ = process.env.COLLECT_TZ || "Africa/Cairo";
 export const todayFor = (settings, now = new Date()) =>
   isDate(settings?.simulatedToday) ? settings.simulatedToday : zonedClock(now, COLLECT_TZ).day;
 
-export const AR_MONTHS = [
-  "يناير",
-  "فبراير",
-  "مارس",
-  "أبريل",
-  "مايو",
-  "يونيو",
-  "يوليو",
-  "أغسطس",
-  "سبتمبر",
-  "أكتوبر",
-  "نوفمبر",
-  "ديسمبر",
+export const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
-/** "11 أكتوبر 2026" */
-export const arDate = (s) => {
+/** "11 October 2026" */
+export const fmtDate = (s) => {
   if (!isDate(s)) return "";
   const [y, m, d] = s.split("-").map(Number);
-  return `${d} ${AR_MONTHS[m - 1]} ${y}`;
+  return `${d} ${MONTHS[m - 1]} ${y}`;
 };
 
-/** "أكتوبر 2026" */
-export const arMonthYear = (s) => {
+/** "October 2026" */
+export const monthYear = (s) => {
   const [y, m] = String(s).split("-").map(Number);
-  return y && m ? `${AR_MONTHS[m - 1]} ${y}` : "";
+  return y && m ? `${MONTHS[m - 1]} ${y}` : "";
 };

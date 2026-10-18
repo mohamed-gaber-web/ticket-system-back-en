@@ -18,15 +18,15 @@ export const DEFAULTS = require("../../config/collect/defaults.json");
 
 export const isObjectId = (v) => mongoose.Types.ObjectId.isValid(String(v ?? "")) && /^[a-f0-9]{24}$/i.test(String(v));
 
-/** InputError → 400 with its (Arabic) message; anything else → 500. */
+/** InputError → 400 with its message; anything else → 500. */
 export const fail = (res, error, message) => {
   if (isInputError(error)) return res.status(400).json({ success: false, message: error.message });
-  if (error?.code === 11000) return res.status(409).json({ success: false, message: "القيمة مستخدمة بالفعل" });
+  if (error?.code === 11000) return res.status(409).json({ success: false, message: "That value is already in use" });
   console.error(message, error);
   return res.status(500).json({ success: false, message });
 };
 
-export const notFound = (res, message = "غير موجود") => res.status(404).json({ success: false, message });
+export const notFound = (res, message = "Not found") => res.status(404).json({ success: false, message });
 
 /** Settings from the Appendix A defaults (the document block and clause library). */
 export const defaultSettingsDoc = () => {

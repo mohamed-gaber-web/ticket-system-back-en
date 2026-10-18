@@ -30,7 +30,7 @@ import {
   todayOf,
 } from "./shared.js";
 
-// Grow Path Collect — admin data tools (§9.9 "البيانات"): export everything as
+// Grow Path Collect — admin data tools (§9.9 "Data"): export everything as
 // JSON, import such a file, demo data (never in production), wipe. Customers
 // are shared ticketing Companies: wipe removes their Collect profile, and only
 // deletes the companies the demo created.
@@ -43,15 +43,15 @@ const dateOr = (v, fallback = null) => (isDate(v) ? v : fallback);
 
 /** Installments (with payments), the clause copy and the signature of an imported contract — cleaned. */
 const importedContractParts = (c, i) => {
-  const label = `العقد ${i + 1}`;
+  const label = `Contract ${i + 1}`;
   const list = cleanInstallments(Array.isArray(c.installments) ? c.installments : []) ?? [];
   const rawInst = Array.isArray(c.installments) ? c.installments : [];
   const installments = list.map(({ _id, ...inst }, k) => ({
     ...inst,
     payments: (Array.isArray(rawInst[k]?.payments) ? rawInst[k].payments : []).slice(0, 500).map((p) => {
       const amount = Number(p?.amount);
-      if (!isDate(p?.date) || !Number.isFinite(amount) || amount < 0) throw new InputError(`${label}: تحصيل غير صحيح`);
-      return { date: p.date, amount, method: String(p.method ?? "").trim().slice(0, 100) || "تحويل بنكي" };
+      if (!isDate(p?.date) || !Number.isFinite(amount) || amount < 0) throw new InputError(`${label}: invalid payment`);
+      return { date: p.date, amount, method: String(p.method ?? "").trim().slice(0, 100) || "Bank transfer" };
     }),
   }));
   const document = isObj(c.document)
@@ -118,7 +118,7 @@ export const exportData = async (_req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="grow-path-collect-${new Date().toISOString().slice(0, 10)}.json"`);
     res.json(payload);
   } catch (error) {
-    fail(res, error, "تعذر تصدير البيانات");
+    fail(res, error, "Could not export the data");
   }
 };
 
@@ -137,14 +137,14 @@ const wipeAll = async () => {
 export const importData = async (req, res) => {
   try {
     const d = req.body ?? {};
-    if (d.app !== "grow-path-collect" || !Array.isArray(d.contracts)) throw new InputError("الملف ليس تصديرًا من Grow Path Collect");
+    if (d.app !== "grow-path-collect" || !Array.isArray(d.contracts)) throw new InputError("This file isn't a Grow Path Collect export");
     const types = (d.contractTypes ?? []).map((t) => ({ key: String(t.key ?? ""), ...cleanType(t) }));
-    if (types.some((t) => !t.key)) throw new InputError("نوع عقد بدون مفتاح في الملف");
+    if (types.some((t) => !t.key)) throw new InputError("A contract type in the file has no key");
     const typeKeys = new Set([...types.map((t) => t.key), ...(await CollectContractType.find().select("key").lean()).map((t) => t.key)]);
     const templates = (d.emailTemplates ?? []).map((t) => ({ key: String(t.key ?? ""), ...cleanTemplate(t) }));
     const rules = (d.reminderRules ?? []).map((r) => ({ key: String(r.key ?? ""), ...cleanRule(r) }));
     const settings = d.settings ? cleanSettings(d.settings) : null;
-    if (d.contracts.length > MAX_IMPORT_CONTRACTS) throw new InputError(`الملف يحتوي على أكثر من ${MAX_IMPORT_CONTRACTS} عقد`);
+    if (d.contracts.length > MAX_IMPORT_CONTRACTS) throw new InputError(`The file has more than ${MAX_IMPORT_CONTRACTS} contracts`);
     // Every value is cleaned BEFORE anything is deleted, so a bad file never
     // leaves the module half-imported. Nothing is stored as-is from the file.
     const customers = (Array.isArray(d.customers) ? d.customers : [])
@@ -152,17 +152,17 @@ export const importData = async (req, res) => {
       .map((c) => cleanCustomer(c))
       .map((c) => ({ name: c.name, data: c }));
     const contracts = d.contracts.map((c, i) => {
-      if (!isObj(c)) throw new InputError(`العقد ${i + 1}: بيانات غير صحيحة`);
-      if (!typeKeys.has(c.typeKey)) throw new InputError(`العقد ${i + 1}: نوع غير معروف`);
+      if (!isObj(c)) throw new InputError(`Contract ${i + 1}: invalid data`);
+      if (!typeKeys.has(c.typeKey)) throw new InputError(`Contract ${i + 1}: unknown type`);
       const customer = typeof c.customer === "string" ? c.customer.trim().slice(0, 200) : "";
-      if (!customer) throw new InputError(`العقد ${i + 1}: بدون عميل`);
+      if (!customer) throw new InputError(`Contract ${i + 1}: no customer`);
       const fields = cleanContract({ ...c, customer: "x", type: "x" });
-      if (!fields.no) throw new InputError(`العقد ${i + 1}: بدون رقم`);
+      if (!fields.no) throw new InputError(`Contract ${i + 1}: no number`);
       return { raw: c, fields, customer, ...importedContractParts(c, i) };
     });
     const nos = contracts.map(({ fields }) => fields.no);
     const dup = nos.find((no, i) => nos.indexOf(no) !== i);
-    if (dup) throw new InputError(`رقم العقد ${dup} مكرر في الملف`);
+    if (dup) throw new InputError(`Contract number ${dup} appears twice in the file`);
 
     // ── writes ──
     for (const t of types) await CollectContractType.updateOne({ key: t.key }, { $set: t }, { upsert: true });
@@ -246,9 +246,9 @@ export const importData = async (req, res) => {
       chequeCount++;
     }
     resetSeedCache();
-    res.json({ success: true, data: { contracts: created.length, cheques: chequeCount }, message: `تم استيراد ${created.length} عقد و${chequeCount} شيك` });
+    res.json({ success: true, data: { contracts: created.length, cheques: chequeCount }, message: `Imported ${created.length} contract(s) and ${chequeCount} cheque(s)` });
   } catch (error) {
-    fail(res, error, "تعذر استيراد الملف");
+    fail(res, error, "Could not import the file");
   }
 };
 
@@ -256,23 +256,23 @@ export const importData = async (req, res) => {
 export const wipeData = async (_req, res) => {
   try {
     await wipeAll();
-    res.json({ success: true, message: "تم مسح بيانات التحصيل" });
+    res.json({ success: true, message: "Collect data wiped" });
   } catch (error) {
-    fail(res, error, "تعذر مسح البيانات");
+    fail(res, error, "Could not wipe the data");
   }
 };
 
 const DEMO_CUSTOMERS = [
-  { name: "شركة النيل للصناعات الغذائية (تجريبي)", contactName: "أحمد سامي", email: "finance@nile-foods.example.com", country: "مصر", currency: "EGP", accountManager: "محمد علي", legalForm: "شركة مساهمة مصرية", cr: "112233", crOffice: "مكتب سجل تجاري القاهرة", taxNo: "200-300-400", address: "المنطقة الصناعية – العاشر من رمضان", signer: "أحمد سامي", signerTitle: "العضو المنتدب" },
-  { name: "مؤسسة الرياض التجارية (تجريبي)", contactName: "خالد العتيبي", email: "ap@riyadh-trading.example.com", country: "السعودية", currency: "SAR", accountManager: "سارة حسن", legalForm: "مؤسسة فردية", cr: "1010101010", crOffice: "الرياض", taxNo: "300012345600003", address: "حي العليا – الرياض", signer: "خالد العتيبي", signerTitle: "المدير العام" },
-  { name: "دلتا للتوزيع (تجريبي)", contactName: "منى عادل", email: "", country: "مصر", currency: "EGP", accountManager: "محمد علي", legalForm: "شركة ذات مسئولية محدودة", cr: "445566", crOffice: "مكتب سجل تجاري المنصورة", taxNo: "", address: "المنصورة – الدقهلية", signer: "", signerTitle: "" },
+  { name: "Nile Foods Industries (Demo)", contactName: "Ahmed Samy", email: "finance@nile-foods.example.com", country: "Egypt", currency: "EGP", accountManager: "Mohamed Ali", legalForm: "Egyptian Joint Stock Company", cr: "112233", crOffice: "Cairo Commercial Registry Office", taxNo: "200-300-400", address: "Industrial Zone, 10th of Ramadan City, Egypt", signer: "Ahmed Samy", signerTitle: "Managing Director" },
+  { name: "Riyadh Trading Est. (Demo)", contactName: "Khaled Al-Otaibi", email: "ap@riyadh-trading.example.com", country: "Saudi Arabia", currency: "SAR", accountManager: "Sara Hassan", legalForm: "Sole Proprietorship", cr: "1010101010", crOffice: "Riyadh", taxNo: "300012345600003", address: "Al Olaya District, Riyadh, Saudi Arabia", signer: "Khaled Al-Otaibi", signerTitle: "General Manager" },
+  { name: "Delta Distribution (Demo)", contactName: "Mona Adel", email: "", country: "Egypt", currency: "EGP", accountManager: "Mohamed Ali", legalForm: "Limited Liability Company", cr: "445566", crOffice: "Mansoura Commercial Registry Office", taxNo: "", address: "Mansoura, Dakahlia, Egypt", signer: "", signerTitle: "" },
 ];
 
 // POST /collect/seed-demo — a few demo customers and contracts around today (not in production)
 export const seedDemo = async (req, res) => {
   try {
     if (process.env.NODE_ENV === "production") {
-      return res.status(403).json({ success: false, message: "البيانات التجريبية غير متاحة على النظام الفعلي" });
+      return res.status(403).json({ success: false, message: "Demo data isn't available on the live system" });
     }
     await ensureSeeded();
     const settings = await getSettings();
@@ -289,10 +289,10 @@ export const seedDemo = async (req, res) => {
       ids.push(company._id);
     }
     const plans = [
-      { typeKey: "impl", customer: ids[0], name: "تنفيذ D365 F&O — المالية والمخازن", value: 4200000, currency: "EGP", startDate: addDays(today, -150), deliveryDate: addDays(today, 60), endDate: addDays(today, 180), pay: [[0, 1, -140], [1, 0.4, -90]], signature: "original" },
-      { typeKey: "sla", customer: ids[1], name: "دعم فني SLA — Dynamics 365", value: 360000, currency: "SAR", startDate: addDays(today, -200), endDate: addDays(today, 164), pay: [[0, 1, -198], [1, 1, -105]], signature: "original" },
-      { typeKey: "lic", customer: ids[2], name: "تجديد تراخيص Microsoft 365 — 120 مستخدم", value: 250000, currency: "EGP", startDate: addDays(today, -330), endDate: addDays(today, 34), pay: [[0, 1, -325]], signature: "signed" },
-      { typeKey: "small", customer: ids[0], name: "تقارير Power BI للإدارة", value: 300000, currency: "EGP", startDate: addDays(today, -20), deliveryDate: addDays(today, 40), endDate: addDays(today, 40), pay: [], signature: "sent" },
+      { typeKey: "impl", customer: ids[0], name: "D365 F&O implementation — Finance & Inventory", value: 4200000, currency: "EGP", startDate: addDays(today, -150), deliveryDate: addDays(today, 60), endDate: addDays(today, 180), pay: [[0, 1, -140], [1, 0.4, -90]], signature: "original" },
+      { typeKey: "sla", customer: ids[1], name: "Dynamics 365 support SLA", value: 360000, currency: "SAR", startDate: addDays(today, -200), endDate: addDays(today, 164), pay: [[0, 1, -198], [1, 1, -105]], signature: "original" },
+      { typeKey: "lic", customer: ids[2], name: "Microsoft 365 license renewal — 120 users", value: 250000, currency: "EGP", startDate: addDays(today, -330), endDate: addDays(today, 34), pay: [[0, 1, -325]], signature: "signed" },
+      { typeKey: "small", customer: ids[0], name: "Power BI management reports", value: 300000, currency: "EGP", startDate: addDays(today, -20), deliveryDate: addDays(today, 40), endDate: addDays(today, 40), pay: [], signature: "sent" },
     ];
     let made = 0;
     for (const p of plans) {
@@ -301,7 +301,7 @@ export const seedDemo = async (req, res) => {
       const before = await CollectSettings.findOneAndUpdate({ key: "collect" }, { $inc: { nextContractNo: 1 } }, { new: false }).lean();
       const inst = generateInstallments(p, type);
       for (const [k, share, dayOffset] of p.pay) {
-        if (inst[k]) inst[k].payments = [{ date: addDays(today, dayOffset), amount: Math.round(inst[k].amount * share), method: "تحويل بنكي", by: req.user._id }];
+        if (inst[k]) inst[k].payments = [{ date: addDays(today, dayOffset), amount: Math.round(inst[k].amount * share), method: "Bank transfer", by: req.user._id }];
       }
       const sentAt = p.signature === "sent" ? addDays(today, -10) : addDays(p.startDate, -10);
       const contract = await CollectContract.create({
@@ -323,18 +323,18 @@ export const seedDemo = async (req, res) => {
           signedAt: p.signature === "sent" ? null : addDays(sentAt, 5),
           originalAt: p.signature === "original" ? addDays(sentAt, 12) : null,
           followUpDate: p.signature === "original" ? null : addDays(today, -1),
-          log: [{ date: sentAt, text: "أُرسل العقد للعميل — بيانات تجريبية", by: req.user._id }],
+          log: [{ date: sentAt, text: "Contract sent to the customer — demo data", by: req.user._id }],
         },
         createdBy: req.user._id,
       });
       if (p.typeKey === "sla") {
         const third = contract.installments[2];
-        await CollectCheque.create({ contract: contract._id, customer: p.customer, kind: "payment", number: "000781", bank: "البنك الأهلي السعودي", amount: third?.amount ?? 90000, currency: "SAR", dueDate: addDays(today, 5), receivedDate: addDays(today, -15), status: "held", installmentId: third?._id ?? null, isDemo: true, log: [{ date: addDays(today, -15), status: "held" }] });
+        await CollectCheque.create({ contract: contract._id, customer: p.customer, kind: "payment", number: "000781", bank: "Saudi National Bank", amount: third?.amount ?? 90000, currency: "SAR", dueDate: addDays(today, 5), receivedDate: addDays(today, -15), status: "held", installmentId: third?._id ?? null, isDemo: true, log: [{ date: addDays(today, -15), status: "held" }] });
       }
       made++;
     }
-    res.json({ success: true, data: { contracts: made }, message: `تمت إضافة ${made} عقود تجريبية` });
+    res.json({ success: true, data: { contracts: made }, message: `${made} demo contract(s) added` });
   } catch (error) {
-    fail(res, error, "تعذر إضافة البيانات التجريبية");
+    fail(res, error, "Could not add the demo data");
   }
 };

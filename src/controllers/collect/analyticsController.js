@@ -32,7 +32,7 @@ export const getAnalytics = async (req, res) => {
     });
     res.json({ success: true, data });
   } catch (error) {
-    fail(res, error, "تعذر تحميل التحليل");
+    fail(res, error, "Could not load the analysis");
   }
 };
 
@@ -74,6 +74,6 @@ export const getCollection = async (req, res) => {
       })),
     });
   } catch (error) {
-    fail(res, error, "تعذر تحميل التحصيل");
+    fail(res, error, "Could not load the collection list");
   }
 };

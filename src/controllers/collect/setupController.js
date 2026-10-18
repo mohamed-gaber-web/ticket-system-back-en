@@ -36,7 +36,7 @@ export const getCollectSettings = async (_req, res) => {
   try {
     res.json({ success: true, data: settingsView(await getSettings({ withImages: true })) });
   } catch (error) {
-    fail(res, error, "تعذر تحميل الإعدادات");
+    fail(res, error, "Could not load the settings");
   }
 };
 
@@ -51,9 +51,9 @@ export const putCollectSettings = async (req, res) => {
       else $set[k] = v;
     }
     const saved = await CollectSettings.findOneAndUpdate({ key: "collect" }, { $set }, { new: true, runValidators: true }).lean();
-    res.json({ success: true, data: settingsView(saved), message: "تم حفظ الإعدادات" });
+    res.json({ success: true, data: settingsView(saved), message: "Settings saved" });
   } catch (error) {
-    fail(res, error, "تعذر حفظ الإعدادات");
+    fail(res, error, "Could not save the settings");
   }
 };
 
@@ -66,9 +66,9 @@ export const resetClauses = async (req, res) => {
       { $set: { clauses: defaultClauses(), updatedBy: req.user._id } },
       { new: true }
     ).lean();
-    res.json({ success: true, data: settingsView(saved), message: "تم استرجاع البنود الافتراضية" });
+    res.json({ success: true, data: settingsView(saved), message: "Default clauses restored" });
   } catch (error) {
-    fail(res, error, "تعذر استرجاع البنود");
+    fail(res, error, "Could not restore the clauses");
   }
 };
 
@@ -123,7 +123,7 @@ export const getMeta = async (req, res) => {
       },
     });
   } catch (error) {
-    fail(res, error, "تعذر تحميل البيانات");
+    fail(res, error, "Could not load data");
   }
 };
 
@@ -141,7 +141,7 @@ export const listTypes = async (_req, res) => {
     const used = new Map(usage.map((u) => [u._id, u.n]));
     res.json({ success: true, data: types.map((t) => ({ ...typeView(t), contractCount: used.get(t.key) ?? 0 })) });
   } catch (error) {
-    fail(res, error, "تعذر تحميل أنواع العقود");
+    fail(res, error, "Could not load the contract types");
   }
 };
 
@@ -153,7 +153,7 @@ export const createType = async (req, res) => {
     const t = await CollectContractType.create({ ...data, key: newTypeKey(keys), order });
     res.status(201).json({ success: true, data: typeView(t.toObject()) });
   } catch (error) {
-    fail(res, error, "تعذر حفظ نوع العقد");
+    fail(res, error, "Could not save the contract type");
   }
 };
 
@@ -164,7 +164,7 @@ export const updateType = async (req, res) => {
     if (!t) return notFound(res);
     res.json({ success: true, data: typeView(t) });
   } catch (error) {
-    fail(res, error, "تعذر حفظ نوع العقد");
+    fail(res, error, "Could not save the contract type");
   }
 };
 
@@ -174,11 +174,11 @@ export const deleteType = async (req, res) => {
     const t = await CollectContractType.findById(req.params.id).lean();
     if (!t) return notFound(res);
     const n = await CollectContract.countDocuments({ type: t._id });
-    if (n) return res.status(409).json({ success: false, message: `لا يمكن حذف النوع لأنه مستخدم في ${n} عقد` });
+    if (n) return res.status(409).json({ success: false, message: `This type can't be deleted: ${n} contract(s) use it` });
     await CollectContractType.deleteOne({ _id: t._id });
-    res.json({ success: true, message: "تم حذف نوع العقد" });
+    res.json({ success: true, message: "Contract type deleted" });
   } catch (error) {
-    fail(res, error, "تعذر حذف نوع العقد");
+    fail(res, error, "Could not delete the contract type");
   }
 };
 
@@ -203,7 +203,7 @@ export const listCustomers = async (req, res) => {
         : { id: String(c._id), name: c.name, currency: "EGP", inCollect: false, contractCount: 0 };
     res.json({ success: true, data: companies.map(view) });
   } catch (error) {
-    fail(res, error, "تعذر تحميل العملاء");
+    fail(res, error, "Could not load the customers");
   }
 };
 
@@ -215,7 +215,7 @@ export const createCustomer = async (req, res) => {
   try {
     const data = cleanCustomer(req.body);
     const existing = await Company.findOne({ name: { $regex: `^${escapeRegex(data.name)}$`, $options: "i" } });
-    if (existing?.collect) throw new InputError("هذا العميل موجود بالفعل في قائمة العملاء");
+    if (existing?.collect) throw new InputError("This customer is already on the customer list");
     const company = existing ?? new Company({ name: data.name });
     company.collect = data.collect;
     // An existing ticketing company keeps its contact details; only blanks are filled.
@@ -224,7 +224,7 @@ export const createCustomer = async (req, res) => {
     await company.save();
     res.status(201).json({ success: true, data: customerView(company.toObject()) });
   } catch (error) {
-    fail(res, error, "تعذر حفظ العميل");
+    fail(res, error, "Could not save the customer");
   }
 };
 
@@ -237,9 +237,9 @@ export const updateCustomer = async (req, res) => {
     if (!company || (!company.collect && !(await CollectContract.exists({ customer: company._id })))) return notFound(res);
     if (data.name !== company.name) {
       // The name is the ticketing company's identity (ticket numbers, the vault…).
-      if (!isAdmin(req.user)) throw new InputError("تغيير اسم الشركة متاح للمدير فقط");
+      if (!isAdmin(req.user)) throw new InputError("Only an administrator can rename a company");
       const clash = await Company.exists({ _id: { $ne: company._id }, name: { $regex: `^${escapeRegex(data.name)}$`, $options: "i" } });
-      if (clash) throw new InputError("يوجد عميل آخر بنفس الاسم");
+      if (clash) throw new InputError("Another customer has the same name");
       company.name = data.name;
     }
     company.contactName = data.contactName;
@@ -248,7 +248,7 @@ export const updateCustomer = async (req, res) => {
     await company.save();
     res.json({ success: true, data: customerView(company.toObject()) });
   } catch (error) {
-    fail(res, error, "تعذر حفظ العميل");
+    fail(res, error, "Could not save the customer");
   }
 };
 
@@ -257,12 +257,12 @@ export const removeCustomer = async (req, res) => {
   try {
     if (!isObjectId(req.params.id)) return notFound(res);
     const n = await CollectContract.countDocuments({ customer: req.params.id });
-    if (n) return res.status(409).json({ success: false, message: `لا يمكن حذف العميل لأن له ${n} عقد` });
+    if (n) return res.status(409).json({ success: false, message: `This customer can't be removed: they have ${n} contract(s)` });
     const done = await Company.findByIdAndUpdate(req.params.id, { $set: { collect: null } });
     if (!done) return notFound(res);
-    res.json({ success: true, message: "تم حذف العميل من قائمة التحصيل" });
+    res.json({ success: true, message: "Customer removed from the Collect list" });
   } catch (error) {
-    fail(res, error, "تعذر حذف العميل");
+    fail(res, error, "Could not remove the customer");
   }
 };
 
@@ -275,7 +275,7 @@ export const listTemplates = async (_req, res) => {
     await ensureSeeded();
     res.json({ success: true, data: (await CollectEmailTemplate.find().sort({ createdAt: 1 }).lean()).map(plainView) });
   } catch (error) {
-    fail(res, error, "تعذر تحميل القوالب");
+    fail(res, error, "Could not load the templates");
   }
 };
 
@@ -291,7 +291,7 @@ export const createTemplate = async (req, res) => {
     const t = await CollectEmailTemplate.create({ ...cleanTemplate(req.body), key: await nextKey(CollectEmailTemplate, "t") });
     res.status(201).json({ success: true, data: plainView(t.toObject()) });
   } catch (error) {
-    fail(res, error, "تعذر حفظ القالب");
+    fail(res, error, "Could not save the template");
   }
 };
 
@@ -302,7 +302,7 @@ export const updateTemplate = async (req, res) => {
     if (!t) return notFound(res);
     res.json({ success: true, data: plainView(t) });
   } catch (error) {
-    fail(res, error, "تعذر حفظ القالب");
+    fail(res, error, "Could not save the template");
   }
 };
 
@@ -312,11 +312,11 @@ export const deleteTemplate = async (req, res) => {
     const t = await CollectEmailTemplate.findById(req.params.id).lean();
     if (!t) return notFound(res);
     const n = await CollectReminderRule.countDocuments({ templateKey: t.key });
-    if (n) return res.status(409).json({ success: false, message: `القالب مستخدم في ${n} قاعدة تذكير` });
+    if (n) return res.status(409).json({ success: false, message: `The template is used by ${n} reminder rule(s)` });
     await CollectEmailTemplate.deleteOne({ _id: t._id });
-    res.json({ success: true, message: "تم حذف القالب" });
+    res.json({ success: true, message: "Template deleted" });
   } catch (error) {
-    fail(res, error, "تعذر حذف القالب");
+    fail(res, error, "Could not delete the template");
   }
 };
 
@@ -324,7 +324,7 @@ export const deleteTemplate = async (req, res) => {
 
 const ruleInput = async (body) => {
   const data = cleanRule(body);
-  if (!(await CollectEmailTemplate.exists({ key: data.templateKey }))) throw new InputError("قالب البريد غير موجود");
+  if (!(await CollectEmailTemplate.exists({ key: data.templateKey }))) throw new InputError("Email template not found");
   return data;
 };
 
@@ -333,7 +333,7 @@ export const listRules = async (_req, res) => {
     await ensureSeeded();
     res.json({ success: true, data: (await CollectReminderRule.find().sort({ createdAt: 1 }).lean()).map(plainView) });
   } catch (error) {
-    fail(res, error, "تعذر تحميل القواعد");
+    fail(res, error, "Could not load the rules");
   }
 };
 
@@ -342,7 +342,7 @@ export const createRule = async (req, res) => {
     const r = await CollectReminderRule.create({ ...(await ruleInput(req.body)), key: await nextKey(CollectReminderRule, "r") });
     res.status(201).json({ success: true, data: plainView(r.toObject()) });
   } catch (error) {
-    fail(res, error, "تعذر حفظ القاعدة");
+    fail(res, error, "Could not save the rule");
   }
 };
 
@@ -353,7 +353,7 @@ export const updateRule = async (req, res) => {
     if (!r) return notFound(res);
     res.json({ success: true, data: plainView(r) });
   } catch (error) {
-    fail(res, error, "تعذر حفظ القاعدة");
+    fail(res, error, "Could not save the rule");
   }
 };
 
@@ -362,9 +362,9 @@ export const deleteRule = async (req, res) => {
     if (!isObjectId(req.params.id)) return notFound(res);
     const r = await CollectReminderRule.findByIdAndDelete(req.params.id).lean();
     if (!r) return notFound(res);
-    res.json({ success: true, message: "تم حذف القاعدة" });
+    res.json({ success: true, message: "Rule deleted" });
   } catch (error) {
-    fail(res, error, "تعذر حذف القاعدة");
+    fail(res, error, "Could not delete the rule");
   }
 };
 
