@@ -3,6 +3,7 @@ import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import { sendTokenResponse, generateResetToken } from "../utils/jwtUtils.js";
 import { sendPasswordResetEmail } from "../utils/emailService.js";
+import { customerAccessIssue } from "../utils/customerAccess.js";
 import {
   USER_TYPES,
   normalizeUserType,
@@ -147,8 +148,14 @@ export const signin = async (req, res) => {
       });
     }
 
-    // Check user status
-    if (user.status !== "active") {
+    // Check user status. Customers are blocked when their own status is not
+    // active OR their company has been deactivated; employees by status alone.
+    if (userType === USER_TYPES.CUSTOMER) {
+      const issue = await customerAccessIssue(user);
+      if (issue) {
+        return res.status(401).json({ success: false, message: issue });
+      }
+    } else if (user.status !== "active") {
       return res.status(401).json({
         success: false,
         message: `Your account is ${user.status}. Please contact support.`,
@@ -392,6 +399,16 @@ export const forgotPassword = async (req, res) => {
       });
     }
 
+    // A deactivated customer (or one whose company was deactivated) must never
+    // receive e-mail — so no reset link is sent and no token is stored. The
+    // response stays the generic one below so account state is not revealed.
+    if (userType === USER_TYPES.CUSTOMER && (await customerAccessIssue(user))) {
+      return res.status(200).json({
+        success: true,
+        message: "If an account with that email exists, a password reset link has been sent.",
+      });
+    }
+
     // Generate reset token
     const { resetToken, hashedToken } = generateResetToken();
 
@@ -480,6 +497,15 @@ export const resetPassword = async (req, res) => {
       });
     }
 
+    // The account must still be live — a customer deactivated (or whose company
+    // was deactivated) after a link was issued cannot complete the reset.
+    if (userType === USER_TYPES.CUSTOMER) {
+      const issue = await customerAccessIssue(user);
+      if (issue) {
+        return res.status(401).json({ success: false, message: issue });
+      }
+    }
+
     // Set new password
     user.password = newPassword;
     user.resetPasswordToken = undefined;
@@ -539,6 +565,21 @@ export const refreshToken = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: "Invalid refresh token",
+      });
+    }
+
+    // A refresh mints a fresh access token, so it must honour the same gate as
+    // sign-in: a deactivated customer (or one whose company was deactivated) and
+    // a non-active employee can no longer refresh their session.
+    if (userType === USER_TYPES.CUSTOMER) {
+      const issue = await customerAccessIssue(user);
+      if (issue) {
+        return res.status(401).json({ success: false, message: issue });
+      }
+    } else if (user.status !== "active") {
+      return res.status(401).json({
+        success: false,
+        message: `Your account is ${user.status}. Please contact support.`,
       });
     }
 

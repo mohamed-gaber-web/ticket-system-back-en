@@ -1,6 +1,7 @@
 import EmailLog from "../models/EmailLog.js";
 import { sendEmail } from "../utils/emailService.js";
 import Ticket from "../models/Ticket.js";
+import { blockedCustomerEmails } from "../utils/customerAccess.js";
 
 // @desc    Get email logs
 // @route   GET /api/emails/logs
@@ -167,6 +168,21 @@ const sendCommentEmailToExternal = async (req, res) => {
       return res.status(400).json({ success: false, message: "Comment text is required" });
     }
 
+    // Drop any recipient that belongs to a deactivated customer / company — they
+    // must never receive e-mail.
+    const blocked = await blockedCustomerEmails(recipients);
+    const deliverable = recipients.filter(
+      (email) => !blocked.has(String(email ?? "").trim().toLowerCase())
+    );
+    if (deliverable.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "Emails sent: 0, failed: 0 (all recipients are inactive)",
+        sent: 0,
+        failed: 0,
+      });
+    }
+
     // Resolve ticket details (fallback to payload values if lookup fails)
     let ticketDoc = null;
     if (ticketId) {
@@ -183,7 +199,7 @@ const sendCommentEmailToExternal = async (req, res) => {
       commentText.length > 200 ? commentText.substring(0, 200) + "..." : commentText;
 
     const results = await Promise.allSettled(
-      recipients.map((email) =>
+      deliverable.map((email) =>
         sendEmail(
           email,
           `New Comment on Ticket ${resolvedNumber}`,

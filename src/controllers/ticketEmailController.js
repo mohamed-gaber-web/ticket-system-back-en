@@ -7,6 +7,7 @@ import { rndHiddenFrom, ticketIdHiddenFrom, rndTicketIds } from "../utils/ticket
 import { escapeRegex } from "../utils/escapeRegex.js";
 import { syncLeadInbox } from "../utils/leadInboxSync.js";
 import { senderMailbox } from "../utils/emailService.js";
+import { customerAccessIssue } from "../utils/customerAccess.js";
 import {
   validateAndSend,
   personalSender,
@@ -47,6 +48,17 @@ const withTicketNumber = (ticket) => (subject) =>
 /** Send, record against the ticket, and answer the request. */
 const sendAndRecord = async (req, res, ticket, replyTo = null) => {
   try {
+    // Never e-mail a deactivated customer (or one under a deactivated company),
+    // even when staff compose the message by hand.
+    if (ticket.customer) {
+      const customer = await Customer.findById(ticket.customer)
+        .select("status company")
+        .populate("company", "isActive")
+        .lean();
+      const issue = customer ? await customerAccessIssue(customer) : null;
+      if (issue) return res.status(403).json({ success: false, message: issue });
+    }
+
     const sent = await validateAndSend(req, {
       replyTo,
       logMeta: { ticketId: ticket._id },

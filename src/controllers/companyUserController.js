@@ -2,6 +2,7 @@ import Customer from "../models/Customer.js";
 import { sendWelcomeEmail } from "../utils/emailService.js";
 
 import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
+import { customerCanReceive } from "../utils/customerAccess.js";
 // @desc    Get all users in the company admin's company
 // @route   GET /api/company-users
 // @access  company_admin customer
@@ -120,10 +121,13 @@ const createCompanyUser = async (req, res) => {
       "-password -refreshToken -resetPasswordToken -resetPasswordExpire"
     );
 
-    // Send welcome email (fire-and-forget)
-    sendWelcomeEmail(populatedUser).catch((err) =>
-      console.error("Welcome email error:", err.message)
-    );
+    // Send welcome email (fire-and-forget) — skip for a user created inactive or
+    // under a deactivated company.
+    if (await customerCanReceive(populatedUser)) {
+      sendWelcomeEmail(populatedUser).catch((err) =>
+        console.error("Welcome email error:", err.message)
+      );
+    }
 
     res.status(201).json({
       success: true,

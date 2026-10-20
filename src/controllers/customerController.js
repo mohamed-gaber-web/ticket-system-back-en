@@ -6,6 +6,7 @@ import Ticket from "../models/Ticket.js";
 import { sendBulkConsultantAssignmentEmails, sendWelcomeEmail } from "../utils/emailService.js";
 
 import { emailTakenElsewhere, EMAIL_TAKEN_MESSAGE } from "../utils/access.js";
+import { customerCanReceive } from "../utils/customerAccess.js";
 // @desc    Get all customers
 // @route   GET /api/customers
 // @access  Public
@@ -175,10 +176,13 @@ const createCustomer = async (req, res) => {
       .populate("consultants", "firstName lastName email phone role status")
       .populate("productTypes", "name isActive");
 
-    // Send welcome email to the new customer (fire-and-forget)
-    sendWelcomeEmail(populatedCustomer).catch((err) =>
-      console.error("Welcome email error:", err.message)
-    );
+    // Send welcome email to the new customer (fire-and-forget) — but never to a
+    // customer created inactive or under a deactivated company.
+    if (await customerCanReceive(populatedCustomer)) {
+      sendWelcomeEmail(populatedCustomer).catch((err) =>
+        console.error("Welcome email error:", err.message)
+      );
+    }
 
     let emailResults = null;
     let emailWarning = null;

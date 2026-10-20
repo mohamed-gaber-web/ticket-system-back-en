@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import Customer from "../models/Customer.js";
 import Consultant from "../models/Consltant.js";
 import { USER_TYPES, normalizeUserType, rolesOf } from "../utils/access.js";
+import { companyIsDeactivated, COMPANY_INACTIVE_MESSAGE } from "../utils/customerAccess.js";
 
 // The role/module/manager decisions all live in access.js; re-exported here so a
 // route file needs one import for everything auth-related.
@@ -69,6 +70,15 @@ export const protect = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         message: `Account is ${user.status}. Please contact support.`,
+      });
+    }
+
+    // A customer is also cut off the moment their company is deactivated, even
+    // on an otherwise valid token.
+    if (userType === USER_TYPES.CUSTOMER && (await companyIsDeactivated(user.company))) {
+      return res.status(401).json({
+        success: false,
+        message: COMPANY_INACTIVE_MESSAGE,
       });
     }
 

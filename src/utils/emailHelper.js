@@ -4,6 +4,7 @@ import Consultant from "../models/Consltant.js";
 import Ticket from "../models/Ticket.js";
 import { emitNotification } from "../socket/io.js";
 import { isCustomerTicket } from "./ticketTypes.js";
+import { customerCanReceive } from "./customerAccess.js";
 import {
   sendTicketCreatedEmail,
   sendTicketAssignedEmail,
@@ -30,6 +31,9 @@ import {
 export const notifyAndEmail = async (eventType, data = {}) => {
   // Internal and R&D tickets never reach the customer, whatever the caller passed
   data = await withoutCustomerUnlessCustomerTicket(data);
+  // A deactivated customer (or a customer whose company was deactivated) never
+  // gets an e-mail or an in-app notification, even on their own customer ticket.
+  data = await withoutInactiveCustomer(data);
   // Run both in parallel, catch errors independently
   await Promise.allSettled([
     createNotification(eventType, data).catch((err) =>
@@ -59,6 +63,37 @@ export const withoutCustomerUnlessCustomerTicket = async (data) => {
   const customerId = String(ticket.customer?._id ?? ticket.customer ?? "");
   const isCustomer = (r) =>
     r?.userType === "customer" || (customerId && String(r?.userId ?? r?._id ?? "") === customerId);
+  return {
+    ...data,
+    customerFacing: false,
+    recipients: Array.isArray(data.recipients) ? data.recipients.filter((r) => !isCustomer(r)) : data.recipients,
+    recipient: isCustomer(data.recipient) ? null : data.recipient,
+  };
+};
+
+/**
+ * Drop the ticket's customer from every recipient list (e-mail + in-app) and
+ * mark the data non-customer-facing when that customer is deactivated or their
+ * company has been deactivated. Mirrors withoutCustomerUnlessCustomerTicket but
+ * keys on account status rather than ticket type, so one choke point silences
+ * every customer-facing template at once.
+ */
+export const withoutInactiveCustomer = async (data) => {
+  const { ticket } = data;
+  // Nothing customer-facing left to strip (non-customer ticket, or no customer).
+  if (!ticket || data.customerFacing === false) return data;
+  const customerId = String(ticket.customer?._id ?? ticket.customer ?? "");
+  if (!customerId) return data;
+
+  const customer = await Customer.findById(customerId)
+    .select("status company")
+    .populate("company", "isActive")
+    .lean();
+  // Unknown/orphan customer: leave the data untouched (fail open).
+  if (!customer || (await customerCanReceive(customer))) return data;
+
+  const isCustomer = (r) =>
+    r?.userType === "customer" || String(r?.userId ?? r?._id ?? "") === customerId;
   return {
     ...data,
     customerFacing: false,
@@ -186,6 +221,7 @@ const sendEventEmail = async (eventType, data) => {
           const admins = await Customer.find({
             companyName: customer.companyName,
             role: "company_admin",
+            status: "active",
             _id: { $ne: customer._id },
           })
             .select("email")
