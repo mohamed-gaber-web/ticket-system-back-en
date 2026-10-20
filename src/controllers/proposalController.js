@@ -143,11 +143,14 @@ export const updateCatalog = async (req, res, next) => {
 
 const summaryFields = "number version status client presentedDate preparedBy approvedBy opportunity totals implementation.discountPct licenses.discountPct updatedAt";
 
-const summarise = (rows, maxDiscount) =>
+const summarise = (rows, maxDiscount, req, leadFor) =>
   rows.map(({ implementation, licenses, ...p }) => ({
     ...p,
     needsApproval: needsApproval(p),
     discountOverLimit: discountOverLimit({ implementation, licenses }, maxDiscount),
+    // What the caller may do with this row (same authority as the single-proposal
+    // view), so the list can show a Delete only where the API would allow it.
+    ...(req ? { permissions: permissionsFor(req, p, leadFor ? leadFor(p) : p.opportunity) } : {}),
   }));
 
 /** GET /proposals — every proposal the caller may see, newest first. */
@@ -190,12 +193,13 @@ export const listProposals = async (req, res, next) => {
         .limit(limit)
         .populate("preparedBy", PERSON)
         .populate("approvedBy", PERSON)
-        .populate("opportunity", "companyName status salesType")
+        // assignedTo + team let permissionsFor judge delete rights per row.
+        .populate("opportunity", "companyName status salesType assignedTo team")
         .lean(),
       Proposal.countDocuments(filter),
       ProposalCatalog.getSingleton(),
     ]);
-    res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount), total, page, limit });
+    res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount, req, (p) => p.opportunity), total, page, limit });
   } catch (err) {
     next(err);
   }
@@ -257,7 +261,7 @@ export const listOpportunityProposals = async (req, res, next) => {
         .lean(),
       ProposalCatalog.getSingleton(),
     ]);
-    res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount) });
+    res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount, req, () => lead) });
   } catch (err) {
     next(err);
   }
