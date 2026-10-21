@@ -143,11 +143,14 @@ export const updateCatalog = async (req, res, next) => {
 
 const summaryFields = "number version status client presentedDate preparedBy approvedBy opportunity totals implementation.discountPct licenses.discountPct updatedAt";
 
-const summarise = (rows, maxDiscount) =>
+const summarise = (rows, maxDiscount, req, leadFor) =>
   rows.map(({ implementation, licenses, ...p }) => ({
     ...p,
     needsApproval: needsApproval(p),
     discountOverLimit: discountOverLimit({ implementation, licenses }, maxDiscount),
+    // What the caller may do with this row (same authority as the single-proposal
+    // view), so the list can show a Delete only where the API would allow it.
+    ...(req ? { permissions: permissionsFor(req, p, leadFor ? leadFor(p) : p.opportunity) } : {}),
   }));
 
 /** GET /proposals — every proposal the caller may see, newest first. */
@@ -190,12 +193,13 @@ export const listProposals = async (req, res, next) => {
         .limit(limit)
         .populate("preparedBy", PERSON)
         .populate("approvedBy", PERSON)
-        .populate("opportunity", "companyName status salesType")
+        // assignedTo + team let permissionsFor judge delete rights per row.
+        .populate("opportunity", "companyName status salesType assignedTo team")
         .lean(),
       Proposal.countDocuments(filter),
       ProposalCatalog.getSingleton(),
     ]);
-    res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount), total, page, limit });
+    res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount, req, (p) => p.opportunity), total, page, limit });
   } catch (err) {
     next(err);
   }
@@ -257,7 +261,7 @@ export const listOpportunityProposals = async (req, res, next) => {
         .lean(),
       ProposalCatalog.getSingleton(),
     ]);
-    res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount) });
+    res.json({ success: true, data: summarise(rows, catalog.settings.maxDiscount, req, () => lead) });
   } catch (err) {
     next(err);
   }
@@ -434,6 +438,54 @@ const moveOpportunityToProposalSent = async (req, lead, proposal) => {
     return "Proposal Sent";
   } catch (err) {
     console.error("Proposal → lead status failed:", err.message);
+    return null;
+  }
+};
+
+/**
+ * When a proposal is actually SENT to the customer (marked "Sent"), advance its
+ * tele-sales record: make it an Opportunity if it isn't one yet, move it to the
+ * "Proposal Sent" status and (re)set its quoted price to this proposal's grand
+ * total — so the opportunity always reflects what was sent. It never pulls a
+ * record already further along (Negotiation / Closed) back, and never blocks the
+ * proposal's own status change.
+ */
+const advanceOpportunityOnProposalSent = async (req, lead, proposal) => {
+  try {
+    if (!(proposal.totals?.grand > 0)) return null;
+
+    // Promote the record to the Opportunity stage if it isn't already one
+    // (normally it is — a proposal can only be built from an Opportunity).
+    if (stageOf(lead) !== "Opportunity") {
+      const now = new Date();
+      const stamp = { salesType: "Opportunity", convertedToOpportunityAt: now, convertedToOpportunityBy: req.user._id };
+      if (!lead.convertedToLeadAt) {
+        stamp.convertedToLeadAt = now;
+        stamp.convertedToLeadBy = req.user._id;
+      }
+      await Lead.updateOne({ _id: lead._id }, { $set: stamp });
+      lead.salesType = "Opportunity";
+    }
+
+    const step = LEAD_STATUS_WORKFLOW[lead.status]?.step;
+    // Don't drag a record already past "Proposal Sent" back to it.
+    if (step != null && step > 4) return null;
+    if (!(lead.status === "Proposal Sent" || isTransitionAllowed(lead.status, "Proposal Sent"))) return null;
+
+    const frontend = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+    const result = await applyStatusChange(req, lead, "Proposal Sent", {
+      file: `${frontend}/proposals/${proposal._id} (${proposal.number})`,
+      value: proposal.totals.grand,
+      due: new Date(Date.now() + 14 * 86400000).toISOString(),
+    });
+    if (!result.ok) return null;
+    // Mark it claimed so a later proposal save won't log "Proposal Sent" again.
+    if (!proposal.leadStatusAppliedAt) {
+      await Proposal.updateOne({ _id: proposal._id }, { $set: { leadStatusAppliedAt: new Date() } });
+    }
+    return "Proposal Sent";
+  } catch (err) {
+    console.error("Proposal send → opportunity update failed:", err.message);
     return null;
   }
 };
@@ -706,7 +758,13 @@ export const setProposalStatus = async (req, res, next) => {
     proposal.status = target;
     if (target === "Draft") clearApproval(proposal);
     await proposal.save();
-    res.json({ success: true, message: `Marked ${proposal.status}`, data: await present(req, proposal._id, lead) });
+
+    // Sending the proposal advances its opportunity: "Proposal Sent" + price.
+    const leadStatus = target === "Sent" ? await advanceOpportunityOnProposalSent(req, lead, proposal) : null;
+    const message = leadStatus
+      ? `Marked ${proposal.status} · opportunity updated to "${leadStatus}" with the proposal price.`
+      : `Marked ${proposal.status}`;
+    res.json({ success: true, message, data: await present(req, proposal._id, lead), leadStatus });
   } catch (err) {
     next(err);
   }
