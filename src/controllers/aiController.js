@@ -193,6 +193,82 @@ Return ONLY the JSON object, no explanation, no markdown.`;
   }
 };
 
+export const ticketChat = async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || typeof message !== "string" || message.trim().length < 8) {
+      return res.status(400).json({ success: false, message: "Please describe the issue in a bit more detail." });
+    }
+
+    const trimmedMessage = message.trim();
+
+    const [categories, departments, serviceTypes] = await Promise.all([
+      Category.find().select("_id name").lean(),
+      Department.find({ isActive: true }).select("_id name").lean(),
+      ServiceType.find({ isActive: true }).select("_id name").lean(),
+    ]);
+
+    const prompt = `You are a support assistant turning a customer's plain-language problem into a draft support ticket. Return a JSON object with exactly these keys:
+{
+  "subject": "<concise summary, max 255 chars, no markdown, no quotes>",
+  "description": "<expanded, professional, 2-4 sentences; do not invent names, IDs, or dates>",
+  "category": "<one of: ${categories.map((c) => c.name).join(", ")}>",
+  "priority": "<low|medium|high|critical>",
+  "department": "<one of: ${departments.map((d) => d.name).join(", ")}>",
+  "serviceType": "<one of: ${serviceTypes.map((s) => s.name).join(", ")}>",
+  "confidence": <0.0-1.0 float>,
+  "followUpQuestion": "<one friendly sentence asking for the single most useful missing detail; may be empty string if confident>"
+}
+
+Customer's problem: ${trimmedMessage}
+
+Return ONLY the JSON object, no explanation, no markdown.`;
+
+    const text = await generate(prompt);
+    const parsed = parseJson(text);
+
+    const categoryMatch = categories.find(
+      (c) => c.name.toLowerCase() === (parsed.category || "").toLowerCase()
+    );
+    const departmentMatch = departments.find(
+      (d) => d.name.toLowerCase() === (parsed.department || "").toLowerCase()
+    );
+    const serviceTypeMatch = serviceTypes.find(
+      (s) => s.name.toLowerCase() === (parsed.serviceType || "").toLowerCase()
+    );
+
+    const subject =
+      typeof parsed.subject === "string" && parsed.subject.trim()
+        ? parsed.subject.trim().slice(0, 255)
+        : trimmedMessage.slice(0, 80);
+
+    const priority = ["low", "medium", "high", "critical"].includes(parsed.priority)
+      ? parsed.priority
+      : "medium";
+
+    const rawConfidence = Number(parsed.confidence);
+    const confidence = Number.isFinite(rawConfidence)
+      ? Math.min(1, Math.max(0, rawConfidence))
+      : 0.5;
+
+    res.json({
+      success: true,
+      data: {
+        ...parsed,
+        subject,
+        priority,
+        confidence,
+        categoryId: categoryMatch?._id?.toString(),
+        departmentId: departmentMatch?._id?.toString(),
+        serviceTypeId: serviceTypeMatch?._id?.toString(),
+      },
+    });
+  } catch (error) {
+    console.error("AI ticketChat error:", error?.message || error);
+    res.status(422).json({ success: false, message: "AI could not read that. Please try again or add more detail." });
+  }
+};
+
 export const parseSearch = async (req, res) => {
   try {
     const { query } = req.body;
