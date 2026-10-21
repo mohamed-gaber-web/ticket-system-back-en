@@ -30,6 +30,7 @@ import {
 } from "../utils/teleSalesScope.js";
 import { buildOpportunityFromCustomer } from "../utils/opportunityFromCustomer.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
+import { parseListParam } from "../utils/listParam.js";
 import { DEFAULT_VALUE_CURRENCY, IMPORTED_LEAD_STATUS } from "../config/leadStatusWorkflow.js";
 import {
   REQUIRED_LEAD_FIELDS,
@@ -620,20 +621,31 @@ export const getAllLeads = async (req, res) => {
 
     const filter = {};
 
-    // Narrowing to one team: any team for a cross-team reader, one of their own
-    // teams for anyone else (the scope below still applies on top).
-    if (team && (isCrossTeamReader(req) || isCallerTeam(req, team))) filter.team = team;
+    // Every list filter takes one value or several ("a,b" or repeated keys);
+    // several values match any of them.
+    const anyOf = (values) => (values.length === 1 ? values[0] : { $in: values });
 
-    if (status) filter.status = status;
-    if (priority) filter.priority = priority;
+    // Narrowing to some teams: any team for a cross-team reader, their own teams
+    // for anyone else (the scope below still applies on top).
+    const teams = parseListParam(team, { ids: true }).filter((t) => isCrossTeamReader(req) || isCallerTeam(req, t));
+    if (teams.length) filter.team = anyOf(teams);
+
+    for (const [field, value] of Object.entries({ status, priority, entityType, industrySector, country })) {
+      const values = parseListParam(value);
+      if (values.length) filter[field] = anyOf(values);
+    }
     // Filter the team pipeline by owner; "unassigned" surfaces the leads still
     // waiting to be handed out.
-    if (assignedTo) filter.assignedTo = assignedTo === "unassigned" ? null : assignedTo;
+    const owners = parseListParam(assignedTo);
+    if (owners.length) {
+      const ownerValues = [
+        ...owners.filter((o) => /^[0-9a-f]{24}$/i.test(o)),
+        ...(owners.includes("unassigned") ? [null] : []),
+      ];
+      filter.assignedTo = ownerValues.length ? anyOf(ownerValues) : { $in: [] };
+    }
     if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
     if (salesType) filter.salesType = viewStageFilter(salesType);
-    if (entityType) filter.entityType = entityType;
-    if (industrySector) filter.industrySector = industrySector;
-    if (country) filter.country = country;
 
     if (search) {
       // Escaped so a company name containing "(" — or a half-typed one — is
