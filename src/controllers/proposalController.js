@@ -80,7 +80,14 @@ const permissionsFor = (req, proposal, lead) => {
     edit,
     // Approving and rejecting are an admin's alone.
     approve: isAdmin(req.user),
-    delete: proposal.status === "Draft" && (canManageLead(req, lead) || (canEditLead(req, lead) && String(proposal.preparedBy?._id ?? proposal.preparedBy) === String(req.user._id))),
+    // An admin or a sales manager of the team may delete a proposal in any
+    // status; the rep who authored it may delete it only while it is still a
+    // Draft (a sent/approved one is theirs to supersede with a new version).
+    delete:
+      canManageLead(req, lead) ||
+      (proposal.status === "Draft" &&
+        canEditLead(req, lead) &&
+        String(proposal.preparedBy?._id ?? proposal.preparedBy) === String(req.user._id)),
   };
 };
 
@@ -561,7 +568,7 @@ export const deleteProposal = async (req, res, next) => {
     if (!found) return notFound(res);
     const { proposal, lead } = found;
     if (!permissionsFor(req, proposal, lead).delete) {
-      return fail(res, proposal.status === "Draft" ? 403 : 409, proposal.status === "Draft" ? "Only the author or a sales manager can delete this draft." : "Only draft proposals can be deleted.");
+      return fail(res, 403, "You can't delete this proposal. Only an admin, a sales manager, or the author of a draft can.");
     }
     const orphans = await orphanImages(proposal);
     await proposal.deleteOne();
