@@ -1,10 +1,12 @@
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
-// Generate JWT token
+// Generate JWT token. The access token lasts one hour by default; an active
+// session is kept alive past that by the refresh-token flow (the client renews
+// silently on a 401). Override with JWT_EXPIRE (e.g. "1h", "30m", "7d").
 export const generateToken = (userId, userType) => {
   return jwt.sign({ id: userId, userType }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE || "7d",
+    expiresIn: process.env.JWT_EXPIRE || "1h",
   });
 };
 

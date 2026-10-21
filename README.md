@@ -68,7 +68,7 @@ NODE_ENV=development
 PORT=5000
 MONGO_URI=mongodb://localhost:27017/ticketing_system
 JWT_SECRET=your_very_secure_secret_key_change_this
-JWT_EXPIRE=7d
+JWT_EXPIRE=1h
 JWT_COOKIE_EXPIRE=7
 CLIENT_URL=http://localhost:3000
 ```
@@ -2019,7 +2019,7 @@ GET /api/scopes?page=2&limit=10&isActive=true&search=support
 | `PORT` | Server port | 5000 | No |
 | `MONGO_URI` | MongoDB connection string | - | Yes |
 | `JWT_SECRET` | Secret key for JWT | - | Yes |
-| `JWT_EXPIRE` | JWT expiration | 7d | No |
+| `JWT_EXPIRE` | Access-token lifetime (session renews via refresh token) | 1h | No |
 | `JWT_COOKIE_EXPIRE` | Cookie expiration (days) | 7 | No |
 | `CLIENT_URL` | Frontend URL | - | No |
 
