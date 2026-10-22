@@ -36,8 +36,13 @@ export const proposalTotals = (p) => {
 
   const term = num(p?.licenses?.termMonths) || 12;
   const licSum = (p?.licenses?.lines ?? []).reduce((a, l) => a + num(l.qty) * licenseUnitPrice(l, term), 0);
-  const licDisc = (licSum * num(p?.licenses?.discountPct)) / 100;
-  const licNet = licSum - licDisc;
+  // Step 1 — preliminary eligibility discount (checkbox off ⇒ 0%).
+  const eligPct = p?.licenses?.eligibilityDiscount ? num(p?.licenses?.eligibilityDiscountPct) : 0;
+  const licEligDisc = (licSum * eligPct) / 100;
+  const licBase = licSum - licEligDisc; // "Base Price After Eligibility"
+  // Step 2 — the standard discount applies to the reduced base, so the two compound.
+  const licDisc = (licBase * num(p?.licenses?.discountPct)) / 100;
+  const licNet = licBase - licDisc;
   const licVat = (licNet * vat) / 100;
   const licenses = licNet + licVat;
 
@@ -46,6 +51,8 @@ export const proposalTotals = (p) => {
     implementation,
     implementationNet,
     licSum,
+    licEligDisc,
+    licBase,
     licDisc,
     licNet,
     licVat,
@@ -67,7 +74,12 @@ export const storedTotals = (p) => {
  */
 export const discountOverLimit = (p, maxDiscount) => {
   const max = num(maxDiscount);
-  return num(p?.implementation?.discountPct) > max || num(p?.licenses?.discountPct) > max;
+  const eligPct = p?.licenses?.eligibilityDiscount ? num(p?.licenses?.eligibilityDiscountPct) : 0;
+  return (
+    num(p?.implementation?.discountPct) > max ||
+    num(p?.licenses?.discountPct) > max ||
+    eligPct > max
+  );
 };
 
 /** Statuses that still wait for an admin's approval (a missing status reads as Draft). */
