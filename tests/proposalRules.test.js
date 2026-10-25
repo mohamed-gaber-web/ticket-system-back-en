@@ -245,6 +245,53 @@ test("proposal save input: unknown modules dropped, numbers clamped, images need
   assert.equal(out.pages.portfolio, true);
 });
 
+test("licenses eligibility discount: round-trip, non-true ⇒ false, pct clamped", () => {
+  const on = cleanProposalInput({ licenses: { eligibilityDiscount: true, eligibilityDiscountPct: 30 } }, { modules: config.modules });
+  assert.equal(on.licenses.eligibilityDiscount, true);
+  assert.equal(on.licenses.eligibilityDiscountPct, 30);
+  // anything that is not the boolean true cleans to false
+  for (const v of ["true", 1, "on", undefined, null, 0]) {
+    assert.equal(cleanProposalInput({ licenses: { eligibilityDiscount: v } }, { modules: config.modules }).licenses.eligibilityDiscount, false, String(v));
+  }
+  // the percentage is clamped to [0, 100] and non-numbers fall back to 0
+  assert.equal(cleanProposalInput({ licenses: { eligibilityDiscountPct: 150 } }, { modules: config.modules }).licenses.eligibilityDiscountPct, 100);
+  assert.equal(cleanProposalInput({ licenses: { eligibilityDiscountPct: -5 } }, { modules: config.modules }).licenses.eligibilityDiscountPct, 0);
+  assert.equal(cleanProposalInput({ licenses: { eligibilityDiscountPct: "abc" } }, { modules: config.modules }).licenses.eligibilityDiscountPct, 0);
+  // defaults when the licenses block omits them
+  const bare = cleanProposalInput({ licenses: {} }, { modules: config.modules });
+  assert.equal(bare.licenses.eligibilityDiscount, false);
+  assert.equal(bare.licenses.eligibilityDiscountPct, 0);
+});
+
+test("buildProposalDefaults seeds eligibility off at 0%", () => {
+  const p = buildProposalDefaults({
+    lead: { companyName: "Acme Co", country: "Egypt", proposalInterests: ["D365 Finance"], expectedUsers: 5 },
+    catalog,
+    config,
+  });
+  assert.equal(p.licenses.eligibilityDiscount, false);
+  assert.equal(p.licenses.eligibilityDiscountPct, 0);
+});
+
+test("content change: a change in only the eligibility fields is detected", () => {
+  const stored = buildProposalDefaults({
+    lead: { companyName: "Linah Group", country: "Egypt", proposalInterests: ["D365 Finance"], expectedUsers: 5 },
+    catalog,
+    config,
+  });
+  const opts = { modules: config.modules };
+  const body = JSON.parse(JSON.stringify(stored));
+  // flipping only the checkbox is a content change (re-drafts a Pending/Approved proposal)
+  const flipped = cleanProposalInput({ ...body, licenses: { ...body.licenses, eligibilityDiscount: true } }, opts);
+  assert.equal(proposalContentChanged(stored, flipped, opts), true);
+  // changing only the percentage is a content change too
+  const pct = cleanProposalInput({ ...body, licenses: { ...body.licenses, eligibilityDiscountPct: 15 } }, opts);
+  assert.equal(proposalContentChanged(stored, pct, opts), true);
+  // an unchanged body is still no change
+  const same = cleanProposalInput(body, opts);
+  assert.equal(proposalContentChanged(stored, same, opts), false);
+});
+
 test("catalog input: codes kept unique, nameless rows dropped", () => {
   const out = cleanCatalogInput({
     settings: { maxDiscount: 150, vat: { Egypt: 14 } },

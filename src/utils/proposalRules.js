@@ -218,7 +218,7 @@ export const buildProposalDefaults = ({ lead, catalog, config, version = 1, now 
     modules,
     sow: { templateKey, duration: "6 months", sections: sectionsFromTemplate(config?.sowTemplates, templateKey) },
     implementation: { groups, discountPct: 0 },
-    licenses: { lines: licenseLines, discountPct: 0, termMonths: 12, payInAdvance: true },
+    licenses: { lines: licenseLines, discountPct: 0, eligibilityDiscount: false, eligibilityDiscountPct: 0, termMonths: 12, payInAdvance: true },
     notes: [],
     payment: {
       preset: DEFAULT_PAYMENT_PRESET,
@@ -362,6 +362,8 @@ export const cleanProposalInput = (body, { modules: moduleCatalog } = {}) => {
 
   out.licenses = {
     discountPct: clampNum(body?.licenses?.discountPct, 0, 100),
+    eligibilityDiscount: body?.licenses?.eligibilityDiscount === true,
+    eligibilityDiscountPct: clampNum(body?.licenses?.eligibilityDiscountPct, 0, 100),
     termMonths: Math.round(clampNum(body?.licenses?.termMonths, 1, 120, 12)),
     payInAdvance: body?.licenses?.payInAdvance !== false,
     lines: (Array.isArray(body?.licenses?.lines) ? body.licenses.lines : []).slice(0, L.licenses).map((l) => ({

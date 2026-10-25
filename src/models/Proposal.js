@@ -130,6 +130,10 @@ const proposalSchema = new mongoose.Schema(
         default: [],
       },
       discountPct: { type: Number, min: 0, max: 100, default: 0 },
+      // Preliminary eligibility discount, applied to the license price BEFORE the
+      // standard discountPct above (the two compound sequentially — proposalMath.js).
+      eligibilityDiscount: { type: Boolean, default: false },
+      eligibilityDiscountPct: { type: Number, min: 0, max: 100, default: 0 },
       termMonths: { type: Number, min: 1, max: 120, default: 12 },
       payInAdvance: { type: Boolean, default: true },
     },
