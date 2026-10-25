@@ -1,7 +1,9 @@
 import Notification from "../models/notification.js";
+import Customer from "../models/Customer.js";
 import { USER_TYPE_BY_STAFF_MODEL } from "../models/Meeting.js";
 import { emitNotification } from "../socket/io.js";
 import { sendEmail } from "./emailService.js";
+import { customerCanReceive } from "./customerAccess.js";
 
 // One place that turns a meeting event into emails + in-app notifications for
 // everyone involved (staff attendees, the customer/lead, external guests).
@@ -101,6 +103,25 @@ const collectRecipients = (meeting, { includeOrganizer }) => {
 };
 
 /**
+ * Drop a deactivated customer from a meeting's recipient lists. Pure (no DB) so
+ * it can be unit-tested: the caller resolves `canReceive` via customerCanReceive.
+ * When the customer is blocked, their e-mail is removed from the map and their
+ * in-app row is filtered out; staff/lead/guest recipients are never touched.
+ *
+ * @param {{ emails: Map<string,string>, inApp: Array<{userId:any,userType:string}> }} recipients
+ * @param {{ customerId: any, customerEmail?: string, canReceive: boolean }} customer
+ */
+export const withoutBlockedMeetingCustomer = ({ emails, inApp }, { customerId, customerEmail, canReceive }) => {
+  if (!customerId || canReceive) return { emails, inApp };
+  const email = String(customerEmail ?? "").trim().toLowerCase();
+  if (email) emails.delete(email);
+  return {
+    emails,
+    inApp: inApp.filter((r) => !(r.userType === "customer" && String(r.userId) === String(customerId))),
+  };
+};
+
+/**
  * @param {import("mongoose").Document} meeting populated meeting
  * @param {"invite"|"updated"|"cancelled"|"reminder"} event
  * @param {{ actorName?: string, actorId?: any, inApp?: boolean }} ctx the person who triggered it
@@ -113,7 +134,25 @@ export const notifyMeeting = async (meeting, event, ctx = {}) => {
   // The organiser hears about everything except their own invitation; when an
   // attendee or admin reschedules/cancels, the organiser must be told too.
   const organizerIsActor = ctx.actorId && String(meeting.organizer?._id) === String(ctx.actorId);
-  const { emails, inApp } = collectRecipients(meeting, { includeOrganizer: event !== "invite" && !organizerIsActor });
+  let { emails, inApp } = collectRecipients(meeting, { includeOrganizer: event !== "invite" && !organizerIsActor });
+
+  // A deactivated customer — inactive status, or a customer whose company has
+  // been deactivated — must never receive a meeting e-mail or in-app
+  // notification, the same gate the ticket flow applies (utils/customerAccess.js,
+  // emailHelper.withoutInactiveCustomer). Only the meeting's own customer is a
+  // Customer record; staff, leads and external guests are left untouched.
+  if (meeting.customer?._id) {
+    const customer = await Customer.findById(meeting.customer._id)
+      .select("status company email")
+      .populate("company", "isActive")
+      .lean();
+    // Fail open on an orphan customer, like customerAccess does.
+    const canReceive = !customer || (await customerCanReceive(customer));
+    ({ emails, inApp } = withoutBlockedMeetingCustomer(
+      { emails, inApp },
+      { customerId: meeting.customer._id, customerEmail: customer?.email ?? meeting.customer.email, canReceive },
+    ));
+  }
 
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
   const meetingUrl = `${frontendUrl}/calendar?meeting=${meeting._id}`;
