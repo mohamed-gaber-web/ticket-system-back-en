@@ -37,12 +37,32 @@ import {
   NEXT_STAGE,
   stageOf,
   viewStageFilter,
+  stageFilter,
   missingLeadFields,
   missingQualifiedFields,
   hasIdentity,
 } from "../utils/leadStages.js";
 
 const cleanStr = (v) => (v == null ? "" : String(v).trim());
+
+// Largest page the lead list serves (the grid's biggest page-size option).
+const MAX_PAGE_SIZE = 1000;
+
+/**
+ * A { $gte, $lt/$lte } date condition from two query values, or null. A bare
+ * "YYYY-MM-DD" end date covers that whole day; invalid dates are ignored.
+ */
+const dateRange = (from, to) => {
+  const range = {};
+  const start = from ? new Date(from) : null;
+  if (start && !Number.isNaN(start.getTime())) range.$gte = start;
+  const end = to ? new Date(to) : null;
+  if (end && !Number.isNaN(end.getTime())) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(to))) range.$lt = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+    else range.$lte = end;
+  }
+  return Object.keys(range).length ? range : null;
+};
 
 /** Does this update change the lead's value (amount or currency)? */
 const valueChanged = (lead, updateData) =>
@@ -616,10 +636,15 @@ export const getAllLeads = async (req, res) => {
     const {
       status, priority, assignedTo, tags, search, from, to,
       salesType, entityType, industrySector, country, team,
+      leadSource, businessClassification, dataSource,
+      customerNeedProducts, isExistingCustomer, recordType,
+      followUpFrom, followUpTo, proposalMin, proposalMax,
       page = 1, limit = 20,
     } = req.query;
 
     const filter = {};
+    // Extra conditions ANDed in; the caller's scope is appended last.
+    const and = [];
 
     // Every list filter takes one value or several ("a,b" or repeated keys);
     // several values match any of them.
@@ -630,10 +655,18 @@ export const getAllLeads = async (req, res) => {
     const teams = parseListParam(team, { ids: true }).filter((t) => isCrossTeamReader(req) || isCallerTeam(req, t));
     if (teams.length) filter.team = anyOf(teams);
 
-    for (const [field, value] of Object.entries({ status, priority, entityType, industrySector, country })) {
+    for (const [field, value] of Object.entries({
+      status, priority, entityType, industrySector, country, leadSource, businessClassification, dataSource,
+    })) {
       const values = parseListParam(value);
       if (values.length) filter[field] = anyOf(values);
     }
+    const needs = parseListParam(customerNeedProducts, { ids: true });
+    if (needs.length) filter.customerNeedProducts = { $in: needs };
+    // "yes" / "no"; both (or neither) picked means no filter. Records created
+    // before the flag existed have no value, so "no" is "not true".
+    const existing = parseListParam(isExistingCustomer, { allowed: ["yes", "no"] });
+    if (existing.length === 1) filter.isExistingCustomer = existing[0] === "yes" ? true : { $ne: true };
     // Filter the team pipeline by owner; "unassigned" surfaces the leads still
     // waiting to be handed out.
     const owners = parseListParam(assignedTo);
@@ -644,33 +677,41 @@ export const getAllLeads = async (req, res) => {
       ];
       filter.assignedTo = ownerValues.length ? anyOf(ownerValues) : { $in: [] };
     }
-    if (tags) filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
+    const tagValues = parseListParam(tags);
+    if (tagValues.length) filter.tags = { $in: tagValues };
     if (salesType) filter.salesType = viewStageFilter(salesType);
+    // Narrows inside the tab — the Leads tab lists Leads and Opportunities.
+    // stageFilter, so legacy records without a salesType still count as Leads.
+    const recordTypes = parseListParam(recordType, { allowed: ["Data", "Lead", "Opportunity"] });
+    if (recordTypes.length) and.push({ $or: recordTypes.map((t) => ({ salesType: stageFilter(t) })) });
 
     if (search) {
       // Escaped so a company name containing "(" — or a half-typed one — is
       // matched literally instead of reaching Mongo as an invalid pattern and
       // failing the whole request with a 500.
       const safe = escapeRegex(search);
-      filter.$or = [
-        { companyName: { $regex: safe, $options: "i" } },
-        { contactPersonName: { $regex: safe, $options: "i" } },
-        { email: { $regex: safe, $options: "i" } },
-        { customerId: { $regex: safe, $options: "i" } },
-      ];
+      filter.$or = ["companyName", "contactPersonName", "email", "customerId", "jobTitle", "phonePrimary", "phoneSecondary", "phoneOther"]
+        .map((field) => ({ [field]: { $regex: safe, $options: "i" } }));
     }
 
-    if (from || to) {
-      filter.createdAt = {};
-      if (from) filter.createdAt.$gte = new Date(from);
-      if (to) filter.createdAt.$lte = new Date(to);
-    }
+    const created = dateRange(from, to);
+    if (created) filter.createdAt = created;
+    const followUp = dateRange(followUpFrom, followUpTo);
+    if (followUp) filter.nextFollowUpDate = followUp;
+
+    const min = Number(proposalMin);
+    const max = Number(proposalMax);
+    if (proposalMin !== undefined && proposalMin !== "" && Number.isFinite(min)) filter.proposalValue = { $gte: min };
+    if (proposalMax !== undefined && proposalMax !== "" && Number.isFinite(max)) filter.proposalValue = { ...filter.proposalValue, $lte: max };
 
     // The scope goes on LAST, ANDed with everything above, so no combination of
     // parameters reaches past it (and a chosen team still narrows inside it).
-    filter.$and = [leadScopeFilter(req)];
+    filter.$and = [...and, leadScopeFilter(req)];
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    // The grid's largest page size; anything bigger (or junk) is clamped.
+    const pageSize = Math.min(Math.max(parseInt(limit) || 20, 1), MAX_PAGE_SIZE);
+    const pageNo = Math.max(parseInt(page) || 1, 1);
+    const skip = (pageNo - 1) * pageSize;
     const [leads, total] = await Promise.all([
       Lead.find(filter)
         .populate("assignedTo", "firstName lastName email")
@@ -678,7 +719,7 @@ export const getAllLeads = async (req, res) => {
         .populate("team", "name code")
         .populate("customerNeedProducts", "name")
         .skip(skip)
-        .limit(parseInt(limit))
+        .limit(pageSize)
         .sort({ createdAt: -1 }),
       Lead.countDocuments(filter),
     ]);
@@ -686,12 +727,49 @@ export const getAllLeads = async (req, res) => {
     res.status(200).json({
       success: true,
       total,
-      page: parseInt(page),
-      pages: Math.ceil(total / parseInt(limit)),
+      page: pageNo,
+      pages: Math.ceil(total / pageSize),
       data: leads,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching leads", error: error.message });
+  }
+};
+
+// @desc    The values the list's free-text filters can offer: what the caller's
+//          records actually hold (country, classification, data source, tags,
+//          needed products), optionally for one tab.
+// @route   GET /api/leads/filter-options?salesType=Data
+// @access  Private (tele_sales)
+export const getLeadFilterOptions = async (req, res) => {
+  try {
+    const match = { ...leadScopeFilter(req) };
+    if (req.query.salesType) match.salesType = viewStageFilter(req.query.salesType);
+
+    const sorted = (values) => values.filter((v) => typeof v === "string" && v.trim()).sort((a, b) => a.localeCompare(b));
+    const [countries, classifications, dataSources, tags, productIds] = await Promise.all([
+      Lead.distinct("country", match),
+      Lead.distinct("businessClassification", match),
+      Lead.distinct("dataSource", match),
+      Lead.distinct("tags", match),
+      Lead.distinct("customerNeedProducts", match),
+    ]);
+    const products = productIds.length
+      ? await Product.find({ _id: { $in: productIds } }).select("name").sort({ name: 1 }).lean()
+      : [];
+
+    res.status(200).json({
+      success: true,
+      data: {
+        country: sorted(countries),
+        businessClassification: sorted(classifications),
+        dataSource: sorted(dataSources),
+        tags: sorted(tags),
+        customerNeedProducts: products.map((p) => ({ _id: String(p._id), name: p.name })),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error fetching filter options", error: error.message });
   }
 };
 
@@ -1066,32 +1144,49 @@ export const deleteLead = async (req, res) => {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
 
-    // Delete attachments from GridFS
-    const attachments = await LeadAttachment.find({ lead: lead._id });
-    if (attachments.length > 0) {
-      const bucket = getGridFSBucket();
-      await Promise.allSettled(
-        attachments.map((a) => bucket.delete(new mongoose.Types.ObjectId(a.fileId)))
-      );
-    }
-
-    // Delete all related records.
-    //
-    // LeadEmail and LeadStatusHistory are included because every sub-resource is
-    // reached through its lead: once the lead is gone the API answers 404 for them,
-    // so anything left behind can never be listed or removed again — and the email
-    // rows still hold the contact's address and the message body.
-    await Promise.all([
-      CallLog.deleteMany({ lead: lead._id }),
-      FollowUp.deleteMany({ lead: lead._id }),
-      LeadAttachment.deleteMany({ lead: lead._id }),
-      LeadEmail.deleteMany({ lead: lead._id }),
-      LeadStatusHistory.deleteMany({ lead: lead._id }),
-      lead.deleteOne(),
-    ]);
+    await purgeLeads([lead._id]);
 
     res.status(200).json({ success: true, message: "Lead deleted successfully", data: {} });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error deleting lead", error: error.message });
   }
 };
+
+/**
+ * Permanently delete leads and everything hanging off them: GridFS files, then
+ * calls, follow-ups, attachments, emails and status history. Rights are the
+ * caller's job — this deletes whatever ids it is given.
+ *
+ * LeadEmail and LeadStatusHistory are included because every sub-resource is
+ * reached through its lead: once the lead is gone the API answers 404 for them,
+ * so anything left behind can never be listed or removed again — and the email
+ * rows still hold the contact's address and the message body.
+ */
+export const purgeLeads = async (leadIds) => {
+  if (!leadIds.length) return;
+  const byLead = { lead: { $in: leadIds } };
+
+  // Files go a batch at a time so a large bulk delete can't flood the pool.
+  const attachments = await LeadAttachment.find(byLead).select("fileId").lean();
+  if (attachments.length > 0) {
+    const bucket = getGridFSBucket();
+    for (let i = 0; i < attachments.length; i += PURGE_FILE_BATCH) {
+      await Promise.allSettled(
+        attachments.slice(i, i + PURGE_FILE_BATCH).map((a) => bucket.delete(new mongoose.Types.ObjectId(a.fileId)))
+      );
+    }
+  }
+
+  // Children first, the leads last: if a step fails the leads still exist, so
+  // the delete can simply be retried instead of leaving unreachable rows behind.
+  await Promise.all([
+    CallLog.deleteMany(byLead),
+    FollowUp.deleteMany(byLead),
+    LeadAttachment.deleteMany(byLead),
+    LeadEmail.deleteMany(byLead),
+    LeadStatusHistory.deleteMany(byLead),
+  ]);
+  await Lead.deleteMany({ _id: { $in: leadIds } });
+};
+// GridFS files deleted at once by purgeLeads.
+const PURGE_FILE_BATCH = 20;

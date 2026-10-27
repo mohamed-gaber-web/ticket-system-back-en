@@ -5,13 +5,14 @@ import {
   backfillCustomerIds,
   getAllLeads,
   getLeadStats,
+  getLeadFilterOptions,
   getLeadById,
   updateLead,
   deleteLead,
   convertLead,
 } from "../controllers/leadController.js";
 import { changeLeadStatus, getLeadStatusHistory } from "../controllers/leadStatusController.js";
-import { bulkUpdateLeads } from "../controllers/leadBulkController.js";
+import { bulkUpdateLeads, bulkDeleteLeads } from "../controllers/leadBulkController.js";
 import { getLeadDashboard } from "../controllers/leadDashboardController.js";
 import { getLeadAccounts, getLeadAccountContacts } from "../controllers/leadAccountController.js";
 import { addCall, getCallsByLead, updateCall, deleteCall } from "../controllers/callLogController.js";
@@ -53,9 +54,12 @@ router.post("/", requireTeleSalesWrite, createLead);
 router.post("/import", requireTeleSalesWrite, importLeads);
 // Bulk edit / mass reassignment of selected records (any tab); reassigning is a manager's
 router.post("/bulk", requireTeleSalesWrite, bulkUpdateLeads);
+// Bulk delete of selected records: same rights as the single delete, checked per record
+router.post("/bulk-delete", requireManagerOrAdmin, requireTeleSalesWrite, bulkDeleteLeads);
 router.post("/backfill-customer-ids", requireAdmin, backfillCustomerIds);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);
+router.get("/filter-options", getLeadFilterOptions);
 // Dashboard v2: period KPIs (+ previous period), funnel, leaderboard, trend, action lists.
 router.get("/dashboard", getLeadDashboard);
 // Existing-customer lookups for the lead form — static paths, above /:id.

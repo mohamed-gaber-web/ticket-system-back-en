@@ -1,12 +1,16 @@
 import mongoose from "mongoose";
 import Lead, { ENTITY_TYPES, LEAD_SOURCES } from "../models/Lead.js";
-import { resolveLeadSourceDetail } from "./leadController.js";
+import { resolveLeadSourceDetail, purgeLeads } from "./leadController.js";
 import { applyStatusChange } from "./leadStatusController.js";
 import { LEAD_STATUSES } from "../config/leadStatusWorkflow.js";
 import { leadScopeFilter, canEditLead, canManageLead, isLeadManager, assigneeTeamError } from "../utils/teleSalesScope.js";
 
-// The grid's largest page; keeps one request well inside the proxy timeout.
+// Bulk edit: each record costs several queries (update, status, history,
+// reminder), so this keeps one request well inside the proxy timeout.
 export const BULK_MAX = 200;
+// Bulk delete is a handful of queries for the whole batch, so it takes the
+// grid's largest page — "select all" always fits one request.
+export const BULK_DELETE_MAX = 1000;
 // Records worked on at once — each costs a few queries (update, status, history,
 // reminder), so a small pool instead of one-by-one.
 const CONCURRENCY = 8;
@@ -175,5 +179,45 @@ export const bulkUpdateLeads = async (req, res) => {
       return res.status(400).json({ success: false, message: "Validation error", errors: messages });
     }
     res.status(500).json({ success: false, message: "Error updating records", error: error.message });
+  }
+};
+
+// @desc    Permanently delete many records (and their calls, follow-ups, files,
+//          emails and history). Each record needs the same right as the single
+//          delete — a manager inside their own team, or an admin; the rest are
+//          skipped and reported.
+// @route   POST /api/leads/bulk-delete   { ids }
+// @access  Private (team manager within their team, or super admin)
+export const bulkDeleteLeads = async (req, res) => {
+  try {
+    const { ids } = req.body ?? {};
+    if (!Array.isArray(ids) || ids.length === 0) return bad(res, "Select at least one record.");
+    const uniqueIds = [...new Set(ids.map(String))];
+    if (uniqueIds.length > BULK_DELETE_MAX) return bad(res, `You can delete at most ${BULK_DELETE_MAX} records at once.`);
+    if (uniqueIds.some((id) => !mongoose.isValidObjectId(id))) return bad(res, "Invalid record id.");
+
+    // Out-of-scope ids are simply not found — never confirmed to exist.
+    const leads = await Lead.find({ _id: { $in: uniqueIds }, ...leadScopeFilter(req) })
+      .select("team companyName contactPersonName phonePrimary email customerId");
+    const found = new Set(leads.map((l) => String(l._id)));
+    const skipped = uniqueIds.filter((id) => !found.has(id)).map((id) => ({ _id: id, name: id, reason: "Not found" }));
+
+    const deletable = [];
+    for (const lead of leads) {
+      if (canManageLead(req, lead)) deletable.push(lead._id);
+      else skipped.push({ _id: String(lead._id), name: recordName(lead), reason: "You cannot delete this record." });
+    }
+
+    await purgeLeads(deletable);
+
+    res.status(200).json({
+      success: true,
+      message: `Deleted ${deletable.length} of ${uniqueIds.length} record${uniqueIds.length === 1 ? "" : "s"}`,
+      total: uniqueIds.length,
+      deleted: deletable.length,
+      skipped,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error deleting records", error: error.message });
   }
 };
