@@ -12,7 +12,7 @@ import {
   convertLead,
 } from "../controllers/leadController.js";
 import { changeLeadStatus, getLeadStatusHistory } from "../controllers/leadStatusController.js";
-import { bulkUpdateLeads, bulkDeleteLeads } from "../controllers/leadBulkController.js";
+import { bulkUpdateLeads, bulkDeleteLeads, deleteAllDataLeads } from "../controllers/leadBulkController.js";
 import { getLeadDashboard } from "../controllers/leadDashboardController.js";
 import { getLeadAccounts, getLeadAccountContacts } from "../controllers/leadAccountController.js";
 import { addCall, getCallsByLead, updateCall, deleteCall } from "../controllers/callLogController.js";
@@ -56,6 +56,8 @@ router.post("/import", requireTeleSalesWrite, importLeads);
 router.post("/bulk", requireTeleSalesWrite, bulkUpdateLeads);
 // Bulk delete of selected records: same rights as the single delete, checked per record
 router.post("/bulk-delete", requireManagerOrAdmin, requireTeleSalesWrite, bulkDeleteLeads);
+// Delete every Data record matching the list filters (the whole Data tab without filters)
+router.post("/delete-all", requireManagerOrAdmin, requireTeleSalesWrite, deleteAllDataLeads);
 router.post("/backfill-customer-ids", requireAdmin, backfillCustomerIds);
 router.get("/", getAllLeads);
 router.get("/stats", getLeadStats);

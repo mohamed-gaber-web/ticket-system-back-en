@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import Lead, { ENTITY_TYPES, LEAD_SOURCES } from "../models/Lead.js";
-import { resolveLeadSourceDetail, purgeLeads } from "./leadController.js";
+import { resolveLeadSourceDetail, purgeLeads, buildLeadListFilter } from "./leadController.js";
 import { applyStatusChange } from "./leadStatusController.js";
 import { LEAD_STATUSES } from "../config/leadStatusWorkflow.js";
 import { leadScopeFilter, canEditLead, canManageLead, isLeadManager, assigneeTeamError } from "../utils/teleSalesScope.js";
@@ -216,6 +216,59 @@ export const bulkDeleteLeads = async (req, res) => {
       total: uniqueIds.length,
       deleted: deletable.length,
       skipped,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error deleting records", error: error.message });
+  }
+};
+
+// Records purged per round of "Delete all" — the same batch size as a
+// bulk delete, so each round is a handful of queries.
+const DELETE_ALL_BATCH = BULK_DELETE_MAX;
+
+// @desc    Delete every Data record matching the list filters (the whole Data
+//          tab when no filter is set). Same rights as the single delete, checked
+//          per record; the caller must echo the expected count as `confirmCount`
+//          so a stale screen can't delete more than it showed.
+// @route   POST /api/leads/delete-all  { filters, confirmCount }
+// @access  Private (sales manager / admin)
+export const deleteAllDataLeads = async (req, res) => {
+  try {
+    const { filters = {}, confirmCount } = req.body ?? {};
+    if (typeof filters !== "object" || Array.isArray(filters)) return bad(res, "Invalid filters.");
+    // Plain string / string-list values only — no Mongo operators from the body.
+    const query = {};
+    for (const [key, value] of Object.entries(filters)) {
+      if (typeof value === "string" || typeof value === "number") query[key] = String(value);
+      else if (Array.isArray(value) && value.every((v) => typeof v === "string")) query[key] = value.join(",");
+    }
+    // Always the Data tab, whatever the client sent.
+    query.salesType = "Data";
+    delete query.recordType;
+
+    const filter = buildLeadListFilter(req, query);
+    const leads = await Lead.find(filter).select("team").lean();
+    if (Number(confirmCount) !== leads.length) {
+      return res.status(409).json({
+        success: false,
+        message: `The Data list changed — it now holds ${leads.length} record${leads.length === 1 ? "" : "s"}. Refresh and try again.`,
+        total: leads.length,
+      });
+    }
+
+    const deletable = leads.filter((l) => canManageLead(req, l)).map((l) => l._id);
+    for (let i = 0; i < deletable.length; i += DELETE_ALL_BATCH) {
+      await purgeLeads(deletable.slice(i, i + DELETE_ALL_BATCH));
+    }
+    const skippedCount = leads.length - deletable.length;
+    console.log(`[leads] delete-all by ${req.user?._id}: ${deletable.length} deleted, ${skippedCount} skipped`);
+
+    res.status(200).json({
+      success: true,
+      message: `Deleted ${deletable.length} of ${leads.length} Data record${leads.length === 1 ? "" : "s"}`,
+      total: leads.length,
+      deleted: deletable.length,
+      skippedCount,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error deleting records", error: error.message });

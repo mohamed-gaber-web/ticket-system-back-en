@@ -1,6 +1,6 @@
 import { InputError } from "../inputError.js";
 import { isDate } from "./dates.js";
-import { CHEQUE_KINDS, CHEQUE_STATUSES, CURRENCIES, PAY_METHODS } from "./calc.js";
+import { CHEQUE_KINDS, CHEQUE_STATUSES, DEFAULT_CURRENCY, PAY_METHODS } from "./calc.js";
 import { RECIPIENTS, TRIGGERS } from "./reminders.js";
 
 /**
@@ -86,7 +86,7 @@ export const cleanCustomer = (body = {}) => {
     contactEmail: email(body.email ?? body.contactEmail, "Customer email"),
     collect: {
       country: str(body.country, 100) || "Egypt",
-      currency: CURRENCIES.includes(body.currency) ? body.currency : "EGP",
+      currency: DEFAULT_CURRENCY,
       accountManager: str(body.accountManager, 200),
       legalForm: str(body.legalForm, 200),
       cr: str(body.cr, 100),
@@ -131,7 +131,7 @@ export const cleanContract = (body = {}) => {
     type: String(body.type),
     name,
     value: num(body.value, "Contract value"),
-    currency: CURRENCIES.includes(body.currency) ? body.currency : "EGP",
+    currency: DEFAULT_CURRENCY,
     startDate,
     endDate,
     deliveryDate: date(body.deliveryDate, "Delivery date", { optional: true }),
@@ -258,7 +258,7 @@ export const cleanCheque = (body = {}) => {
     number,
     bank: str(body.bank, 120),
     amount: num(body.amount, "Cheque amount"),
-    currency: CURRENCIES.includes(body.currency) ? body.currency : "EGP",
+    currency: DEFAULT_CURRENCY,
     dueDate: date(body.dueDate, "Due date", { optional: true }),
     receivedDate: date(body.receivedDate, "Received date", { optional: true }),
     status: CHEQUE_STATUSES.includes(body.status) ? body.status : "held",
@@ -333,12 +333,6 @@ export const cleanSettings = (body = {}) => {
   if (has(body, "contractPrefix")) out.contractPrefix = str(body.contractPrefix, 20);
   if (has(body, "simulatedToday")) out.simulatedToday = body.simulatedToday ? date(body.simulatedToday, "Today's date") : null;
   if (has(body, "reminderMode")) out.reminderMode = body.reminderMode === "auto" ? "auto" : "manual";
-  if (has(body, "rates")) {
-    out.rates = {
-      SAR: num(body.rates?.SAR, "SAR rate", { max: 100000 }),
-      USD: num(body.rates?.USD, "USD rate", { max: 100000 }),
-    };
-  }
   if (has(body, "document")) {
     const d = body.document ?? {};
     const doc = {};

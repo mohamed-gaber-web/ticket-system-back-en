@@ -46,7 +46,7 @@ const companySchema = new mongoose.Schema({
     type: new mongoose.Schema(
       {
         country: { type: String, trim: true, maxlength: 100, default: "Egypt" },
-        currency: { type: String, enum: ["EGP", "SAR", "USD"], default: "EGP" },
+        currency: { type: String, enum: ["USD"], default: "USD" },
         accountManager: { type: String, trim: true, maxlength: 200, default: "" },
         legalForm: { type: String, trim: true, maxlength: 200, default: "" },
         cr: { type: String, trim: true, maxlength: 100, default: "" },
@@ -69,6 +69,11 @@ const companySchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+});
+
+// Grow Path Collect is USD only: an older currency on the profile is relabelled.
+companySchema.pre("validate", function () {
+  if (this.collect && this.collect.currency && this.collect.currency !== "USD") this.collect.currency = "USD";
 });
 
 companySchema.pre("save", function () {

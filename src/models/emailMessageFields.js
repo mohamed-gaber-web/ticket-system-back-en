@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { subjectKey } from "../utils/emailSubject.js";
 
 // The fields of one message in a two-way email conversation — shared by
 // LeadEmail (tele-sales) and TicketEmail (support tickets), which differ only in
@@ -38,6 +39,9 @@ export const emailMessageFields = (modelName) => ({
     required: [true, "Subject is required"],
     trim: true,
   },
+  // The conversation this message belongs to within its record: the subject
+  // without Re:/Fwd: and the record tag (utils/emailSubject.js). Set on save.
+  subjectKey: { type: String },
   // Sanitised HTML body exactly as it was sent / received.
   body: { type: String, default: "" },
   // Plain-text teaser for list views.
@@ -100,6 +104,9 @@ export const applyEmailMessageSchema = (schema) => {
   schema.index({ sentBy: 1 });
   schema.index({ conversationId: 1 });
   schema.index({ internetMessageId: 1 }, { unique: true, sparse: true });
+  schema.pre("validate", function () {
+    if (this.isNew || this.isModified("subject") || !this.subjectKey) this.subjectKey = subjectKey(this.subject);
+  });
   // The moment the exchange happened, regardless of direction.
   schema.virtual("at").get(function () {
     return this.direction === "inbound" ? this.receivedAt ?? this.createdAt : this.sentAt ?? this.createdAt;

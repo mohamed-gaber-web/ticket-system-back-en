@@ -48,6 +48,7 @@ const getAllNotifications = async (req, res) => {
       .populate("ticket", "ticketNumber subject priority status")
       .populate("meeting", "title startAt status")
       .populate("lead", "companyName contactPersonName")
+      .populate("task", "taskNumber name")
       .sort(sortOptions)
       .limit(parseInt(limit))
       .skip(skip);
@@ -269,7 +270,8 @@ const updateNotification = async (req, res) => {
       }
     ).populate("ticket", "ticketNumber subject priority status")
       .populate("meeting", "title startAt status")
-      .populate("lead", "companyName contactPersonName");
+      .populate("lead", "companyName contactPersonName")
+      .populate("task", "taskNumber name");
 
     res.status(200).json({
       success: true,

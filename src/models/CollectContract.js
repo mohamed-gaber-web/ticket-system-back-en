@@ -72,7 +72,7 @@ const collectContractSchema = new mongoose.Schema(
     typeKey: { type: String, required: true },
     name: { type: String, trim: true, required: true, maxlength: 300 },
     value: { type: Number, required: true, min: 0 },
-    currency: { type: String, enum: ["EGP", "SAR", "USD"], default: "EGP" },
+    currency: { type: String, enum: ["USD"], default: "USD" },
     startDate: { type: String, required: true },
     endDate: { type: String, default: null },
     deliveryDate: { type: String, default: null },
@@ -95,5 +95,10 @@ collectContractSchema.index({ status: 1 });
 collectContractSchema.index({ "installments.dueDate": 1 });
 collectContractSchema.index({ endDate: 1 });
 collectContractSchema.index({ "signature.status": 1, "signature.followUpDate": 1 });
+
+// USD only: a record saved with an older currency (EGP / SAR) is relabelled.
+collectContractSchema.pre("validate", function () {
+  if (this.currency !== "USD") this.currency = "USD";
+});
 
 export default mongoose.model("CollectContract", collectContractSchema);

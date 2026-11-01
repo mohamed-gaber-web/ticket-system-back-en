@@ -2,12 +2,14 @@ import { addDays, addMonths, monthYear, diffDays, monthKey, yearOf } from "./dat
 
 /**
  * Grow Path Collect — core calculations (GROW_PATH_COLLECT_SPEC.md §3, §4, §5),
- * pure functions over plain objects. Money is in the contract's own currency;
- * only analytics convert to EGP with the Settings rates. Tests:
+ * pure functions over plain objects. Every amount is in US dollars (USD only,
+ * like the rest of the app — no exchange rates). Tests:
  * tests/collect.test.js.
  */
 
-export const CURRENCIES = ["EGP", "SAR", "USD"];
+// USD only: any other currency a client sends is stored as USD.
+export const CURRENCIES = ["USD"];
+export const DEFAULT_CURRENCY = "USD";
 export const CONTRACT_STATUSES = ["active", "closed", "renewed", "cancelled"];
 export const PAY_METHODS = ["Bank transfer", "Cheque", "InstaPay", "SADAD", "Cash"];
 
@@ -23,7 +25,8 @@ export const isPaid = (inst) => remaining(inst) <= PAID_TOLERANCE;
 /** Positive = days late, negative = days left. */
 export const lateDays = (inst, today) => diffDays(today, inst.dueDate);
 
-export const toEGP = (v, cur, rates = {}) => (cur === "EGP" || !cur ? Number(v) || 0 : (Number(v) || 0) * (Number(rates[cur]) || 0));
+/** An amount for the totals — every amount is already USD, so no conversion. */
+export const toUsd = (v) => Number(v) || 0;
 
 /** The installment status chip (§3.1). */
 export const instStatus = (inst, today) => {
@@ -197,7 +200,7 @@ export const sortCollection = (rows, filter) =>
     filter === "overdue" ? b.late - a.late : a.inst.dueDate.localeCompare(b.inst.dueDate)
   );
 
-// ── Analytics (§4) — every amount in EGP ─────────────────────────────────────
+// ── Analytics (§4) — every amount in USD ─────────────────────────────────────
 
 const pct = (a, b) => (b > 0 ? a / b : null);
 
@@ -205,8 +208,8 @@ const pct = (a, b) => (b > 0 ? a / b : null);
  * Everything the analytics screen draws, from filtered contracts.
  * `types` = [{ key, name, color }], `customers` = Map(id → name).
  */
-export const buildAnalytics = ({ contracts, types, customers, rates, today, year }) => {
-  const egp = (v, c) => toEGP(v, c.currency, rates);
+export const buildAnalytics = ({ contracts, types, customers, today, year }) => {
+  const usd = (v) => toUsd(v);
   const live = contracts.filter((c) => c.status !== "cancelled");
   const thisMonth = monthKey(today);
 
@@ -216,41 +219,41 @@ export const buildAnalytics = ({ contracts, types, customers, rates, today, year
   );
 
   const active = contracts.filter((c) => c.status === "active");
-  const backlog = sum(allInst, ({ c, i }) => egp(remaining(i), c));
+  const backlog = sum(allInst, ({ c, i }) => usd(remaining(i)));
   const overdue = sum(
     allInst.filter(({ i }) => lateDays(i, today) > 0),
-    ({ c, i }) => egp(remaining(i), c)
+    ({ c, i }) => usd(remaining(i))
   );
   const dueYear = allInst.filter(({ i }) => yearOf(i.dueDate) === year && i.dueDate <= today);
   const kpis = {
-    activeValue: sum(active, (c) => egp(c.value, c)),
+    activeValue: sum(active, (c) => usd(c.value)),
     activeCount: active.length,
     backlog,
     overdue,
     overduePct: pct(overdue, backlog),
     dueThisMonth: sum(
       allInst.filter(({ i }) => monthKey(i.dueDate) === thisMonth),
-      ({ c, i }) => egp(remaining(i), c)
+      ({ c, i }) => usd(remaining(i))
     ),
     collectedYear: sum(
       allPays.filter(({ p }) => yearOf(p.date) === year),
-      ({ c, p }) => egp(p.amount, c)
+      ({ c, p }) => usd(p.amount)
     ),
     discipline: pct(
-      sum(dueYear, ({ c, i }) => egp(Math.min(Number(i.amount) || 0, paid(i)), c)),
-      sum(dueYear, ({ c, i }) => egp(i.amount, c))
+      sum(dueYear, ({ c, i }) => usd(Math.min(Number(i.amount) || 0, paid(i)))),
+      sum(dueYear, ({ c, i }) => usd(i.amount))
     ),
   };
 
   const months = Array.from({ length: 12 }, (_, k) => `${year}-${String(k + 1).padStart(2, "0")}`);
   const prevYearMonth = (m) => `${year - 1}${m.slice(4)}`;
-  const collectedIn = (m) => sum(allPays.filter(({ p }) => monthKey(p.date) === m), ({ c, p }) => egp(p.amount, c));
+  const collectedIn = (m) => sum(allPays.filter(({ p }) => monthKey(p.date) === m), ({ c, p }) => usd(p.amount));
 
   const monthly = months.map((m, k) => {
-    const planned = sum(allInst.filter(({ i }) => monthKey(i.dueDate) === m), ({ c, i }) => egp(i.amount, c));
+    const planned = sum(allInst.filter(({ i }) => monthKey(i.dueDate) === m), ({ c, i }) => usd(i.amount));
     const pays = allPays.filter(({ p }) => monthKey(p.date) === m);
-    const part = (f) => sum(pays.filter(f), ({ c, p }) => egp(p.amount, c));
-    const collected = sum(pays, ({ c, p }) => egp(p.amount, c));
+    const part = (f) => sum(pays.filter(f), ({ c, p }) => usd(p.amount));
+    const collected = sum(pays, ({ c, p }) => usd(p.amount));
     const prevCollected = k === 0 ? collectedIn(`${year - 1}-12`) : null;
     return {
       month: m,
@@ -290,15 +293,15 @@ export const buildAnalytics = ({ contracts, types, customers, rates, today, year
         sum(rows.filter((x) => x.c.typeKey === t.key && monthKey(monthOf(x)) === m), amountOf)
       ),
     }));
-  const collectedByType = byType(allPays, ({ c, p }) => egp(p.amount, c), ({ p }) => p.date);
-  const plannedByType = byType(allInst, ({ c, i }) => egp(i.amount, c), ({ i }) => i.dueDate);
+  const collectedByType = byType(allPays, ({ c, p }) => usd(p.amount), ({ p }) => p.date);
+  const plannedByType = byType(allInst, ({ c, i }) => usd(i.amount), ({ i }) => i.dueDate);
 
   const remainingByType = types
     .map((t) => ({
       key: t.key,
       name: t.name,
       color: t.color,
-      value: sum(allInst.filter(({ c }) => c.typeKey === t.key), ({ c, i }) => egp(remaining(i), c)),
+      value: sum(allInst.filter(({ c }) => c.typeKey === t.key), ({ c, i }) => usd(remaining(i))),
     }))
     .filter((x) => x.value > 0)
     .sort((a, b) => b.value - a.value);
@@ -311,7 +314,7 @@ export const buildAnalytics = ({ contracts, types, customers, rates, today, year
       label: monthYear(`${m}-01`),
       value: sum(
         allInst.filter(({ i }) => monthKey(i.dueDate) === m && lateDays(i, today) <= 0),
-        ({ c, i }) => egp(remaining(i), c)
+        ({ c, i }) => usd(remaining(i))
       ),
     });
   }
@@ -320,7 +323,7 @@ export const buildAnalytics = ({ contracts, types, customers, rates, today, year
   for (const { c, i } of allInst) {
     if (lateDays(i, today) <= 0) continue;
     const id = idOf(c.customer);
-    overdueByCustomer.set(id, (overdueByCustomer.get(id) ?? 0) + egp(remaining(i), c));
+    overdueByCustomer.set(id, (overdueByCustomer.get(id) ?? 0) + usd(remaining(i)));
   }
   const topOverdue = [...overdueByCustomer.entries()]
     .filter(([, v]) => v > PAID_TOLERANCE)
@@ -328,5 +331,5 @@ export const buildAnalytics = ({ contracts, types, customers, rates, today, year
     .slice(0, 6)
     .map(([id, value]) => ({ id, name: customers.get(id) ?? "—", value }));
 
-  return { year, today, rates, kpis, monthly, totals, collectedByType, plannedByType, remainingByType, upcoming, topOverdue };
+  return { year, today, kpis, monthly, totals, collectedByType, plannedByType, remainingByType, upcoming, topOverdue };
 };

@@ -222,7 +222,7 @@ export const getEmailInbox = async (req, res) => {
         page: pageNo,
         limit: pageSize,
         lookup: [
-          { $lookup: { from: "leads", localField: "_id", foreignField: "_id", as: "lead", pipeline: [{ $project: { companyName: 1, contactPersonName: 1, email: 1, status: 1, assignedTo: 1 } }] } },
+          { $lookup: { from: "leads", localField: "record", foreignField: "_id", as: "lead", pipeline: [{ $project: { companyName: 1, contactPersonName: 1, email: 1, status: 1, assignedTo: 1 } }] } },
           { $unwind: { path: "$lead", preserveNullAndEmptyArrays: true } },
         ],
         project: { lead: 1 },
