@@ -66,6 +66,12 @@ const departmentScope = (req, requested) => {
   return { department: { $in: (picked.length ? picked : own).map(toObjectId) } };
 };
 
+/** May the caller read this task (and its email thread)? Same rule as GET /tasks/:id. */
+export const canSeeTask = (req, task) => Boolean(task) && (isAdmin(req.user) || inCallerDepartments(req, task));
+
+/** The task filter of everything the caller may read (their departments; admins all). */
+export const visibleTaskFilter = (req) => departmentScope(req);
+
 /** Is this employee named on the task — assignee, responsible, or creator? */
 const isTaskOwner = (req, task) => {
   const me = String(req.user._id);

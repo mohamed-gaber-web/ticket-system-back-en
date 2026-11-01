@@ -1,6 +1,6 @@
 import { InputError } from "../../utils/inputError.js";
 import { addDays, diffDays } from "../../utils/collect/dates.js";
-import { CHEQUE_STATUSES, chequeClearingPayment, toEGP } from "../../utils/collect/calc.js";
+import { CHEQUE_STATUSES, chequeClearingPayment, toUsd } from "../../utils/collect/calc.js";
 import { cleanCheque } from "../../utils/collect/rules.js";
 import { CollectCheque, CollectContract, chequeView, contractSummary, fail, getSettings, isObjectId, loadContext, notFound, todayOf } from "./shared.js";
 
@@ -153,7 +153,6 @@ export const getSignatures = async (_req, res) => {
   try {
     const { ctx, contractsById } = await contextViews();
     const { today, settings } = ctx;
-    const rates = settings.rates;
     const summaries = ctx.contracts.map((c) => ({ c, s: contractSummary(c, ctx) }));
     const unsigned = summaries.filter(({ s }) => s.unsigned);
     const followups = unsigned
@@ -178,9 +177,9 @@ export const getSignatures = async (_req, res) => {
       data: {
         kpis: {
           unsignedCount: unsigned.length,
-          unsignedValue: unsigned.reduce((a, { c }) => a + toEGP(c.value, c.currency, rates), 0),
+          unsignedValue: unsigned.reduce((a, { c }) => a + toUsd(c.value), 0),
           followUpsDue: followups.filter((f) => f.followUpDate && f.followUpDate <= today).length,
-          guaranteeValue: held.reduce((a, q) => a + toEGP(q.amount, q.currency, rates), 0),
+          guaranteeValue: held.reduce((a, q) => a + toUsd(q.amount), 0),
           guaranteeCount: held.length,
           paymentDue30: ctx.cheques.filter((q) => q.kind === "payment" && ["held", "deposited"].includes(q.status) && q.dueDate && q.dueDate <= in30).length,
           returned: ctx.cheques.filter((q) => q.status === "returned").length,

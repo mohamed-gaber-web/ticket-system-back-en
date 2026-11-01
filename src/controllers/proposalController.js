@@ -474,6 +474,14 @@ const advanceOpportunityOnProposalSent = async (req, lead, proposal) => {
       lead.salesType = "Opportunity";
     }
 
+    // The sent proposal's total is the opportunity's proposal price, whatever
+    // happens to the status below — even a record already in Negotiation (which
+    // keeps its status) shows the price of the proposal that actually went out.
+    await Lead.updateOne(
+      { _id: lead._id },
+      { $set: { proposalValue: proposal.totals.grand, proposalCurrency: "USD", proposalUpdatedAt: new Date() } },
+    );
+
     const step = LEAD_STATUS_WORKFLOW[lead.status]?.step;
     // Don't drag a record already past "Proposal Sent" back to it.
     if (step != null && step > 4) return null;

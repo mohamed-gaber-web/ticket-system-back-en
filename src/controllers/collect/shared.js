@@ -40,7 +40,6 @@ export const defaultSettingsDoc = () => {
     nextContractNo: 1,
     simulatedToday: null,
     reminderMode: "manual",
-    rates: s.rates,
     document: { ...s.document, logo: null, mark: null },
     clauses: defaultClauses(),
   };

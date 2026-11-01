@@ -6,11 +6,11 @@ import {
   collectionRows,
   matchesCollectionFilter,
   sortCollection,
-  toEGP,
+  toUsd,
 } from "../../utils/collect/calc.js";
 import { fail, isObjectId, loadContext } from "./shared.js";
 
-// Grow Path Collect — the monthly analysis (§4, every amount in EGP) and the
+// Grow Path Collect — the monthly analysis (§4, every amount in USD) and the
 // collection screen (§5).
 
 // GET /collect/analytics?year&type&customer
@@ -26,7 +26,6 @@ export const getAnalytics = async (req, res) => {
       contracts: ctx.contracts,
       types: ctx.types.map((t) => ({ key: t.key, name: t.name, color: t.color })),
       customers,
-      rates: ctx.settings.rates,
       today: ctx.today,
       year,
     });
@@ -50,12 +49,11 @@ export const getCollection = async (req, res) => {
     const searched = re ? all.filter((r) => re.test(r.contract.no) || re.test(r.contract.name) || re.test(nameOf(r.contract))) : all;
     const counts = Object.fromEntries(COLLECTION_FILTERS.map((f) => [f, searched.filter((r) => matchesCollectionFilter(r, f, today)).length]));
     const rows = sortCollection(searched.filter((r) => matchesCollectionFilter(r, filter, today)), filter);
-    const rates = ctx.settings.rates;
     res.json({
       success: true,
       today,
       counts,
-      totalRemainingEGP: rows.reduce((a, r) => a + toEGP(r.remaining, r.contract.currency, rates), 0),
+      totalRemaining: rows.reduce((a, r) => a + toUsd(r.remaining), 0),
       data: rows.map((r) => ({
         contractId: String(r.contract._id),
         contractNo: r.contract.no,

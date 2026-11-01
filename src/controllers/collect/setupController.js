@@ -112,7 +112,6 @@ export const getMeta = async (req, res) => {
         today: ctx.today,
         simulated: !!s.simulatedToday,
         company: s.company,
-        rates: s.rates,
         contractPrefix: s.contractPrefix,
         reminderMode: s.reminderMode,
         internalEmailSet: !!s.internalEmail,
@@ -200,7 +199,7 @@ export const listCustomers = async (req, res) => {
     const view = (c) =>
       c.collect || used.has(String(c._id))
         ? { ...customerView(c), contractCount: used.get(String(c._id)) ?? 0 }
-        : { id: String(c._id), name: c.name, currency: "EGP", inCollect: false, contractCount: 0 };
+        : { id: String(c._id), name: c.name, currency: "USD", inCollect: false, contractCount: 0 };
     res.json({ success: true, data: companies.map(view) });
   } catch (error) {
     fail(res, error, "Could not load the customers");

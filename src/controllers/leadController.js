@@ -633,14 +633,50 @@ export const backfillCustomerIds = async (req, res) => {
 // @access  Private (tele_sales) — admin/marketing: all teams, everyone else: their own teams
 export const getAllLeads = async (req, res) => {
   try {
+    const { page = 1, limit = 20 } = req.query;
+    const filter = buildLeadListFilter(req, req.query);
+
+    // The grid's largest page size; anything bigger (or junk) is clamped.
+    const pageSize = Math.min(Math.max(parseInt(limit) || 20, 1), MAX_PAGE_SIZE);
+    const pageNo = Math.max(parseInt(page) || 1, 1);
+    const skip = (pageNo - 1) * pageSize;
+    const [leads, total] = await Promise.all([
+      Lead.find(filter)
+        .populate("assignedTo", "firstName lastName email")
+        .populate("createdBy", "firstName lastName")
+        .populate("team", "name code")
+        .populate("customerNeedProducts", "name")
+        .skip(skip)
+        .limit(pageSize)
+        .sort({ createdAt: -1 }),
+      Lead.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      total,
+      page: pageNo,
+      pages: Math.ceil(total / pageSize),
+      data: leads,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error fetching leads", error: error.message });
+  }
+};
+
+/**
+ * The Mongo filter for the leads list from its query parameters, with the
+ * caller's scope ANDed in last. Shared by the list and "Delete all", so a
+ * delete-all removes exactly what the list shows for the same filters.
+ */
+export const buildLeadListFilter = (req, query = {}) => {
     const {
       status, priority, assignedTo, tags, search, from, to,
       salesType, entityType, industrySector, country, team,
       leadSource, businessClassification, dataSource,
       customerNeedProducts, isExistingCustomer, recordType,
       followUpFrom, followUpTo, proposalMin, proposalMax,
-      page = 1, limit = 20,
-    } = req.query;
+    } = query;
 
     const filter = {};
     // Extra conditions ANDed in; the caller's scope is appended last.
@@ -707,33 +743,7 @@ export const getAllLeads = async (req, res) => {
     // The scope goes on LAST, ANDed with everything above, so no combination of
     // parameters reaches past it (and a chosen team still narrows inside it).
     filter.$and = [...and, leadScopeFilter(req)];
-
-    // The grid's largest page size; anything bigger (or junk) is clamped.
-    const pageSize = Math.min(Math.max(parseInt(limit) || 20, 1), MAX_PAGE_SIZE);
-    const pageNo = Math.max(parseInt(page) || 1, 1);
-    const skip = (pageNo - 1) * pageSize;
-    const [leads, total] = await Promise.all([
-      Lead.find(filter)
-        .populate("assignedTo", "firstName lastName email")
-        .populate("createdBy", "firstName lastName")
-        .populate("team", "name code")
-        .populate("customerNeedProducts", "name")
-        .skip(skip)
-        .limit(pageSize)
-        .sort({ createdAt: -1 }),
-      Lead.countDocuments(filter),
-    ]);
-
-    res.status(200).json({
-      success: true,
-      total,
-      page: pageNo,
-      pages: Math.ceil(total / pageSize),
-      data: leads,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Error fetching leads", error: error.message });
-  }
+    return filter;
 };
 
 // @desc    The values the list's free-text filters can offer: what the caller's

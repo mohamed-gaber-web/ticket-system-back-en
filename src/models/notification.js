@@ -16,6 +16,11 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Lead",
     },
+    // Set for task notifications (an email reply on the task).
+    task: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+    },
     // Set for Proposal Builder notifications (approval requested / approved).
     proposal: {
       type: mongoose.Schema.Types.ObjectId,
@@ -54,6 +59,7 @@ const notificationSchema = new mongoose.Schema(
         "meeting_reminder",
         "lead_email_reply",
         "ticket_email_reply",
+        "task_email_reply",
         "proposal_approval_request",
         "proposal_approved",
         "proposal_rejected",

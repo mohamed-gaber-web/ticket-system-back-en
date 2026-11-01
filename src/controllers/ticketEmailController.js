@@ -238,7 +238,7 @@ export const getTicketEmailInbox = async (req, res) => {
           {
             $lookup: {
               from: "tickets",
-              localField: "_id",
+              localField: "record",
               foreignField: "_id",
               as: "ticket",
               pipeline: [

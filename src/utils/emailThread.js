@@ -236,15 +236,18 @@ export const threadSummary = (emails) => {
 };
 
 /**
- * The per-conversation grouping stages shared by both email inboxes: one row
- * per `groupField` value with counts, the last message and who is waiting on
- * whom. The caller adds its own $match before and $lookup after.
+ * The per-conversation grouping stages shared by the email inboxes: one row per
+ * record (`groupField`) AND subject — every subject is its own conversation —
+ * with counts, the last message and who is waiting on whom. The row carries the
+ * record id as `record` (the caller's $lookup joins on it) and the conversation
+ * as `subjectKey`. Messages saved before subjectKey existed fall back to the
+ * lower-cased subject until backfillEmailSubjectKeys.js has run.
  */
 export const conversationStages = (groupField, filter) => [
   { $sort: { createdAt: 1 } },
   {
     $group: {
-      _id: `$${groupField}`,
+      _id: { record: `$${groupField}`, subject: { $ifNull: ["$subjectKey", { $toLower: "$subject" }] } },
       messages: { $sum: 1 },
       sent: { $sum: { $cond: [{ $and: [{ $ne: ["$direction", "inbound"] }, { $ne: ["$status", "failed"] }] }, 1, 0] } },
       received: { $sum: { $cond: [{ $eq: ["$direction", "inbound"] }, 1, 0] } },
@@ -257,6 +260,8 @@ export const conversationStages = (groupField, filter) => [
   },
   {
     $addFields: {
+      record: "$_id.record",
+      subjectKey: "$_id.subject",
       awaitingAgent: { $and: [{ $eq: ["$last.direction", "inbound"] }, { $ne: ["$last.status", "replied"] }] },
       awaitingLead: { $and: [{ $ne: ["$last.direction", "inbound"] }, { $ne: ["$last.status", "failed"] }] },
       lastAt: { $ifNull: [{ $cond: [{ $eq: ["$last.direction", "inbound"] }, "$last.receivedAt", "$last.sentAt"] }, "$last.createdAt"] },
@@ -280,6 +285,7 @@ export const inboxFacet = ({ page, limit, lookup, project }) => ({
         $project: {
           _id: 0,
           ...project,
+          subjectKey: 1,
           messages: 1, sent: 1, received: 1, unread: 1, awaitingAgent: 1, awaitingLead: 1,
           lastAt: 1, lastInboundAt: 1, lastOutboundAt: 1, agents: 1,
           last: { _id: 1, direction: 1, status: 1, subject: 1, bodyPreview: 1, from: 1, fromName: 1, sentByName: 1 },

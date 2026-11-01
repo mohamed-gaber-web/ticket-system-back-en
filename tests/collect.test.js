@@ -20,7 +20,7 @@ import {
   renewalDefaults,
   renewedValue,
   sortCollection,
-  toEGP,
+  toUsd,
 } from "../src/utils/collect/calc.js";
 import { buildMails, fill, money } from "../src/utils/collect/reminders.js";
 import {
@@ -125,7 +125,7 @@ describe("installment status and totals (§3.1)", () => {
       { collected: 40, remaining: 260, overdue: 60 }
     );
     assert.equal(contractTotals({ ...c, status: "cancelled" }, today).remaining, 0);
-    assert.equal(toEGP(10, "SAR", { SAR: 13 }), 130);
+    assert.equal(toUsd(10), 10);
   });
 
   it("filters and sorts the collection screen", () => {
@@ -155,7 +155,7 @@ describe("analytics (§4)", () => {
       typeKey: "impl",
       status: "active",
       value: 1000,
-      currency: "EGP",
+      currency: "USD",
       installments: [
         { _id: "i1", amount: 400, dueDate: "2026-01-15", payments: [{ amount: 400, date: "2026-03-10" }] },
         { _id: "i2", amount: 600, dueDate: "2026-03-01", payments: [{ amount: 100, date: "2026-03-02" }] },
@@ -167,7 +167,7 @@ describe("analytics (§4)", () => {
       typeKey: "sla",
       status: "active",
       value: 100,
-      currency: "SAR",
+      currency: "USD",
       installments: [{ _id: "i3", amount: 100, dueDate: "2026-05-01", payments: [{ amount: 50, date: "2026-02-20" }] }],
     },
   ];
@@ -181,7 +181,6 @@ describe("analytics (§4)", () => {
       ["c1", "A"],
       ["c2", "B"],
     ]),
-    rates: { SAR: 13, USD: 48 },
     today: "2026-06-01",
     year: 2026,
   });
@@ -191,15 +190,15 @@ describe("analytics (§4)", () => {
     assert.equal(mar.collected, 500);
     assert.equal(mar.fromLate, 400);
     assert.equal(mar.fromMonth, 100);
-    assert.equal(a.monthly[1].advance, 650); // February payment against a May installment, in EGP
+    assert.equal(a.monthly[1].advance, 50); // February payment against a May installment
   });
 
-  it("totals equal the sum of the rows, in EGP", () => {
+  it("totals equal the sum of the rows, in USD", () => {
     assert.equal(a.totals.collected, a.monthly.reduce((s, r) => s + r.collected, 0));
-    assert.equal(a.totals.planned, 400 + 600 + 1300);
-    assert.equal(a.kpis.overdue, 500 + 650);
-    assert.equal(a.kpis.backlog, 500 + 650);
-    assert.equal(a.topOverdue[0].name, "B");
+    assert.equal(a.totals.planned, 400 + 600 + 100);
+    assert.equal(a.kpis.overdue, 500 + 50);
+    assert.equal(a.kpis.backlog, 500 + 50);
+    assert.equal(a.topOverdue[0].name, "A"); // 500 overdue vs 50
   });
 });
 
@@ -214,7 +213,7 @@ describe("reminder engine (§6)", () => {
     typeKey: "impl",
     status: "active",
     value: 1000,
-    currency: "EGP",
+    currency: "USD",
     installments: [{ _id: "i1", name: "Installment 1", amount: 1000, dueDate: "2026-09-21", payments: [] }],
   };
   const base = {
@@ -263,7 +262,7 @@ describe("reminder engine (§6)", () => {
 
   it("replaces known placeholders and leaves unknown ones", () => {
     assert.equal(fill("{{customer}} — {{unknown_token}}", { customer: "ACME" }), "ACME — {{unknown_token}}");
-    assert.equal(money(1250000, "EGP"), "1,250,000 EGP");
+    assert.equal(money(1250000, "USD"), "1,250,000 USD");
   });
 });
 

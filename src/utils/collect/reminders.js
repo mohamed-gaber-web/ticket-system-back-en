@@ -23,7 +23,7 @@ export const TRIGGER_LABELS = {
 
 const FAMILY = { due: "due", overdue: "overdue", renewal: "ren", sign: "sign", cheque: "cheque" };
 
-export const CURRENCY_LABELS = { EGP: "EGP", SAR: "SAR", USD: "USD" };
+export const CURRENCY_LABELS = { USD: "USD" };
 
 const n0 = (v) => new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(Math.round(Number(v) || 0));
 export const money = (v, cur) => `${n0(v)} ${CURRENCY_LABELS[cur] ?? cur ?? ""}`.trim();

@@ -190,7 +190,7 @@ export const importData = async (req, res) => {
         if (data.contactName && !c.contactName) c.contactName = data.contactName;
         if (data.contactEmail && !c.contactEmail) c.contactEmail = data.contactEmail;
       } else if (!c.collect) {
-        c.collect = { currency: "EGP" };
+        c.collect = { currency: "USD" };
       }
       await c.save();
       companyId.set(name, c._id);
@@ -232,7 +232,7 @@ export const importData = async (req, res) => {
         number: String(q.number ?? "—").slice(0, 60) || "—",
         bank: String(q.bank ?? "").slice(0, 120),
         amount: Math.max(0, Number(q.amount) || 0),
-        currency: ["EGP", "SAR", "USD"].includes(q.currency) ? q.currency : c.currency,
+        currency: "USD",
         dueDate: dateOr(q.dueDate),
         receivedDate: dateOr(q.receivedDate),
         status: ["held", "deposited", "cleared", "returned", "released"].includes(q.status) ? q.status : "held",
@@ -263,9 +263,9 @@ export const wipeData = async (_req, res) => {
 };
 
 const DEMO_CUSTOMERS = [
-  { name: "Nile Foods Industries (Demo)", contactName: "Ahmed Samy", email: "finance@nile-foods.example.com", country: "Egypt", currency: "EGP", accountManager: "Mohamed Ali", legalForm: "Egyptian Joint Stock Company", cr: "112233", crOffice: "Cairo Commercial Registry Office", taxNo: "200-300-400", address: "Industrial Zone, 10th of Ramadan City, Egypt", signer: "Ahmed Samy", signerTitle: "Managing Director" },
-  { name: "Riyadh Trading Est. (Demo)", contactName: "Khaled Al-Otaibi", email: "ap@riyadh-trading.example.com", country: "Saudi Arabia", currency: "SAR", accountManager: "Sara Hassan", legalForm: "Sole Proprietorship", cr: "1010101010", crOffice: "Riyadh", taxNo: "300012345600003", address: "Al Olaya District, Riyadh, Saudi Arabia", signer: "Khaled Al-Otaibi", signerTitle: "General Manager" },
-  { name: "Delta Distribution (Demo)", contactName: "Mona Adel", email: "", country: "Egypt", currency: "EGP", accountManager: "Mohamed Ali", legalForm: "Limited Liability Company", cr: "445566", crOffice: "Mansoura Commercial Registry Office", taxNo: "", address: "Mansoura, Dakahlia, Egypt", signer: "", signerTitle: "" },
+  { name: "Nile Foods Industries (Demo)", contactName: "Ahmed Samy", email: "finance@nile-foods.example.com", country: "Egypt", currency: "USD", accountManager: "Mohamed Ali", legalForm: "Egyptian Joint Stock Company", cr: "112233", crOffice: "Cairo Commercial Registry Office", taxNo: "200-300-400", address: "Industrial Zone, 10th of Ramadan City, Egypt", signer: "Ahmed Samy", signerTitle: "Managing Director" },
+  { name: "Riyadh Trading Est. (Demo)", contactName: "Khaled Al-Otaibi", email: "ap@riyadh-trading.example.com", country: "Saudi Arabia", currency: "USD", accountManager: "Sara Hassan", legalForm: "Sole Proprietorship", cr: "1010101010", crOffice: "Riyadh", taxNo: "300012345600003", address: "Al Olaya District, Riyadh, Saudi Arabia", signer: "Khaled Al-Otaibi", signerTitle: "General Manager" },
+  { name: "Delta Distribution (Demo)", contactName: "Mona Adel", email: "", country: "Egypt", currency: "USD", accountManager: "Mohamed Ali", legalForm: "Limited Liability Company", cr: "445566", crOffice: "Mansoura Commercial Registry Office", taxNo: "", address: "Mansoura, Dakahlia, Egypt", signer: "", signerTitle: "" },
 ];
 
 // POST /collect/seed-demo — a few demo customers and contracts around today (not in production)
@@ -289,10 +289,10 @@ export const seedDemo = async (req, res) => {
       ids.push(company._id);
     }
     const plans = [
-      { typeKey: "impl", customer: ids[0], name: "D365 F&O implementation — Finance & Inventory", value: 4200000, currency: "EGP", startDate: addDays(today, -150), deliveryDate: addDays(today, 60), endDate: addDays(today, 180), pay: [[0, 1, -140], [1, 0.4, -90]], signature: "original" },
-      { typeKey: "sla", customer: ids[1], name: "Dynamics 365 support SLA", value: 360000, currency: "SAR", startDate: addDays(today, -200), endDate: addDays(today, 164), pay: [[0, 1, -198], [1, 1, -105]], signature: "original" },
-      { typeKey: "lic", customer: ids[2], name: "Microsoft 365 license renewal — 120 users", value: 250000, currency: "EGP", startDate: addDays(today, -330), endDate: addDays(today, 34), pay: [[0, 1, -325]], signature: "signed" },
-      { typeKey: "small", customer: ids[0], name: "Power BI management reports", value: 300000, currency: "EGP", startDate: addDays(today, -20), deliveryDate: addDays(today, 40), endDate: addDays(today, 40), pay: [], signature: "sent" },
+      { typeKey: "impl", customer: ids[0], name: "D365 F&O implementation — Finance & Inventory", value: 4200000, currency: "USD", startDate: addDays(today, -150), deliveryDate: addDays(today, 60), endDate: addDays(today, 180), pay: [[0, 1, -140], [1, 0.4, -90]], signature: "original" },
+      { typeKey: "sla", customer: ids[1], name: "Dynamics 365 support SLA", value: 360000, currency: "USD", startDate: addDays(today, -200), endDate: addDays(today, 164), pay: [[0, 1, -198], [1, 1, -105]], signature: "original" },
+      { typeKey: "lic", customer: ids[2], name: "Microsoft 365 license renewal — 120 users", value: 250000, currency: "USD", startDate: addDays(today, -330), endDate: addDays(today, 34), pay: [[0, 1, -325]], signature: "signed" },
+      { typeKey: "small", customer: ids[0], name: "Power BI management reports", value: 300000, currency: "USD", startDate: addDays(today, -20), deliveryDate: addDays(today, 40), endDate: addDays(today, 40), pay: [], signature: "sent" },
     ];
     let made = 0;
     for (const p of plans) {
@@ -329,7 +329,7 @@ export const seedDemo = async (req, res) => {
       });
       if (p.typeKey === "sla") {
         const third = contract.installments[2];
-        await CollectCheque.create({ contract: contract._id, customer: p.customer, kind: "payment", number: "000781", bank: "Saudi National Bank", amount: third?.amount ?? 90000, currency: "SAR", dueDate: addDays(today, 5), receivedDate: addDays(today, -15), status: "held", installmentId: third?._id ?? null, isDemo: true, log: [{ date: addDays(today, -15), status: "held" }] });
+        await CollectCheque.create({ contract: contract._id, customer: p.customer, kind: "payment", number: "000781", bank: "Saudi National Bank", amount: third?.amount ?? 90000, currency: "USD", dueDate: addDays(today, 5), receivedDate: addDays(today, -15), status: "held", installmentId: third?._id ?? null, isDemo: true, log: [{ date: addDays(today, -15), status: "held" }] });
       }
       made++;
     }

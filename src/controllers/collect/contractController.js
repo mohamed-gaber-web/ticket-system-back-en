@@ -8,7 +8,7 @@ import {
   remaining,
   renewalDefaults,
   renewedValue,
-  toEGP,
+  toUsd,
 } from "../../utils/collect/calc.js";
 import {
   applyFollowUp,
@@ -121,12 +121,11 @@ export const listContracts = async (req, res) => {
     }
     if (req.query.unsigned) rows = rows.filter((r) => r.unsigned);
     rows.sort((a, b) => b.startDate.localeCompare(a.startDate) || b.no.localeCompare(a.no));
-    const rates = ctx.settings.rates;
-    const egp = (k) => rows.reduce((s, r) => s + toEGP(r[k], r.currency, rates), 0);
+    const total = (k) => rows.reduce((s, r) => s + toUsd(r[k]), 0);
     res.json({
       success: true,
       data: rows,
-      totals: { value: egp("value"), collected: egp("collected"), remaining: egp("remaining"), overdue: egp("overdue") },
+      totals: { value: total("value"), collected: total("collected"), remaining: total("remaining"), overdue: total("overdue") },
       today: ctx.today,
     });
   } catch (error) {

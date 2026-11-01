@@ -4,6 +4,8 @@ import Lead from "../models/Lead.js";
 import LeadEmail from "../models/LeadEmail.js";
 import Ticket from "../models/Ticket.js";
 import TicketEmail from "../models/TicketEmail.js";
+import Task from "../models/Task.js";
+import TaskEmail from "../models/TaskEmail.js";
 import MailSyncState from "../models/MailSyncState.js";
 import Notification from "../models/notification.js";
 import { getGridFSBucket } from "../config/gridfs.js";
@@ -28,15 +30,18 @@ import {
 // A message is filed, first match wins, under
 //   1. the ticket whose email conversation it continues (conversationId),
 //   2. the lead whose email conversation it continues (conversationId),
-//   3. the ticket whose number its subject quotes ("[MIN-2026-00202] …" — every
+//   3. the task whose email conversation it continues (conversationId),
+//   4. the ticket whose number its subject quotes ("[MIN-2026-00202] …" — every
 //      ticket email carries it, so a forwarded or re-started mail still lands),
-//   4. the lead whose email address sent it.
+//   5. the task whose number its subject quotes ("[TASK-2026-00012] …"),
+//   6. the lead whose email address sent it.
 // Everything else in the inbox is ignored (left untouched in the mailbox).
 //
 // Employees may also send from their own mailbox (sendAs "personal"). Each such
 // mailbox that sent in the last PERSONAL_WINDOW_DAYS is read too, but only rules
 // 1–2 apply there: a message is filed only when it continues a conversation the
 // system started, so the rest of the employee's mail is never touched or stored.
+// (Rules 1–3 are the conversation rules.)
 
 // The support mailbox keeps the original cursor key, so upgrading does not
 // re-read its last day; any other mailbox gets its own.
@@ -115,6 +120,9 @@ const inboundFields = (msg, mailbox, attachments, answered) => ({
 const TICKET_NUMBER = /\b([A-Z]{3}-(?:\d{4}-\d{5}|SUB-\d{4}))\b/g;
 const TICKET_FIELDS = "_id ticketNumber subject acceptedBy";
 const LEAD_FIELDS = "_id team assignedTo email companyName contactPersonName";
+// A task number quoted in a subject: "TASK-2026-00012".
+const TASK_NUMBER = /\b(TASK-\d{4}-\d{5})\b/g;
+const TASK_FIELDS = "_id taskNumber name assignedTo";
 
 /**
  * Where an inbox message belongs: { ticket } or { lead }, or null when it is
@@ -134,6 +142,11 @@ export const matchMessage = async (msg, { conversationOnly = false } = {}) => {
       const lead = await Lead.findById(leadMail.lead).select(LEAD_FIELDS).lean();
       if (lead) return { lead };
     }
+    const taskMail = await TaskEmail.findOne({ conversationId: msg.conversationId }).sort({ createdAt: -1 }).lean();
+    if (taskMail) {
+      const task = await Task.findById(taskMail.task).select(TASK_FIELDS).lean();
+      if (task) return { task };
+    }
   }
 
   if (conversationOnly) return null;
@@ -142,6 +155,12 @@ export const matchMessage = async (msg, { conversationOnly = false } = {}) => {
   if (numbers.length) {
     const ticket = await Ticket.findOne({ ticketNumber: { $in: numbers } }).select(TICKET_FIELDS).lean();
     if (ticket) return { ticket };
+  }
+
+  const taskNumbers = [...String(msg.subject ?? "").toUpperCase().matchAll(TASK_NUMBER)].map((m) => m[1]);
+  if (taskNumbers.length) {
+    const task = await Task.findOne({ taskNumber: { $in: taskNumbers } }).select(TASK_FIELDS).lean();
+    if (task) return { task };
   }
 
   const from = addr(msg.from);
@@ -208,11 +227,47 @@ const fileTicketMessage = async (msg, mailbox, ticket) => {
   return record;
 };
 
-/** File one inbox message under its ticket or lead. Exported for tests. */
+const fileTaskMessage = async (msg, mailbox, task) => {
+  // The outbound message this answers: newest employee email in the conversation.
+  const answered = await TaskEmail.findOne({
+    task: task._id,
+    direction: "outbound",
+    ...(msg.conversationId ? { conversationId: msg.conversationId } : {}),
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const attachments = await downloadAttachments(msg, "task-email-inbound", mailbox);
+  const record = await TaskEmail.create({ task: task._id, ...inboundFields(msg, mailbox, attachments, answered) });
+
+  if (answered && answered.status !== "replied") {
+    await TaskEmail.updateOne({ _id: answered._id }, { $set: { status: "replied", repliedAt: record.receivedAt } });
+  }
+
+  // Tell whoever wrote last from the task, else the task's assignee.
+  const userId = answered?.sentBy ?? task.assignedTo ?? null;
+  if (userId) {
+    const who = record.fromName || record.from;
+    notify(
+      {
+        task: task._id,
+        userId,
+        userType: "employee",
+        notificationType: "task_email_reply",
+        message: `${who} replied on ${task.taskNumber}: "${record.subject}"`,
+      },
+      { task: { _id: task._id, taskNumber: task.taskNumber, name: task.name } }
+    );
+  }
+  return record;
+};
+
+/** File one inbox message under its ticket, task or lead. Exported for tests. */
 export const fileInboundMessage = async (msg, mailbox, { conversationOnly = false } = {}) => {
   const match = await matchMessage(msg, { conversationOnly });
   if (!match) return null;
   if (match.ticket) return fileTicketMessage(msg, mailbox, match.ticket);
+  if (match.task) return fileTaskMessage(msg, mailbox, match.task);
   const { lead } = match;
 
   // The outbound message this answers: newest agent email in the conversation.
@@ -288,13 +343,17 @@ export const syncLeadInbox = async () => {
   }
 };
 
-/** Employee mailboxes that sent lead / ticket email lately (never a shared one). */
+/** Employee mailboxes that sent lead / ticket / task email lately (never a shared one). */
 export const personalMailboxes = async () => {
   const since = new Date(Date.now() - PERSONAL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const filter = { direction: "outbound", status: { $ne: "failed" }, sentAt: { $gte: since }, mailbox: { $nin: [null, ""] } };
-  const [leads, tickets] = await Promise.all([LeadEmail.distinct("mailbox", filter), TicketEmail.distinct("mailbox", filter)]);
+  const [leads, tickets, tasks] = await Promise.all([
+    LeadEmail.distinct("mailbox", filter),
+    TicketEmail.distinct("mailbox", filter),
+    TaskEmail.distinct("mailbox", filter),
+  ]);
   const shared = new Set(syncedMailboxes());
-  return [...new Set([...leads, ...tickets].map((m) => String(m).toLowerCase()))].filter((m) => !shared.has(m));
+  return [...new Set([...leads, ...tickets, ...tasks].map((m) => String(m).toLowerCase()))].filter((m) => !shared.has(m));
 };
 
 /** One pass over one mailbox, with that mailbox's own cursor. */
@@ -317,7 +376,8 @@ const syncMailbox = async (mailbox, { personal = false } = {}) => {
       if (!msg.internetMessageId || ours.has(addr(msg.from))) continue;
       if (
         (await LeadEmail.exists({ internetMessageId: msg.internetMessageId })) ||
-        (await TicketEmail.exists({ internetMessageId: msg.internetMessageId }))
+        (await TicketEmail.exists({ internetMessageId: msg.internetMessageId })) ||
+        (await TaskEmail.exists({ internetMessageId: msg.internetMessageId }))
       ) continue;
       try {
         if (await fileInboundMessage(msg, mailbox, { conversationOnly: personal })) filed++;
