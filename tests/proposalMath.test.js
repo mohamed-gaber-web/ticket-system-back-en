@@ -85,3 +85,14 @@ test("discountOverLimit flags an enabled eligibility % over the limit, not a dis
   assert.equal(discountOverLimit(offButHigh, 10), false);
   assert.equal(discountOverLimit(over, 50), false); // at the limit, not over
 });
+
+test("billing term in months + days: a day is 1/30 of the monthly price", async () => {
+  const { licenseTermMonths } = await import("../src/utils/proposalMath.js");
+  const lines = [{ qty: 1, pricePerUserMonth: 10 }];
+  const total = (licenses) => proposalTotals({ vat: 0, licenses: { lines, ...licenses } }).licSum;
+  assert.equal(total({ termMonths: 2, termDays: 15 }), 25); // $20 + 15 × $10/30
+  assert.ok(Math.abs(total({ termMonths: 0, termDays: 20 }) - 200 / 30) < 1e-9); // days only
+  assert.equal(total({ termMonths: 12 }), 120); // older proposals: no termDays
+  assert.equal(total({}), 120); // no term at all → 12 months
+  assert.equal(licenseTermMonths({ termMonths: 0, termDays: 0 }), 12);
+});

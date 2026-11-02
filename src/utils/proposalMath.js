@@ -19,7 +19,18 @@ export const groupTotals = (group, discountPct, vatPct) => {
   return { sum, disc, net, vat, total: net + vat };
 };
 
-/** Yearly (or per-term) unit price of a license line. */
+/**
+ * The billing term in months: months + days / 30 (a day is 1/30 of the monthly
+ * price). A missing month count reads as 12 (older proposals); a term of
+ * nothing falls back to 12 months.
+ */
+export const licenseTermMonths = (lic) => {
+  const months = lic?.termMonths == null || lic.termMonths === "" ? 12 : num(lic.termMonths);
+  const total = months + num(lic?.termDays) / 30;
+  return total > 0 ? total : 12;
+};
+
+/** Per-term unit price of a license line (term in months, may be fractional). */
 export const licenseUnitPrice = (line, termMonths) => num(line?.pricePerUserMonth) * (num(termMonths) || 12);
 
 /**
@@ -34,7 +45,7 @@ export const proposalTotals = (p) => {
   const implementation = groups.reduce((a, g) => a + g.total, 0);
   const implementationNet = groups.reduce((a, g) => a + g.net, 0);
 
-  const term = num(p?.licenses?.termMonths) || 12;
+  const term = licenseTermMonths(p?.licenses);
   const licSum = (p?.licenses?.lines ?? []).reduce((a, l) => a + num(l.qty) * licenseUnitPrice(l, term), 0);
   // Step 1 — preliminary eligibility discount (checkbox off ⇒ 0%).
   const eligPct = p?.licenses?.eligibilityDiscount ? num(p?.licenses?.eligibilityDiscountPct) : 0;

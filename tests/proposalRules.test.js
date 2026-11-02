@@ -239,7 +239,7 @@ test("proposal save input: unknown modules dropped, numbers clamped, images need
   assert.equal(att[1].widthPct, 100);
   assert.equal(out.implementation.discountPct, 0);
   assert.deepEqual(out.implementation.groups[0], { title: "Implementation", lines: [{ serviceId: "", name: "x", qty: 2, unitPrice: 100 }] });
-  assert.equal(out.licenses.termMonths, 1);
+  assert.equal(out.licenses.termMonths, 12); // 0 months and no days: no term → 12 months
   assert.deepEqual(out.payment.milestones[0], { phase: "A", items: ["x"], pct: 100 });
   assert.equal(out.pages.toc, false);
   assert.equal(out.pages.portfolio, true);
@@ -470,4 +470,16 @@ test("proposal list multi-select filters: comma lists, repeated params, allowed 
     assert.deepEqual(parseListParam(undefined), []);
     assert.equal(parseListParam(Array.from({ length: 80 }, (_, i) => `v${i}`).join(",")).length, 50);
   }
+});
+
+test("billing term: 0–120 months + 0–30 days, nothing → 12 months", () => {
+  const term = (licenses) => {
+    const { termMonths, termDays } = cleanProposalInput({ licenses }, { modules: config.modules }).licenses;
+    return [termMonths, termDays];
+  };
+  assert.deepEqual(term({ termMonths: 2, termDays: 15 }), [2, 15]);
+  assert.deepEqual(term({ termMonths: 0, termDays: 20 }), [0, 20]);
+  assert.deepEqual(term({ termMonths: 0, termDays: 0 }), [12, 0]);
+  assert.deepEqual(term({ termMonths: 500, termDays: 99 }), [120, 30]);
+  assert.deepEqual(term({}), [12, 0]);
 });

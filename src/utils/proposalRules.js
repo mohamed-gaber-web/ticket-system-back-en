@@ -218,7 +218,7 @@ export const buildProposalDefaults = ({ lead, catalog, config, version = 1, now 
     modules,
     sow: { templateKey, duration: "6 months", sections: sectionsFromTemplate(config?.sowTemplates, templateKey) },
     implementation: { groups, discountPct: 0 },
-    licenses: { lines: licenseLines, discountPct: 0, eligibilityDiscount: false, eligibilityDiscountPct: 0, termMonths: 12, payInAdvance: true },
+    licenses: { lines: licenseLines, discountPct: 0, eligibilityDiscount: false, eligibilityDiscountPct: 0, termMonths: 12, termDays: 0, payInAdvance: true },
     notes: [],
     payment: {
       preset: DEFAULT_PAYMENT_PRESET,
@@ -279,6 +279,12 @@ const clampNum = (v, min, max, fallback = 0) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
+};
+/** Billing term: 0–120 months + 0–30 days; nothing at all falls back to 12 months. */
+const cleanTerm = (lic) => {
+  const termMonths = Math.round(clampNum(lic?.termMonths, 0, 120, 12));
+  const termDays = Math.round(clampNum(lic?.termDays, 0, 30, 0));
+  return termMonths + termDays > 0 ? { termMonths, termDays } : { termMonths: 12, termDays: 0 };
 };
 const strList = (v, maxItems, maxLen = 1000) =>
   (Array.isArray(v) ? v : []).map((s) => cleanText(s, maxLen)).filter(Boolean).slice(0, maxItems);
@@ -364,7 +370,7 @@ export const cleanProposalInput = (body, { modules: moduleCatalog } = {}) => {
     discountPct: clampNum(body?.licenses?.discountPct, 0, 100),
     eligibilityDiscount: body?.licenses?.eligibilityDiscount === true,
     eligibilityDiscountPct: clampNum(body?.licenses?.eligibilityDiscountPct, 0, 100),
-    termMonths: Math.round(clampNum(body?.licenses?.termMonths, 1, 120, 12)),
+    ...cleanTerm(body?.licenses),
     payInAdvance: body?.licenses?.payInAdvance !== false,
     lines: (Array.isArray(body?.licenses?.lines) ? body.licenses.lines : []).slice(0, L.licenses).map((l) => ({
       skuId: cleanText(l?.skuId, 40),

@@ -134,7 +134,10 @@ const proposalSchema = new mongoose.Schema(
       // standard discountPct above (the two compound sequentially — proposalMath.js).
       eligibilityDiscount: { type: Boolean, default: false },
       eligibilityDiscountPct: { type: Number, min: 0, max: 100, default: 0 },
-      termMonths: { type: Number, min: 1, max: 120, default: 12 },
+      // Billing term = months + days (a day is 1/30 of the monthly price —
+      // proposalMath.licenseTermMonths). 0 months is allowed when days > 0.
+      termMonths: { type: Number, min: 0, max: 120, default: 12 },
+      termDays: { type: Number, min: 0, max: 30, default: 0 },
       payInAdvance: { type: Boolean, default: true },
     },
     notes: { type: [String], default: [] },
