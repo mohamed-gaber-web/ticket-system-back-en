@@ -15,6 +15,10 @@ import {
   isTransitionAllowed,
   validateStatusFields,
   proposalPriceFromStatus,
+  DATA_STATUSES,
+  allowedNext,
+  buildFieldValueMap,
+  statusConfigFor,
 } from "../src/config/leadStatusWorkflow.js";
 
 describe("No Action (imported leads)", () => {
@@ -40,7 +44,8 @@ describe("No Action (imported leads)", () => {
 describe("quick updates (same status again)", () => {
   it("are allowed on every working status", () => {
     for (const status of LEAD_STATUSES) {
-      if (status === "No Action" || status === "Closed Won") continue;
+      // Data-only statuses are re-logged on the Data tab, not on a Lead.
+      if (status === "No Action" || status === "Closed Won" || LEAD_STATUS_WORKFLOW[status].dataOnly) continue;
       assert.equal(isTransitionAllowed(status, status), true, status);
     }
   });
@@ -72,5 +77,36 @@ describe("proposalPriceFromStatus", () => {
   it("ignores an empty amount and stores the price as USD", () => {
     assert.equal(proposalPriceFromStatus("Proposal Sent", { value: "" }), null);
     assert.equal(proposalPriceFromStatus("Proposal Sent", { value: 1, value__c: "EGP" }).currency, "USD");
+  });
+});
+
+describe("Data stage statuses", () => {
+  it("offers only the five Data statuses, from any status", () => {
+    assert.deepEqual(DATA_STATUSES, ["No Answer", "Not Available", "Wrong Number", "Interested", "Not Interested"]);
+    for (const from of ["No Action", "Follow-up", "Not Interested"]) {
+      assert.deepEqual(allowedNext(from, "Data"), DATA_STATUSES, from);
+    }
+    for (const to of ["No Action", "New Lead", "Follow-up", "Closed Lost"]) {
+      assert.equal(isTransitionAllowed("No Action", to, "Data"), false, to);
+    }
+  });
+
+  it("asks only for an optional note — no reminder, counter or value", () => {
+    for (const status of DATA_STATUSES) {
+      assert.equal(validateStatusFields(status, {}, {}, "Data").valid, true, status);
+      const config = statusConfigFor(status, "Data");
+      assert.equal(config.task, undefined);
+      assert.equal(config.increments, undefined);
+    }
+    assert.deepEqual(buildFieldValueMap("Interested", { notes: "call Sunday", level: "High" }, {}, "Data"), { notes: "call Sunday" });
+  });
+
+  it("keeps the new statuses off the Leads tab, but a converted record moves on", () => {
+    for (const list of Object.entries(NEXT).filter(([k]) => !["Not Available", "Not Interested"].includes(k)).map(([, v]) => v)) {
+      assert.equal(list.includes("Not Available") || list.includes("Not Interested"), false);
+    }
+    assert.ok(isTransitionAllowed("Not Interested", "New Lead", "Lead"));
+    assert.ok(isTransitionAllowed("Not Available", "Interested", "Lead"));
+    assert.equal(validateStatusFields("Interested", {}, {}, "Lead").valid, false);
   });
 });

@@ -88,7 +88,7 @@ const CONTACTED_EXCLUDED = ["No Action", "New Lead"];
 const MEETING_STATUSES = ["Meeting Scheduled", "Under Preparation", "Proposal Sent", "Negotiation", "Closed Won"];
 const PROPOSAL_STATUSES = ["Proposal Sent", "Negotiation", "Closed Won"];
 const CALL_LIST_STATUSES = ["No Action", "New Lead", "No Answer", "Call Back Later", "Follow-up", "Interested"];
-const CLOSED_LEAD_STATUSES = ["Closed Won", "Closed Lost", "Wrong Number"];
+const CLOSED_LEAD_STATUSES = ["Closed Won", "Closed Lost", "Wrong Number", "Not Interested"];
 
 const MEETING_CATEGORY_NAMES = ["Online Meeting", "On Site Meeting"];
 

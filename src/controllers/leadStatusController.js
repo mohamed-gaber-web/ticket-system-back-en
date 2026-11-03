@@ -4,8 +4,9 @@ import FollowUp from "../models/FollowUp.js";
 import { syncNextFollowUpDate } from "./followUpController.js";
 import {
   LEAD_STATUS_WORKFLOW,
-  NEXT,
+  allowedNext,
   isTransitionAllowed,
+  statusConfigFor,
   validateStatusFields,
   buildFieldValueMap,
   resolveFollowUpType,
@@ -20,6 +21,7 @@ import {
   isSelf,
   assigneeTeamError,
 } from "../utils/teleSalesScope.js";
+import { stageOf } from "../utils/leadStages.js";
 
 /**
  * Move one lead to `newStatus` through the validated workflow: the transition
@@ -57,15 +59,19 @@ export const applyStatusChange = async (req, lead, newStatus, values = {}, { ame
     };
   }
 
-  const statusConfig = LEAD_STATUS_WORKFLOW[newStatus];
+  // A Data record takes only the Data statuses, each with a note only.
+  const stage = stageOf(lead);
+  const statusConfig = statusConfigFor(newStatus, stage);
   if (!statusConfig) return { ok: false, code: 400, message: `Unknown status "${newStatus}"` };
 
-  if (!isTransitionAllowed(lead.status, newStatus)) {
+  if (!isTransitionAllowed(lead.status, newStatus, stage)) {
     return {
       ok: false,
       code: 400,
-      message: `Cannot move from "${lead.status}" to "${newStatus}"`,
-      allowed: NEXT[lead.status] || [],
+      message: stage === "Data"
+        ? `A Data record can't be set to "${newStatus}".`
+        : `Cannot move from "${lead.status}" to "${newStatus}"`,
+      allowed: allowedNext(lead.status, stage),
     };
   }
 
@@ -73,10 +79,10 @@ export const applyStatusChange = async (req, lead, newStatus, values = {}, { ame
   // auto-numbered fields read the counters from before that update bumped them.
   const basis = amendEntry && statusConfig.increments ? countersBefore(lead, statusConfig.increments) : lead;
 
-  const { valid, errors } = validateStatusFields(newStatus, values, basis);
+  const { valid, errors } = validateStatusFields(newStatus, values, basis, stage);
   if (!valid) return { ok: false, code: 400, message: "Validation error", errors };
 
-  const fieldValues = buildFieldValueMap(newStatus, values, basis);
+  const fieldValues = buildFieldValueMap(newStatus, values, basis, stage);
 
   const setUpdate = { status: newStatus };
   // "New Lead" carries an owner. Only a manager may hand the lead to someone
@@ -109,7 +115,7 @@ export const applyStatusChange = async (req, lead, newStatus, values = {}, { ame
   }
 
   // A money field marked `leadValue` becomes the lead's value (the dashboard sums it).
-  const leadValue = leadValueFromStatus(newStatus, values);
+  const leadValue = leadValueFromStatus(newStatus, values, stage);
   if (leadValue) {
     setUpdate.potentialValue = leadValue.amount;
     setUpdate.valueCurrency = leadValue.currency;
@@ -118,7 +124,7 @@ export const applyStatusChange = async (req, lead, newStatus, values = {}, { ame
   }
 
   // The Quoted Value at "Proposal Sent" is also kept as the proposal price.
-  const proposal = proposalPriceFromStatus(newStatus, values);
+  const proposal = proposalPriceFromStatus(newStatus, values, stage);
   if (proposal) {
     setUpdate.proposalValue = proposal.amount;
     setUpdate.proposalCurrency = proposal.currency;

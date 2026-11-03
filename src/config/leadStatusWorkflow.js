@@ -22,8 +22,10 @@ export const LEAD_STATUSES = [
   "No Action",
   "New Lead",
   "No Answer",
+  "Not Available",
   "Call Back Later",
   "Wrong Number",
+  "Not Interested",
   "Interested",
   "Follow-up",
   "Meeting Scheduled",
@@ -57,6 +59,16 @@ export const VALUE_SOURCES = ["manual", "quoted", "revised", "final"];
 // The status every imported lead starts in: nobody has acted on it yet. Only an
 // import puts a lead here — no transition leads back to it.
 export const IMPORTED_LEAD_STATUS = "No Action";
+
+// ── Data stage ───────────────────────────────────────────────────────────────
+// A Data record (raw imported data, Lead.salesType "Data") takes only these
+// statuses, in any order, each with an optional note and nothing else — no
+// reminders, counters or values. It starts in "No Action" (import), which can't
+// be picked again. Once converted to a Lead the full workflow below applies.
+export const DATA_STATUSES = ["No Answer", "Not Available", "Wrong Number", "Interested", "Not Interested"];
+const DATA_STATUS_FIELDS = [
+  { k: "notes", label: "Notes", ar: "ملاحظات", type: "textarea" },
+];
 
 const MODULES = ["D365 Finance & Operations", "Business Central", "Power Platform", "MASAR Mobile App", "Support / SLA", "Licenses only"];
 
@@ -109,6 +121,26 @@ export const LEAD_STATUS_WORKFLOW = {
     task: (v) => (v.reminder ? { title: `Retry contact — ${v.channel}`, due: v.next, kind: "call" } : null),
     increments: { callAttempts: 1 },
     call: true,
+  },
+
+  "Not Available": {
+    ar: "غير متاح",
+    color: "#0f766e",
+    bg: "#ccfbf1",
+    step: 1,
+    desc: "The contact answered but is not available — Data tab status.",
+    fields: DATA_STATUS_FIELDS,
+    dataOnly: true,
+  },
+
+  "Not Interested": {
+    ar: "غير مهتم",
+    color: "#9f1239",
+    bg: "#ffe4e6",
+    step: 6,
+    desc: "The contact is not interested — Data tab status.",
+    fields: DATA_STATUS_FIELDS,
+    dataOnly: true,
   },
 
   "Call Back Later": {
@@ -331,6 +363,9 @@ export const NEXT = {
   "No Answer": ["No Answer", "Call Back Later", "Wrong Number", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
   "Call Back Later": ["Call Back Later", "No Answer", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
   "Wrong Number": ["Wrong Number", "New Lead", "Follow-up", "Closed Lost"],
+  // Data-only statuses: a record converted to a Lead moves on from them.
+  "Not Available": ["No Answer", "Call Back Later", "Wrong Number", "Interested", "Follow-up", "Meeting Scheduled", "Closed Lost"],
+  "Not Interested": ["New Lead", "Follow-up", "Closed Lost"],
   "Interested": ["Interested", "Follow-up", "Meeting Scheduled", "Under Preparation", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
   "Follow-up": ["Follow-up", "Meeting Scheduled", "Under Preparation", "Proposal Sent", "No Answer", "Call Back Later", "Closed Lost"],
   "Meeting Scheduled": ["Meeting Scheduled", "Follow-up", "Under Preparation", "Proposal Sent", "No Answer", "Closed Lost"],
@@ -341,7 +376,20 @@ export const NEXT = {
   "Closed Lost": ["Closed Lost", "New Lead"],
 };
 
-export const isTransitionAllowed = (from, to) => Array.isArray(NEXT[from]) && NEXT[from].includes(to);
+/** The statuses a record in `stage` may move to from `from`. Data records: DATA_STATUSES, from anything. */
+export const allowedNext = (from, stage) => (stage === "Data" ? DATA_STATUSES : NEXT[from] || []);
+
+export const isTransitionAllowed = (from, to, stage) => allowedNext(from, stage).includes(to);
+
+/**
+ * The workflow entry used for a status in a given stage: on a Data record every
+ * status is the notes-only form (no reminder, counter or value).
+ */
+export const statusConfigFor = (statusKey, stage) => {
+  const config = LEAD_STATUS_WORKFLOW[statusKey];
+  if (!config || stage !== "Data") return config;
+  return { ...config, fields: DATA_STATUS_FIELDS, task: undefined, increments: undefined, call: false };
+};
 
 const isFieldVisible = (field, values, lead) => !field.showIf || field.showIf(values, lead);
 const isFieldRequired = (field, values, lead) => !!field.req || (field.reqIf ? field.reqIf(values, lead) : false);
@@ -370,8 +418,8 @@ const isFieldFilled = (field, values) => {
  * Validate the field values submitted for a status change. Mirrors the
  * simulation's save()/need()/vis() loop. Returns { valid, errors }.
  */
-export const validateStatusFields = (statusKey, values, lead) => {
-  const config = LEAD_STATUS_WORKFLOW[statusKey];
+export const validateStatusFields = (statusKey, values, lead, stage) => {
+  const config = statusConfigFor(statusKey, stage);
   if (!config) return { valid: false, errors: [{ field: null, label: null, message: `Unknown status "${statusKey}"` }] };
 
   const errors = [];
@@ -391,8 +439,8 @@ export const validateStatusFields = (statusKey, values, lead) => {
  * `lead` (pre-update) — client-submitted auto values are never trusted, since
  * they'd let a client forge attempt/round numbers.
  */
-export const buildFieldValueMap = (statusKey, rawValues, lead) => {
-  const config = LEAD_STATUS_WORKFLOW[statusKey];
+export const buildFieldValueMap = (statusKey, rawValues, lead, stage) => {
+  const config = statusConfigFor(statusKey, stage);
   const values = rawValues || {};
   const out = {};
 
@@ -437,8 +485,8 @@ export const buildFieldValueMap = (statusKey, rawValues, lead) => {
  * with its currency. An empty or zero amount (Revised Value is optional) keeps
  * whatever the lead already had.
  */
-export const leadValueFromStatus = (statusKey, rawValues) => {
-  const config = LEAD_STATUS_WORKFLOW[statusKey];
+export const leadValueFromStatus = (statusKey, rawValues, stage) => {
+  const config = statusConfigFor(statusKey, stage);
   const values = rawValues || {};
   const field = (config?.fields || []).find((f) => f.type === "money" && f.leadValue);
   if (!field) return null;
@@ -453,8 +501,8 @@ export const leadValueFromStatus = (statusKey, rawValues) => {
  * field (the Quoted Value at Proposal Sent), with its currency. Unlike the lead
  * value, a later Revised or Final value does not overwrite it.
  */
-export const proposalPriceFromStatus = (statusKey, rawValues) => {
-  const config = LEAD_STATUS_WORKFLOW[statusKey];
+export const proposalPriceFromStatus = (statusKey, rawValues, stage) => {
+  const config = statusConfigFor(statusKey, stage);
   const values = rawValues || {};
   const field = (config?.fields || []).find((f) => f.type === "money" && f.proposalPrice);
   if (!field) return null;
