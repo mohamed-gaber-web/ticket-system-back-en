@@ -8,6 +8,9 @@ import { LEAD_STATUSES, VALUE_CURRENCIES, VALUE_SOURCES, DEFAULT_VALUE_CURRENCY 
 // qualified Lead, or an Opportunity. See src/utils/leadStages.js.
 export const SALES_TYPES = ["Data", "Lead", "Opportunity"];
 
+// Account_Type — is the company a potential customer or a competitor? Optional.
+export const ACCOUNT_TYPES = ["Customer", "Competitor"];
+
 // Field 1: Entity_Type
 export const ENTITY_TYPES = ["Hotel", "Restaurant", "Cafe", "Factory", "Company"];
 
@@ -170,6 +173,17 @@ const leadSchema = mongoose.Schema(
     convertedToLeadBy: { type: mongoose.Schema.Types.ObjectId, ref: "Consultant" },
     convertedToOpportunityAt: { type: Date },
     convertedToOpportunityBy: { type: mongoose.Schema.Types.ObjectId, ref: "Consultant" },
+
+    // Customer or Competitor — optional on every stage; null when not chosen.
+    accountType: {
+      type: String,
+      enum: {
+        values: ACCOUNT_TYPES,
+        message: "{VALUE} is not a valid account type (Customer or Competitor)",
+      },
+      default: null,
+      trim: true,
+    },
 
     // ── Entity Classification (spec fields 1-3) ──────────────────────────────
     // Field 1: Entity_Type
