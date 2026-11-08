@@ -50,4 +50,10 @@ export const emitNotification = (notifications = []) => {
   });
 };
 
+/** Emit any event to one user's open tabs (e.g. live WhatsApp QR and messages). */
+export const emitToUser = (userId, userType, event, payload) => {
+  if (!io || !userId) return;
+  io.to(`user:${userId}:${normalizeUserType(userType)}`).emit(event, payload);
+};
+
 export const getIO = () => io;

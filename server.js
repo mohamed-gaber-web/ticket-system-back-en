@@ -18,10 +18,16 @@ import { migrateLegacyPhones } from "./src/utils/migrateLegacyPhones.js";
 import { seedIndustrySectors } from "./src/utils/seedIndustrySectors.js";
 import { seedCountries } from "./src/utils/seedCountries.js";
 import { initSocket } from "./src/socket/io.js";
+import { restoreWhatsAppSessions } from "./src/whatsapp/manager.js";
 import { warnIfVaultUnconfigured } from "./src/utils/vaultCrypto.js";
 
 // Load environment variables
 dotenv.config();
+
+// A stray async error (e.g. from a WhatsApp socket) must not take the whole API down.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
 
 // Debug: log which email env vars are present at startup
 console.log("=== ENV CHECK === PID:", process.pid);
@@ -193,6 +199,9 @@ const startServer = async () => {
 
       // Grow Path Collect reminders — daily 08:00 Cairo, sends only in auto mode
       startCollectReminderCron();
+
+      // Reconnect employees' linked WhatsApp numbers (sessions live in memory)
+      restoreWhatsAppSessions().catch((err) => console.error("[whatsapp] restore failed:", err.message));
     });
   } catch (error) {
     console.error("Failed to start server:", error);
