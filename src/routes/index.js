@@ -60,6 +60,8 @@ import { guardProposalFiles } from "../controllers/proposalController.js";
 import vaultRoutes from "./vaultRoutes.js";
 import collectRoutes from "./collectRoutes.js";
 import { guardVaultFiles } from "../controllers/vault/attachmentController.js";
+import whatsappRoutes from "./whatsappRoutes.js";
+import { guardWhatsAppFiles } from "../controllers/whatsappController.js";
 
 const router = express.Router();
 
@@ -212,6 +214,9 @@ router.use("/me", meRoutes);
 // Credentials Vault: encrypted client/company logins, audited sends and reveals
 router.use("/vault", vaultRoutes);
 
+// WhatsApp: each employee links their own number (QR) and chats by mobile number
+router.use("/whatsapp", whatsappRoutes);
+
 // Grow Path Collect: contracts, collections, cheques, signatures and reminders
 router.use("/collect", collectRoutes);
 // HR documents live in the same GridFS bucket but are only ever served through
@@ -220,6 +225,8 @@ router.all(["/files/:id", "/files/:id/info"], guardHrFiles);
 router.all(["/files/:id", "/files/:id/info"], guardProposalFiles);
 // Vault attachments are encrypted and served only by /vault/entries/:id/attachments/:fileId.
 router.all(["/files/:id", "/files/:id/info"], guardVaultFiles);
+// Received WhatsApp media is served only by /whatsapp/media/:messageId (owner check).
+router.all(["/files/:id", "/files/:id/info"], guardWhatsAppFiles);
 
 // Upload routes (GridFS file upload)
 router.use("/", uploadRoutes);

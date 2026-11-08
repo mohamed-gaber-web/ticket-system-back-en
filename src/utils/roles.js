@@ -40,16 +40,17 @@ export const MODULES = Object.freeze([
   "proposals",
   "vault",
   "collect",
+  "whatsapp",
 ]);
 
 /** What each role opens when the admin has not overridden `modules`. */
 export const ROLE_DEFAULT_MODULES = Object.freeze({
   admin: MODULES,
-  consultant: ["tickets"],
-  sales: ["telesales", "proposals"],
-  sales_manager: ["telesales", "proposals"],
-  marketing: ["telesales", "tasks", "marketing"],
-  marketing_manager: ["telesales", "tasks", "marketing"],
+  consultant: ["tickets", "whatsapp"],
+  sales: ["telesales", "proposals", "whatsapp"],
+  sales_manager: ["telesales", "proposals", "whatsapp"],
+  marketing: ["telesales", "tasks", "marketing", "whatsapp"],
+  marketing_manager: ["telesales", "tasks", "marketing", "whatsapp"],
   developer: ["development"],
   developer_manager: ["development"],
 });

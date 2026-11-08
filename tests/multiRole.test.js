@@ -64,8 +64,8 @@ describe("predicates OR across roles", () => {
   });
 
   it("opens the union of every role's default modules", () => {
-    assert.deepEqual(effectiveModules(emp("consultant", ["developer"])).sort(), ["development", "tickets"]);
-    assert.deepEqual(effectiveModules(emp("sales", ["marketing"])).sort(), ["marketing", "proposals", "tasks", "telesales"]);
+    assert.deepEqual(effectiveModules(emp("consultant", ["developer"])).sort(), ["development", "tickets", "whatsapp"]);
+    assert.deepEqual(effectiveModules(emp("sales", ["marketing"])).sort(), ["marketing", "proposals", "tasks", "telesales", "whatsapp"]);
   });
 
   it("an explicit module override still wins", () => {

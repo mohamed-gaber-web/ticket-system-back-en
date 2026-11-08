@@ -18,6 +18,8 @@ import {
 } from "../utils/salesAssistant.js";
 import { sendAndRecord } from "./leadEmailController.js";
 import { toWhatsAppNumber, isValidWhatsAppNumber, whatsAppLink } from "../utils/whatsapp.js";
+import { sendWhatsAppMessage } from "../whatsapp/manager.js";
+import { hasModule } from "../utils/access.js";
 
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(String(v ?? ""));
 
@@ -293,7 +295,7 @@ export const prepareWhatsApp = async (req, res) => {
 
     const actor = actorRef(req);
     const details = await resolveMeta(meta);
-    const log = await CommunicationLog.create({
+    const logFields = {
       lead: lead._id,
       team: lead.team ?? null,
       agent: actor.id,
@@ -303,8 +305,25 @@ export const prepareWhatsApp = async (req, res) => {
       ...details,
       recipient: `+${number}`,
       message,
-      status: "prepared",
-    });
+    };
+
+    // "Send now": straight from the agent's linked WhatsApp number.
+    if (req.body.send && hasModule(req.user, "whatsapp")) {
+      try {
+        const sent = await sendWhatsAppMessage(req.user._id, { phone: number, text: message, lead: lead._id });
+        const log = await CommunicationLog.create({ ...logFields, status: "sent" });
+        return res.status(201).json({
+          success: true,
+          message: "WhatsApp message sent",
+          data: { log, whatsappNumber: number, whatsappMessage: sent },
+        });
+      } catch (sendError) {
+        await CommunicationLog.create({ ...logFields, status: "failed", errorMessage: sendError.message });
+        return res.status(sendError.status ?? 500).json({ success: false, message: sendError.message });
+      }
+    }
+
+    const log = await CommunicationLog.create({ ...logFields, status: "prepared" });
 
     res.status(201).json({
       success: true,

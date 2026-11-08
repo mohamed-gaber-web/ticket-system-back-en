@@ -60,6 +60,7 @@ const notificationSchema = new mongoose.Schema(
         "lead_email_reply",
         "ticket_email_reply",
         "task_email_reply",
+        "whatsapp_message",
         "proposal_approval_request",
         "proposal_approved",
         "proposal_rejected",

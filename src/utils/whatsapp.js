@@ -1,9 +1,7 @@
 /**
- * WhatsApp helpers. There is no WhatsApp provider integration today: messages
- * are generated server-side, logged, and handed to the agent as a wa.me link
- * (WhatsApp Web / desktop / mobile pick it up). When a Business / Cloud API
- * account exists, add a `sendWhatsAppMessage` here and call it from
- * salesAssistantController.prepareWhatsApp — nothing else needs to change.
+ * WhatsApp number helpers. Real sending / receiving goes through each
+ * employee's linked number (src/whatsapp/manager.js); the wa.me link below is
+ * the fallback for employees who have not linked one.
  */
 
 // Dial codes for the countries the teams sell into; a national number
