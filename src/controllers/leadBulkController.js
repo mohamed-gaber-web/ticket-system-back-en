@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import Lead, { ENTITY_TYPES, LEAD_SOURCES } from "../models/Lead.js";
+import Lead, { ENTITY_TYPES, ACCOUNT_TYPES, LEAD_SOURCES } from "../models/Lead.js";
 import { resolveLeadSourceDetail, purgeLeads, buildLeadListFilter } from "./leadController.js";
 import { applyStatusChange } from "./leadStatusController.js";
 import { LEAD_STATUSES } from "../config/leadStatusWorkflow.js";
@@ -46,6 +46,11 @@ const buildFieldSet = (raw = {}) => {
   if (entityType) {
     if (!ENTITY_TYPES.includes(entityType)) return { error: `"${entityType}" is not a valid entity type.` };
     set.entityType = entityType;
+  }
+  const accountType = cleanStr(raw.accountType);
+  if (accountType) {
+    if (!ACCOUNT_TYPES.includes(accountType)) return { error: `"${accountType}" is not a valid account type.` };
+    set.accountType = accountType;
   }
   const leadSource = cleanStr(raw.leadSource);
   if (leadSource) {

@@ -71,7 +71,7 @@ const valueChanged = (lead, updateData) =>
 
 // Enum fields a Data record may leave empty. A form sends "" for "not chosen",
 // which the schema enum would reject, so it is stored as null instead.
-const OPTIONAL_ENUM_FIELDS = ["leadSource", "entityType", "priority", "valueCurrency"];
+const OPTIONAL_ENUM_FIELDS = ["leadSource", "entityType", "accountType", "priority", "valueCurrency"];
 const blankEnumsToNull = (data) => {
   OPTIONAL_ENUM_FIELDS.forEach((f) => {
     if (data[f] !== undefined && !cleanStr(data[f])) data[f] = null;
@@ -383,6 +383,11 @@ const EMAIL_REGEX = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
 const VALID_SOURCES = Lead.schema.path("leadSource").enumValues;
 const VALID_PRIORITIES = Lead.schema.path("priority").enumValues;
 const VALID_ENTITY_TYPES = Lead.schema.path("entityType").enumValues;
+/** "competitor" / "COMPETITOR " → "Competitor"; anything else → undefined. */
+const importAccountType = (value) => {
+  const v = cleanStr(value).toLowerCase();
+  return Lead.schema.path("accountType").enumValues.find((t) => t.toLowerCase() === v);
+};
 // Industry sectors are an admin-managed lookup (not a schema enum), so the valid
 // set is loaded from the IndustrySector collection at import time — see importLeads.
 
@@ -497,6 +502,7 @@ export const importLeads = async (req, res) => {
         // Imports are the Data tab's alone: whatever the file says, rows start as raw data.
         salesType: "Data",
         entityType: VALID_ENTITY_TYPES.includes(row.entityType) ? row.entityType : undefined,
+        accountType: importAccountType(row.accountType),
         businessClassification: cleanStr(row.businessClassification) || undefined,
         industrySector: VALID_INDUSTRY_SECTORS.has(row.industrySector) ? row.industrySector : undefined,
         country: cleanStr(row.country) || undefined, // schema default "Egypt" applies when unset
@@ -672,7 +678,7 @@ export const getAllLeads = async (req, res) => {
 export const buildLeadListFilter = (req, query = {}) => {
     const {
       status, priority, assignedTo, tags, search, from, to,
-      salesType, entityType, industrySector, country, team,
+      salesType, entityType, accountType, industrySector, country, team,
       leadSource, businessClassification, dataSource,
       customerNeedProducts, isExistingCustomer, recordType,
       followUpFrom, followUpTo, proposalMin, proposalMax,
@@ -692,7 +698,7 @@ export const buildLeadListFilter = (req, query = {}) => {
     if (teams.length) filter.team = anyOf(teams);
 
     for (const [field, value] of Object.entries({
-      status, priority, entityType, industrySector, country, leadSource, businessClassification, dataSource,
+      status, priority, entityType, accountType, industrySector, country, leadSource, businessClassification, dataSource,
     })) {
       const values = parseListParam(value);
       if (values.length) filter[field] = anyOf(values);
@@ -933,7 +939,7 @@ export const updateLead = async (req, res) => {
       "industry", "leadSource", "priority", "potentialValue", "valueCurrency",
       "painPoints", "customerNeeds", "customerNeedProducts", "budget", "isDecisionMaker", "tags",
       // Spec fields (tele-sales lead specification)
-      "entityType", "businessClassification", "industrySector", "country",
+      "entityType", "accountType", "businessClassification", "industrySector", "country",
       "fullAddress", "phonePrimary", "phoneSecondary",
       "phoneOther", "website", "dataSource",
     ];
