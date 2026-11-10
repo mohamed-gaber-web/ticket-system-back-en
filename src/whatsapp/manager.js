@@ -27,6 +27,7 @@ import Consultant from "../models/Consltant.js";
 import Lead from "../models/Lead.js";
 import Customer from "../models/Customer.js";
 import { getGridFSBucket } from "../config/gridfs.js";
+import { resolveContentType } from "../utils/fileType.js";
 import { emitNotification, emitToUser } from "../socket/io.js";
 import { isManagerOrAdmin } from "../utils/access.js";
 import { useMongoAuthState, clearMongoAuthState } from "./mongoAuthState.js";
@@ -302,7 +303,10 @@ const withCurrentAdvSecret = (qr, creds) => {
   return `${qr.slice(0, hash + 1)}${parts.join(",")}`;
 };
 
-const RECONNECT_CODES_TO_DROP =[DisconnectReason.loggedOut, DisconnectReason.forbidden, DisconnectReason.badSession];
+// Only a real unlink ends the login. Not badSession (500): Baileys reports
+// every unknown stream error as 500, and wiping the login on those forced a
+// new QR scan after any hiccup.
+const RECONNECT_CODES_TO_DROP = [DisconnectReason.loggedOut, DisconnectReason.forbidden];
 
 const openSocket = async (employeeId, entry) => {
   // Load the login once per session and keep it in memory across reconnects:
@@ -402,7 +406,7 @@ const openSocket = async (employeeId, entry) => {
       console.warn(`[whatsapp] ${employeeId} connection closed (code ${code ?? "-"}): ${lastDisconnect?.error?.message ?? "no reason"}`);
       if (entry.stopped) return;
       if (RECONNECT_CODES_TO_DROP.includes(code)) {
-        // Unlinked from the phone (Linked devices → Log out) or the login is unusable.
+        // Unlinked from the phone (Linked devices → Log out): the login is dead.
         sessions.delete(String(employeeId));
         entry.status = "disconnected";
         await clearMongoAuthState(employeeId);
@@ -410,7 +414,19 @@ const openSocket = async (employeeId, entry) => {
         pushStatus(employeeId, entry, { error: "WhatsApp was unlinked. Scan the QR code again to reconnect." });
         return;
       }
-      if (entry.reconnects >= MAX_RECONNECTS) {
+      if (code === DisconnectReason.connectionReplaced) {
+        // The same login opened in another process (a second server, or a local
+        // backend sharing this database). Reconnecting would just kick it back
+        // and forth, so stop here — the login stays saved.
+        stopEntry(String(employeeId), entry);
+        const error = "This WhatsApp is open on another server. Press Connect to use it here.";
+        saveSession(employeeId, { status: "disconnected", lastError: error });
+        pushStatus(employeeId, entry, { error });
+        return;
+      }
+      // A linked number keeps retrying (network drops, WhatsApp restarts, the
+      // odd "stream errored" code 500); only a first link gives up.
+      if (!entry.phone && entry.reconnects >= MAX_RECONNECTS) {
         sessions.delete(String(employeeId));
         entry.status = "disconnected";
         saveSession(employeeId, { status: "disconnected", lastError: lastDisconnect?.error?.message ?? "Connection lost" });
@@ -421,7 +437,7 @@ const openSocket = async (employeeId, entry) => {
       entry.reconnects += 1;
       entry.status = "connecting";
       pushStatus(employeeId, entry);
-      const delay = code === DisconnectReason.restartRequired ? 0 : Math.min(30000, 1000 * 2 ** entry.reconnects);
+      const delay = code === DisconnectReason.restartRequired ? 0 : Math.min(60000, 1000 * 2 ** Math.min(entry.reconnects, 6));
       setTimeout(() => {
         if (entry.stopped || sessions.get(String(employeeId)) !== entry) return;
         openSocket(employeeId, entry).catch((err) => console.error("[whatsapp] reconnect failed:", err.message));
@@ -453,7 +469,13 @@ export const connectWhatsApp = async (employeeId) => {
     stopEntry(id, existing);
   }
 
-  const employee = await Consultant.findById(employeeId).lean();
+  const [employee, saved] = await Promise.all([
+    Consultant.findById(employeeId).lean(),
+    WhatsAppSession.findOne({ employee: employeeId }).select("creds phone name").lean(),
+  ]);
+  // An already-linked number (restart, redeploy): it reconnects with its saved
+  // login, so it is not held to the first-link QR timeout or retry limit.
+  const linked = Boolean(saved?.creds && saved.phone);
   const entry = {
     sock: null,
     status: "connecting",
@@ -462,8 +484,8 @@ export const connectWhatsApp = async (employeeId) => {
     reconnects: 0,
     stopped: false,
     lastSendAt: 0,
-    phone: null,
-    name: null,
+    phone: linked ? saved.phone : null,
+    name: linked ? saved.name : null,
     startedAt: Date.now(),
     canSeeAllLeads: employee ? isManagerOrAdmin(employee) : false,
   };
@@ -555,7 +577,7 @@ export class WhatsAppSendError extends Error {
 
 /**
  * Send one message from the employee's linked number. `attachment` is an
- * already-uploaded GridFS file ({ fileId }). Returns the saved message.
+ * already-uploaded GridFS file ({ fileId, fileName?, mimeType? }). Returns the saved message.
  */
 export const sendWhatsAppMessage = async (employeeId, { phone, text = "", attachment = null, lead = null, ticket = null }) => {
   const entry = sessions.get(String(employeeId));
@@ -580,7 +602,8 @@ export const sendWhatsAppMessage = async (employeeId, { phone, text = "", attach
     if (read.file.length > MAX_MEDIA_BYTES) throw new WhatsAppSendError("Attachments over 16 MB cannot be sent on WhatsApp.");
     media.fileId = read.file._id;
     media.fileName = attachment.fileName || read.file.filename;
-    media.mimeType = read.file.contentType || read.file.metadata?.contentType || "application/octet-stream";
+    // GridFS no longer stores contentType on new uploads — see utils/fileType.js.
+    media.mimeType = attachment.mimeType || resolveContentType(read.file, media.fileName);
     media.kind = kindOfMime(media.mimeType);
     content = mediaContent(media.kind, read.buffer, media.mimeType, media.fileName, text || undefined);
   }

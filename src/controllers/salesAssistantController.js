@@ -307,15 +307,41 @@ export const prepareWhatsApp = async (req, res) => {
       message,
     };
 
-    // "Send now": straight from the agent's linked WhatsApp number.
+    // "Send now": straight from the agent's linked WhatsApp number. The
+    // chosen sales document goes along as a real file (like the email's
+    // attachment), right after the text — the wa.me fallback can only link it.
     if (req.body.send && hasModule(req.user, "whatsapp")) {
       try {
         const sent = await sendWhatsAppMessage(req.user._id, { phone: number, text: message, lead: lead._id });
-        const log = await CommunicationLog.create({ ...logFields, status: "sent" });
+
+        let fileSent = null;
+        let fileError = null;
+        const document = isObjectId(meta.documentId)
+          ? await SalesDocument.findById(meta.documentId).select("name file").lean()
+          : null;
+        if (document?.file?.fileId) {
+          try {
+            fileSent = await sendWhatsAppMessage(req.user._id, {
+              phone: number,
+              attachment: { fileId: document.file.fileId, fileName: document.file.fileName, mimeType: document.file.fileType },
+              lead: lead._id,
+            });
+          } catch (attachError) {
+            fileError = attachError.message;
+          }
+        }
+
+        const log = await CommunicationLog.create({
+          ...logFields,
+          status: "sent",
+          ...(fileError && { errorMessage: `Document not attached: ${fileError}` }),
+        });
         return res.status(201).json({
           success: true,
-          message: "WhatsApp message sent",
-          data: { log, whatsappNumber: number, whatsappMessage: sent },
+          message: fileError
+            ? `WhatsApp message sent, but "${document.name}" could not be attached: ${fileError}`
+            : fileSent ? `WhatsApp message and "${document.name}" sent` : "WhatsApp message sent",
+          data: { log, whatsappNumber: number, whatsappMessage: sent, whatsappFile: fileSent, fileError },
         });
       } catch (sendError) {
         await CommunicationLog.create({ ...logFields, status: "failed", errorMessage: sendError.message });

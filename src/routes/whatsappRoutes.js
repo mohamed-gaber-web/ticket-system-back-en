@@ -7,6 +7,7 @@ import {
   getChats,
   getChatMessages,
   markChatRead,
+  deleteChat,
   sendMessage,
   getMedia,
 } from "../controllers/whatsappController.js";
@@ -23,6 +24,7 @@ router.post("/session/logout", logoutSession);
 router.get("/chats", getChats);
 router.get("/chats/:phone/messages", getChatMessages);
 router.post("/chats/:phone/read", markChatRead);
+router.delete("/chats/:phone", deleteChat);
 
 router.post("/send", sendMessage);
 router.get("/media/:messageId", getMedia);
