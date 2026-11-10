@@ -56,18 +56,22 @@ export const logoutSession = async (req, res) => {
 
 // ── Chats ────────────────────────────────────────────────────────────────────
 
-/** One row per number: last message, unread count and the linked lead / customer. */
+/**
+ * One row per chat — (employee, number): last message, unread count, the linked
+ * lead / customer and whose chat it is. `?scope=team` (admins only) lists every
+ * employee's chats, so a number shows who on the team talked to it.
+ */
 export const getChats = async (req, res) => {
   try {
-    const owner = chatOwner(req);
+    const team = req.query.scope === "team" && isAdmin(req.user);
     const search = String(req.query.search ?? "").trim();
 
     const pipeline = [
-      { $match: { employee: owner } },
+      { $match: team ? {} : { employee: chatOwner(req) } },
       { $sort: { sentAt: -1 } },
       {
         $group: {
-          _id: "$phone",
+          _id: { employee: "$employee", phone: "$phone" },
           last: { $first: "$$ROOT" },
           unread: { $sum: { $cond: [{ $and: [{ $eq: ["$direction", "inbound"] }, { $eq: ["$status", "received"] }] }, 1, 0] } },
           lead: { $max: "$lead" },
@@ -77,10 +81,12 @@ export const getChats = async (req, res) => {
       },
       { $lookup: { from: "leads", localField: "lead", foreignField: "_id", as: "lead", pipeline: [{ $project: { companyName: 1, contactPersonName: 1, customerId: 1 } }] } },
       { $lookup: { from: "customers", localField: "customer", foreignField: "_id", as: "customer", pipeline: [{ $project: { companyName: 1, contactPerson: 1 } }] } },
+      { $lookup: { from: "consultants", localField: "_id.employee", foreignField: "_id", as: "employee", pipeline: [{ $project: { firstName: 1, lastName: 1 } }] } },
       {
         $project: {
           _id: 0,
-          phone: "$_id",
+          phone: "$_id.phone",
+          employee: { $first: "$employee" },
           unread: 1,
           pushName: 1,
           lead: { $first: "$lead" },
@@ -102,6 +108,7 @@ export const getChats = async (req, res) => {
             { "lead.contactPersonName": rx },
             { "customer.companyName": rx },
             { "customer.contactPerson": rx },
+            ...(team ? [{ "employee.firstName": rx }, { "employee.lastName": rx }] : []),
           ],
         },
       });
@@ -153,6 +160,38 @@ export const markChatRead = async (req, res) => {
   }
 };
 
+/**
+ * Delete a whole chat from the system: its messages and the media WhatsApp
+ * sent us (GridFS files of the whatsapp_media category). Files the employee
+ * attached themselves came from the shared uploads (sales documents among
+ * them) and are left alone. Nothing is deleted on the phones — a new message
+ * from the number starts the chat again. Own chats, or any chat for an admin.
+ */
+export const deleteChat = async (req, res) => {
+  try {
+    const phone = digitsOf(req.params.phone);
+    if (!isValidWhatsAppNumber(phone)) return fail(res, 400, "Invalid phone number");
+    const filter = { employee: chatOwner(req), phone };
+
+    const withMedia = await WhatsAppMessage.find({ ...filter, "media.fileId": { $ne: null } }).select("media.fileId").lean();
+    const bucket = getGridFSBucket();
+    const receivedFiles = withMedia.length
+      ? await bucket
+          .find({ _id: { $in: withMedia.map((m) => m.media.fileId) }, "metadata.category": WHATSAPP_MEDIA_CATEGORY })
+          .project({ _id: 1 })
+          .toArray()
+      : [];
+    for (const file of receivedFiles) {
+      await bucket.delete(file._id).catch(() => undefined); // already gone is fine
+    }
+
+    const result = await WhatsAppMessage.deleteMany(filter);
+    res.json({ success: true, data: { deleted: result.deletedCount, files: receivedFiles.length } });
+  } catch (error) {
+    fail(res, 500, error.message);
+  }
+};
+
 // ── Sending ──────────────────────────────────────────────────────────────────
 
 export const sendMessage = async (req, res) => {
@@ -187,7 +226,11 @@ export const sendMessage = async (req, res) => {
 export const getMedia = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.messageId)) return fail(res, 404, "File not found");
-    const message = await WhatsAppMessage.findOne({ _id: req.params.messageId, employee: chatOwner(req) }).lean();
+    // Employees open their own chats' files; an admin, any employee's (team view).
+    const message = await WhatsAppMessage.findOne({
+      _id: req.params.messageId,
+      ...(isAdmin(req.user) ? {} : { employee: req.user._id }),
+    }).lean();
     if (!message?.media?.fileId) return fail(res, 404, "File not found");
 
     const bucket = getGridFSBucket();

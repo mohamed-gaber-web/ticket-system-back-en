@@ -9,6 +9,10 @@ const decode = (text) => JSON.parse(text, BufferJSON.reviver);
 
 export const useMongoAuthState = async (employeeId) => {
   const session = await WhatsAppSession.findOne({ employee: employeeId }).lean();
+  // No saved login means a fresh QR link with a brand-new identity: signal keys
+  // left over from an earlier link belong to the old identity and would break
+  // decryption, so start from an empty key store.
+  if (!session?.creds) await WhatsAppAuthKey.deleteMany({ employee: employeeId });
   const creds = session?.creds ? decode(session.creds) : initAuthCreds();
 
   return {
@@ -55,8 +59,16 @@ export const useMongoAuthState = async (employeeId) => {
         },
       },
     },
-    saveCreds: () =>
-      WhatsAppSession.updateOne({ employee: employeeId }, { $set: { creds: encode(creds) } }, { upsert: true }),
+    // Must run the query here: Baileys calls saveCreds() without awaiting it,
+    // and a Mongoose query that is never awaited is never sent — the login
+    // would live only in memory and be lost on the next restart.
+    saveCreds: async () => {
+      try {
+        await WhatsAppSession.updateOne({ employee: employeeId }, { $set: { creds: encode(creds) } }, { upsert: true });
+      } catch (err) {
+        console.error("[whatsapp] saving the login failed:", err.message);
+      }
+    },
   };
 };
 
