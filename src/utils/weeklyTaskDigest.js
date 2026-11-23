@@ -67,7 +67,7 @@ export const loadWeeklyTasks = async (weekEnd) => {
 
 // ── HTML ─────────────────────────────────────────────────────────────────────
 
-const escapeHtml = (value) =>
+export const escapeHtml = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

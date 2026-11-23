@@ -12,6 +12,7 @@ import {
 } from "../utils/weeklyTaskDigest.js";
 import Department from "../models/Department.js";
 import { parseListParam } from "../utils/listParam.js";
+import { newlyAssignedIds, sendTaskAssignedEmails } from "../utils/taskAssignedEmail.js";
 // Whitelist of sortable fields → actual document path used by the aggregation $sort.
 // Guards against injection and lets the client sort on populated names + computed delay.
 const SORT_FIELDS = {
@@ -455,6 +456,8 @@ const createTask = async (req, res) => {
     const populated = await populateTask(Task.findById(task._id));
 
     res.status(201).json({ success: true, message: "Task created successfully", data: populated });
+    // Tell the assignee and the responsible person (after answering, never blocks the save)
+    sendTaskAssignedEmails(populated, newlyAssignedIds(null, populated, req.user?._id), req.user);
   } catch (error) {
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((e) => e.message);
@@ -570,6 +573,8 @@ const updateTask = async (req, res) => {
     );
 
     res.status(200).json({ success: true, message: "Task updated successfully", data: updated });
+    // Someone new is now the assignee or the responsible person → e-mail them
+    if (updated) sendTaskAssignedEmails(updated, newlyAssignedIds(existing, updated, req.user?._id), req.user);
   } catch (error) {
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((e) => e.message);

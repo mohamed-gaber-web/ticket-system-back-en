@@ -9,6 +9,7 @@ import ticketCommentRoutes from "./ticketCommentRoutes.js";
 import ticketAttachmentRoutes from "./ticketAttachmentRoutes.js";
 import ticketEmailRoutes from "./ticketEmailRoutes.js";
 import taskEmailRoutes from "./taskEmailRoutes.js";
+import emailContactRoutes from "./emailContactRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import ticketStatusHistoryRoutes from "./ticketStatusHistoryRoutes.js";
 import ticketSettingsRoutes from "./ticketSettingsRoutes.js";
@@ -96,6 +97,8 @@ router.use("/ticket-attachments", ticketAttachmentRoutes);
 // Ticket email conversations with the customer (staff only)
 router.use("/ticket-emails", ticketEmailRoutes);
 router.use("/task-emails", taskEmailRoutes);
+// Recipient autocomplete for every email composer
+router.use("/email-contacts", emailContactRoutes);
 
 // Notification routes
 router.use("/notifications", notificationRoutes);

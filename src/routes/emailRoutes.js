@@ -4,7 +4,6 @@ import {
   getEmailStats,
   sendTestEmail,
   sendCommentEmailToExternal,
-  sendTaskAssignedEmailHandler,
 } from "../controllers/emailController.js";
 import { sendComposedEmail } from "../controllers/leadEmailController.js";
 import { protect, requireEmployee, requireManagerOrAdmin, requireModule } from "../middleware/authMiddleware.js";
@@ -27,9 +26,6 @@ router.get("/test", ...adminOnly, sendTestEmail);
 
 // POST /api/emails/send-comment - Send a comment to external email recipients
 router.post("/send-comment", protect, sendCommentEmailToExternal);
-
-// POST /api/emails/send-task-assigned - Notify a consultant about a new task assignment
-router.post("/send-task-assigned", protect, sendTaskAssignedEmailHandler);
 
 // POST /api/emails/compose - Free-form message from the tele-sales compose window,
 // not tied to any single lead
