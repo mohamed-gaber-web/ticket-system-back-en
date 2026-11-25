@@ -23,6 +23,12 @@ import {
   isInternalCompanyName,
 } from "../utils/ticketTypes.js";
 import { rndHiddenFrom, rndScopeFilter } from "../utils/ticketVisibility.js";
+import TicketStatusHistory from "../models/TicketStatusHistory.js";
+import TicketAttachment from "../models/TicketAttachment.js";
+import TimeEntry from "../models/TimeEntry.js";
+import { loadStatusFlow } from "./ticketSettingsController.js";
+import { transitionError, validateStatusForm, hasRequiredForm, STATUS_LABELS } from "../utils/ticketStatusFlow.js";
+import { ticketKind } from "../utils/myHomeRules.js";
 // Load working-hours config + holidays, auto-create defaults if missing
 const loadEstimationConfig = async () => {
   let config = await WorkingHours.findOne().lean();
@@ -1044,6 +1050,20 @@ const updateTicket = async (req, res) => {
     const nextStatus = status || ticket.status;
     const nextDuration = durationHours !== undefined ? durationHours : ticket.durationHours;
     const statusChanging = Boolean(status) && status !== ticket.status;
+    // Status Flow (Ticketing Setup): employees follow the configured order (admins
+    // may skip it); a status whose form has required fields must be reached
+    // through the Change Status dialog, which collects them.
+    if (statusChanging && isEmployee(req)) {
+      const flow = await loadStatusFlow();
+      const orderError = transitionError(flow, ticket.status, status, { admin: isAdmin(req.user) });
+      if (orderError) return res.status(400).json({ success: false, message: orderError });
+      if (hasRequiredForm(flow, status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Moving to ${STATUS_LABELS[status] ?? status} needs the status form — use Change Status on the ticket page.`,
+        });
+      }
+    }
     const durationCleared = durationHours !== undefined && hasDuration(ticket.durationHours) && !hasDuration(durationHours);
     if (statusChanging || durationCleared) {
       const editDurationError = durationError(nextStatus, nextDuration);
@@ -1215,6 +1235,51 @@ const updateTicket = async (req, res) => {
 // @desc    Update ticket status
 // @route   PATCH /api/tickets/:id/status
 // @access  Public
+// Stores what the status form collected: a status-history row (reason + comment
+// as notes), an internal comment, the hours as a time entry (the ticket's
+// durationHours was already incremented) and the attached files.
+const recordStatusForm = async ({ req, ticket, oldStatus, status, form }) => {
+  const label = STATUS_LABELS[status] ?? status;
+  const notes = [form.reason && `Reason: ${form.reason}`, form.comment].filter(Boolean).join("\n");
+  await TicketStatusHistory.create({
+    ticket: ticket._id,
+    oldStatus,
+    newStatus: status,
+    changedByUserId: req.user._id,
+    changedByUserType: USER_TYPES.EMPLOYEE,
+    notes: notes || undefined,
+  });
+  if (form.comment || form.reason) {
+    await TicketComment.create({
+      ticket: ticket._id,
+      commentText: [`[Status → ${label}]`, form.reason && `Reason: ${form.reason}`, form.comment].filter(Boolean).join("\n"),
+      commentByUserId: req.user._id,
+      commentByUserType: USER_TYPES.EMPLOYEE,
+      isInternal: true,
+    });
+  }
+  if (form.hours) {
+    await TimeEntry.create({
+      employee: req.user._id,
+      ticket: ticket._id,
+      date: new Date(),
+      hours: form.hours,
+      note: `Status → ${label}`,
+      billable: ticketKind(ticket.ticketType) === "client",
+    });
+  }
+  if (form.attachments?.length) {
+    await TicketAttachment.insertMany(
+      form.attachments.map((f) => ({
+        ...f,
+        ticket: ticket._id,
+        uploadedByUserId: req.user._id,
+        uploadedByUserType: USER_TYPES.EMPLOYEE,
+      }))
+    );
+  }
+};
+
 const updateTicketStatus = async (req, res) => {
   try {
     const { status, pendingOn } = req.body;
@@ -1253,7 +1318,22 @@ const updateTicketStatus = async (req, res) => {
       }
     }
 
-    const statusDurationError = durationError(status, ticket.durationHours);
+    // Status Flow (Ticketing Setup): the allowed order (admins may skip it) and
+    // the form configured for the new status. Customers keep their fixed rule above.
+    const statusChanging = status !== ticket.status;
+    let statusForm = {};
+    if (statusChanging && isEmployee(req)) {
+      const flow = await loadStatusFlow();
+      const orderError = transitionError(flow, ticket.status, status, { admin: isAdmin(req.user) });
+      if (orderError) return res.status(400).json({ success: false, message: orderError });
+      const checked = validateStatusForm(flow, status, req.body.form);
+      if (checked.error) {
+        return res.status(400).json({ success: false, message: checked.error, missing: checked.missing ?? [] });
+      }
+      statusForm = checked.form;
+    }
+
+    const statusDurationError = durationError(status, (Number(ticket.durationHours) || 0) + (statusForm.hours || 0));
     if (statusDurationError) {
       return res.status(400).json({ success: false, message: statusDurationError });
     }
@@ -1287,6 +1367,7 @@ const updateTicketStatus = async (req, res) => {
     }
 
     const oldStatus = ticket.status;
+    if (statusForm.hours) updateData.$inc = { durationHours: statusForm.hours };
 
     ticket = await Ticket.findByIdAndUpdate(
       req.params.id,
@@ -1359,6 +1440,12 @@ const updateTicketStatus = async (req, res) => {
         assignee,
         recipients,
       }).catch((err) => console.error("Email notification error:", err.message));
+    }
+
+    if (statusChanging && isEmployee(req)) {
+      await recordStatusForm({ req, ticket, oldStatus, status, form: statusForm }).catch((err) =>
+        console.error(`[status-form] ${ticket.ticketNumber}: ${err.message}`)
+      );
     }
 
     res.status(200).json({

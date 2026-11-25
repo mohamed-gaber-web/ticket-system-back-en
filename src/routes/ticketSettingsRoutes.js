@@ -1,5 +1,5 @@
 import express from "express";
-import { getTicketSettings, updateTicketSettings } from "../controllers/ticketSettingsController.js";
+import { getTicketSettings, updateTicketSettings, updateStatusFlow } from "../controllers/ticketSettingsController.js";
 import { protect, requireEmployee, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -72,5 +72,7 @@ router.use(protect, requireEmployee);
  */
 router.get("/", getTicketSettings);
 router.put("/", requireAdmin, updateTicketSettings);
+// Status Flow: allowed next statuses + the form shown on each status change
+router.put("/status-flow", requireAdmin, updateStatusFlow);
 
 export default router;

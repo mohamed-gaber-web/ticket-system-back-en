@@ -1,7 +1,21 @@
 import mongoose from "mongoose";
 import TicketSettings from "../models/TicketSettings.js";
 import Department from "../models/Department.js";
-import { canSeeRnd, primeRndDepartmentCache } from "../utils/access.js";
+import { canSeeRnd, primeRndDepartmentCache, isAdmin } from "../utils/access.js";
+import { normalizeFlow } from "../utils/ticketStatusFlow.js";
+
+// The status flow is read on every status change — cache it briefly, prime on save.
+let flowCache = { value: null, at: 0 };
+const FLOW_TTL_MS = 30_000;
+export const loadStatusFlow = async () => {
+  if (Date.now() - flowCache.at < FLOW_TTL_MS) return flowCache.value;
+  const settings = await TicketSettings.findOne().select("statusFlow").lean();
+  flowCache = { value: settings?.statusFlow ?? null, at: Date.now() };
+  return flowCache.value;
+};
+const primeStatusFlow = (value) => {
+  flowCache = { value, at: Date.now() };
+};
 
 /**
  * Ticketing settings (singleton). Today it holds one thing: the department whose
@@ -17,6 +31,9 @@ const view = async (settings, user) => {
   return {
     rndDepartment: department ? { _id: department._id, name: department.name } : null,
     canSeeRnd: await canSeeRnd(user),
+    statusFlow: settings?.statusFlow ?? null,
+    // Admins may move a ticket to any status; the client shows them every option
+    bypassStatusOrder: isAdmin(user),
   };
 };
 
@@ -61,5 +78,30 @@ export const updateTicketSettings = async (req, res) => {
     res.status(200).json({ success: true, message: "Ticket settings saved", data: await view(settings, req.user) });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error saving ticket settings" });
+  }
+};
+
+// @desc    Save the ticket status flow (allowed next statuses + status form fields)
+// @route   PUT /api/ticket-settings/status-flow   { statusFlow: {...} | null }
+// @access  Private (admin)
+export const updateStatusFlow = async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    if (!Object.prototype.hasOwnProperty.call(body, "statusFlow")) {
+      return res.status(400).json({ success: false, message: "statusFlow is required (an object, or null to allow every move)" });
+    }
+    const { flow, error } = normalizeFlow(body.statusFlow);
+    if (error) return res.status(400).json({ success: false, message: error });
+
+    const settings = await TicketSettings.getSingleton();
+    settings.statusFlow = flow;
+    settings.markModified("statusFlow");
+    settings.updatedBy = req.user._id;
+    await settings.save();
+    primeStatusFlow(flow);
+
+    res.status(200).json({ success: true, message: "Status flow saved", data: await view(settings, req.user) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error saving the status flow" });
   }
 };

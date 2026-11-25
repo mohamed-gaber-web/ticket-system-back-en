@@ -7,6 +7,9 @@ import mongoose from "mongoose";
 const ticketSettingsSchema = new mongoose.Schema(
   {
     rndDepartment: { type: mongoose.Schema.Types.ObjectId, ref: "Department", default: null },
+    // Status Flow: { [status]: { next: [status], fields: [{ key, required }] } }
+    // (utils/ticketStatusFlow.js). null = never configured = every move allowed.
+    statusFlow: { type: mongoose.Schema.Types.Mixed, default: null },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Consultant", default: null },
   },
   { timestamps: true }
