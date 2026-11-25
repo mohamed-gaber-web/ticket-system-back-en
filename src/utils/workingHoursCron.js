@@ -6,6 +6,7 @@ import { notifyAndEmail } from "./emailHelper.js";
 import { sendDeliveryReminderEmail } from "./emailService.js";
 
 import { USER_TYPES } from "./access.js";
+import { applyResolvedFallback } from "./resolvedDate.js";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -71,10 +72,10 @@ const autoCloseDeliveredTickets = async () => {
     for (const ticket of tickets) {
       const closedAt = new Date();
 
-      await Ticket.findByIdAndUpdate(ticket._id, {
-        status: "closed",
-        closedAt,
-      });
+      await Ticket.findByIdAndUpdate(
+        ticket._id,
+        applyResolvedFallback({ status: "closed", ticket, updateData: { status: "closed", closedAt } })
+      );
 
       const customer = ticket.customer;
       const assignee = ticket.assignedBy;

@@ -29,6 +29,7 @@ import TimeEntry from "../models/TimeEntry.js";
 import { loadStatusFlow } from "./ticketSettingsController.js";
 import { transitionError, validateStatusForm, hasRequiredForm, STATUS_LABELS } from "../utils/ticketStatusFlow.js";
 import { ticketKind } from "../utils/myHomeRules.js";
+import { applyResolvedFallback } from "../utils/resolvedDate.js";
 // Load working-hours config + holidays, auto-create defaults if missing
 const loadEstimationConfig = async () => {
   let config = await WorkingHours.findOne().lean();
@@ -1088,6 +1089,8 @@ const updateTicket = async (req, res) => {
       if (status === "delivered" && !ticket.deliveredAt && !updateData.deliveredAt) {
         updateData.deliveredAt = new Date();
       }
+      // Delivered / Closed without passing Resolved → resolved date = delivered date
+      applyResolvedFallback({ status, ticket, updateData, actorId: actingConsultantId });
     }
 
     // Set first response time if being assigned for the first time
@@ -1359,6 +1362,10 @@ const updateTicketStatus = async (req, res) => {
     }
     if (status === "delivered" && !ticket.deliveredAt) {
       updateData.deliveredAt = new Date();
+    }
+    // Delivered / Closed without passing Resolved → resolved date = delivered date
+    if (status !== ticket.status) {
+      applyResolvedFallback({ status, ticket, updateData, actorId: actingConsultantId });
     }
 
     const pending = await applyPendingTransition({ updateData, ticket, status, pendingOn, actingConsultantId });
