@@ -64,11 +64,20 @@ import { guardVaultFiles } from "../controllers/vault/attachmentController.js";
 import whatsappRoutes from "./whatsappRoutes.js";
 import { guardWhatsAppFiles } from "../controllers/whatsappController.js";
 
+import userLogRoutes from "./userLogRoutes.js";
+import { userActivityLog } from "../utils/userActivityLog.js";
+
 const router = express.Router();
+
+// User Log: records every successful employee change (and sign in/out) on any route below
+router.use(userActivityLog);
 
 router.get("/", (req, res) => {
   res.json({ message: "API Routes" });
 });
+
+// User Log screen (employees only)
+router.use("/user-logs", userLogRoutes);
 
 // Authentication routes
 router.use("/auth", authRoutes);
