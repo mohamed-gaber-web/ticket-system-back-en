@@ -197,6 +197,10 @@ Collections and backlog for Grow Path's own customer contracts (spec: `GROW_PATH
 - **Demo data:** `POST /collect/seed-demo` (refused in production).
 - **Existing databases:** `npm run collect:reset-defaults -- --dry`, then without `--dry` (`src/scripts/resetCollectDefaults.js`), moves a database seeded with the earlier Arabic defaults onto the English ones. By key it replaces templates and rules and the contract types no contract uses (a type in use only gets its name, scope, terms and phase names refreshed), and resets the document texts and clause library in Settings. It keeps images, rates, e-mails, the simulated date and the counter, and never touches contracts, their customised clauses, payments or cheques.
 
+### User Log
+
+`src/utils/userActivityLog.js` is mounted first in `routes/index.js`, so every successful (2xx) POST/PUT/PATCH/DELETE by an **employee** — plus sign in / sign out — writes a `UserLog` row (user, module, action, summary, `changes` old→new, ticket + `ticketNumber`, the ticket's `durationHours` after the change, `hoursLogged` for Log time). Customers and crons are never logged; a logging failure never fails the request. `/resource/:id` updates are diffed before/after through `RESOURCE_MODELS`; ref ids are shown as names. Every employee can read the log (`GET /api/user-logs`, `/user-logs/filters`, `requireEmployee`), so bodies of `NO_DETAIL` areas (auth, vault, whatsapp, collect, consultants/HR, balances, evaluations) and `HIDDEN_KEY` fields (passwords, tokens, salary, IBAN…) are never stored. Noise (refresh token, notifications, read marks, syncs, previews, AI) is in `SKIP`. Rows expire after one year (TTL). Tests: `tests/userLog.test.js`.
+
 ### Code Organization
 
 Standard MVC pattern: `src/models/`, `src/controllers/`, `src/routes/`. Each domain entity follows the same structure (e.g., `Category` has `Category.js` model, `categoryController.js`, `categoryRoutes.js`).
